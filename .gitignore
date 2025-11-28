@@ -1,0 +1,44 @@
+# =========================
+# Unity generated folders
+# =========================
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+MemoryCaptures/
+
+# =========================
+# IDE / Editor caches
+# =========================
+.vs/
+.idea/
+.vscode/
+*.user
+*.rsuser
+*.suo
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+
+# Visual Studio / Unity generated solution & project files
+*.csproj
+*.sln
+*.sln.DotSettings
+*.sln.DotSettings.user
+*.unityproj
+
+# =========================
+# OS junk
+# =========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# =========================
+# Optional: JetBrains Rider
+# =========================
+/.idea/

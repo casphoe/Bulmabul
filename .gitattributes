@@ -1,0 +1,26 @@
+# 기본: 텍스트는 LF로 저장
+* text=auto eol=lf
+
+# Unity / C# (줄바꿈 충돌 방지)
+*.meta   text eol=lf
+*.unity  text eol=lf
+*.prefab text eol=lf
+*.asset  text eol=lf
+*.cs     text eol=lf
+*.json   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.md     text eol=lf
+
+# 바이너리(줄바꿈 변환 금지)
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.tga    binary
+*.psd    binary
+*.fbx    binary
+*.wav    binary
+*.mp3    binary
+*.ogg    binary
+*.mp4    binary
+*.dll    binary
