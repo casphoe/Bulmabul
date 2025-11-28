@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "738540137124",
+    "firebase_url": "https://testactgame-default-rtdb.firebaseio.com",
+    "project_id": "testactgame",
+    "storage_bucket": "testactgame.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:738540137124:android:3510e4e3ba396780ccd431",
+        "android_client_info": {
+          "package_name": "com.Moon.ActGame"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxE4t2sEd5p03jjUtgixLfwJc7n0g4cy4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:738540137124:android:a6368ef8072376bfccd431",
+        "android_client_info": {
+          "package_name": "com.Moon.BulmabulGame"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxE4t2sEd5p03jjUtgixLfwJc7n0g4cy4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
