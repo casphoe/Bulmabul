@@ -82,6 +82,14 @@ public static class AccountCloudStore
         return acc;
     }
 
+    static string ToNameKey(string name)
+    {
+        name = (name ?? "").Trim();
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+", " ");
+        return name;
+    }
+
+
     /// <summary>
     /// Account 전체 저장:
     /// - Account를 JSON 직렬화 → AES/HMAC 암호화 → accountEnc에 저장
@@ -98,7 +106,8 @@ public static class AccountCloudStore
         {
             [$"users/{uid}/accountEnc"] = enc,
             [$"users/{uid}/money"] = acc.Money,
-            [$"users/{uid}/nick"] = acc.NickName ?? ""
+            [$"users/{uid}/nick"] = acc.NickName,
+            [$"users/{uid}/nameKey"] = ToNameKey(acc.Name)
         };
 
         await Root.UpdateChildrenAsync(updates);
@@ -120,5 +129,46 @@ public static class AccountCloudStore
     {
         string uid = Uid;
         await NickRef(uid).SetValueAsync(nick ?? "");
+    }
+
+    public static async Task<Account> LoadAsync()
+    {
+        var user = FirebaseAuth.DefaultInstance.CurrentUser;
+        if (user == null) throw new Exception("Not logged in.");
+
+        string uid = user.UserId;
+
+        // 1) accountEnc 로드
+        var encSnap = await EncRef(uid).GetValueAsync();
+        if (!encSnap.Exists || encSnap.Value == null)
+            return null; // ✅ 없으면 null
+
+        // 2) 복호화 후 Account 복원
+        string enc = encSnap.Value.ToString();
+        string json = CryptoUtil.DecryptFromBase64(enc, uid);
+        var acc = JsonConvert.DeserializeObject<Account>(json);
+
+        // 3) null 방어(컬렉션)
+        acc.ClaimedAttendanceDays ??= new List<int>();
+        acc.DiceInventory ??= new List<OwnedDice>();
+
+        // 4) money/nick 별도 필드가 존재하면 최신값으로 덮기
+        var moneySnap = await MoneyRef(uid).GetValueAsync();
+        if (moneySnap.Exists && moneySnap.Value != null)
+            acc.Money = Convert.ToSingle(moneySnap.Value);
+
+        var nickSnap = await NickRef(uid).GetValueAsync();
+        if (nickSnap.Exists && nickSnap.Value != null)
+            acc.NickName = nickSnap.Value.ToString();
+
+        return acc;
+    }
+
+    public static async Task<Account> LoadOrThrowAsync()
+    {
+        var acc = await LoadAsync();
+        if (acc == null)
+            throw new Exception("계정 데이터가 없습니다. 회원가입을 진행해 주세요.");
+        return acc;
     }
 }

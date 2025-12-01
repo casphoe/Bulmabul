@@ -29,17 +29,6 @@ public class FireBaseAuthManager : MonoBehaviour
 
     // 초기화 완료 여부
     public bool IsReady { get; private set; }
-    #region 토스 메시지 설정 변수
-    [Header("토스 메시지")]
-    [SerializeField] TextMeshProUGUI toasstMessage;
-
-    [Header("토스트 설정")]
-    [SerializeField] float toastShowSeconds = 1.2f; // 완전히 보이는 유지 시간
-    [SerializeField] float toastFadeSeconds = 0.8f; // 페이드 아웃 시간
-
-    Coroutine toastRoutine;
-
-    #endregion
 
     private void Awake()
     {
@@ -64,14 +53,6 @@ public class FireBaseAuthManager : MonoBehaviour
 
         Debug.Log("Firebase Ready.");
 
-        if (toasstMessage != null)
-        {
-            var c = toasstMessage.color;
-            c.a = 0f;
-            toasstMessage.color = c;
-            toasstMessage.text = "";
-        }
-
         // 앱 재실행 시 이미 로그인 상태일 수 있음 (원하면 자동 로드)
         // if (Auth.CurrentUser != null) await LoadAccountAfterLoginAsync();
     }
@@ -83,7 +64,7 @@ public class FireBaseAuthManager : MonoBehaviour
     /// 2) 닉네임 선점(중복 체크)
     /// 3) Account 생성 + DB 저장
     /// </summary>
-    public async Task RegisterAsync(string email, string password, string nickName)
+    public async Task RegisterAsync(string name,string email, string password, string nickName)
     {
         EnsureReady();
 
@@ -125,7 +106,7 @@ public class FireBaseAuthManager : MonoBehaviour
             await NicknameService.ClaimAsync(createdUser.UserId, nickName);
 
             // 3) Account 생성 + DB 저장
-            var acc = CreateDefaultAccount(createdUser, nickName);
+            var acc = CreateDefaultAccount(createdUser, name, nickName);
             await AccountCloudStore.SaveFullAsync(acc);
 
             CurrentAccount = acc;
@@ -165,6 +146,7 @@ public class FireBaseAuthManager : MonoBehaviour
         try
         {
             AuthResult res = await Auth.SignInWithEmailAndPasswordAsync(email, password);
+            // 여기서 계정 없으면 예외 발생
             await LoadAccountAfterLoginAsync();
 
             ShowToast("로그인 성공!");
@@ -172,6 +154,11 @@ public class FireBaseAuthManager : MonoBehaviour
         }
         catch (Exception e)
         {
+            // Auth는 성공했는데 Account가 없는 경우도 있으니 안전하게 signout
+            try { Auth?.SignOut(); } catch { }
+
+            CurrentAccount = null;
+
             ShowToast($"로그인 실패: {ExtractFriendlyError(e)}");
             //Debug.LogError($"Login Fail: {e}");
             throw;
@@ -208,8 +195,7 @@ public class FireBaseAuthManager : MonoBehaviour
         var user = Auth.CurrentUser;
         if (user == null) throw new Exception("Not logged in.");
 
-        // DB에 accountEnc 없으면 생성하는 로직 포함
-        CurrentAccount = await AccountCloudStore.LoadOrCreateAsync(u => CreateDefaultAccount(u, "Player"));
+        CurrentAccount = await AccountCloudStore.LoadOrThrowAsync();
 
         // 로그인 날짜 갱신(원하면)
         CurrentAccount.LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -221,7 +207,7 @@ public class FireBaseAuthManager : MonoBehaviour
     /// 기본 Account 생성 함수
     /// - 여기서 게임 기본값(초기 돈/출석/인벤 등)을 설정
     /// </summary>
-    private Account CreateDefaultAccount(FirebaseUser user, string nickName)
+    private Account CreateDefaultAccount(FirebaseUser user, string name, string nickName)
     {
         // 시작 주사위 1개 지급
         var starterDice = new OwnedDice
@@ -258,8 +244,19 @@ public class FireBaseAuthManager : MonoBehaviour
 
         return acc;
     }
+    //비밀번호 찾기(이메일로 재설정 메일 발송)
+    public async Task SendPasswordResetEmailAsync(string email)
+    {
+        EnsureReady();
 
-    private void EnsureReady()
+        if (string.IsNullOrWhiteSpace(email))
+            throw new Exception("이메일을 입력하세요.");
+
+        await Auth.SendPasswordResetEmailAsync(email.Trim());
+        ShowToast("비밀번호 재설정 메일을 전송했습니다.");
+    }
+
+    public void EnsureReady()
     {
         if (!IsReady || Auth == null)
             throw new Exception("Firebase is not ready yet. (Wait for Start initialization)");
@@ -268,47 +265,13 @@ public class FireBaseAuthManager : MonoBehaviour
     #region 토스 메시지 표시
     public void ShowToast(string msg)
     {
-        if (toasstMessage == null)
+        if (AuthUIController.instance == null || AuthUIController.instance.toasstMessage == null)
         {
-            Debug.LogWarning("toasstMessage(TextMeshProUGUI) is not assigned.");
+            Debug.LogWarning($"Toast(UI 없음): {msg}");
             return;
         }
 
-        if (toastRoutine != null) StopCoroutine(toastRoutine);
-        toastRoutine = StartCoroutine(CoToastFadeOut(msg, toastShowSeconds, toastFadeSeconds));
-    }
-
-    IEnumerator CoToastFadeOut(string msg, float showSec, float fadeSec)
-    {
-        // 1) 텍스트 세팅 + 즉시 알파 1
-        toasstMessage.text = msg;
-
-        Color c = toasstMessage.color;
-        c.a = 1f;
-        toasstMessage.color = c;
-
-        // 2) 잠깐 유지
-        if (showSec > 0f)
-            yield return new WaitForSeconds(showSec);
-
-        // 3) 페이드 아웃 (1 -> 0)
-        float t = 0f;
-        float dur = Mathf.Max(0.01f, fadeSec);
-
-        while (t < dur)
-        {
-            t += Time.unscaledDeltaTime; // UI는 timescale=0에서도 보이게 하려면 unscaled 권장
-            float a = Mathf.Lerp(1f, 0f, t / dur);
-            c.a = a;
-            toasstMessage.color = c;
-            yield return null;
-        }
-
-        // 4) 완전히 숨김
-        c.a = 0f;
-        toasstMessage.color = c;
-        toasstMessage.text = "";
-        toastRoutine = null;
+        AuthUIController.instance.ShowToast(msg);
     }
 
     private string ExtractFriendlyError(Exception e)
