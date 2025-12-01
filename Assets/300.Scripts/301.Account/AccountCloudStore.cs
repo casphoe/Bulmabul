@@ -38,50 +38,6 @@ public static class AccountCloudStore
     static DatabaseReference MoneyRef(string uid) => UserRef(uid).Child("money");
     static DatabaseReference NickRef(string uid) => UserRef(uid).Child("nick");
 
-
-    /// <summary>
-    /// DB에서 Account를 불러오되, 없으면 factory로 생성해서 저장 후 반환
-    /// </summary>
-    public static async Task<Account> LoadOrCreateAsync(Func<FirebaseUser, Account> factory)
-    {
-        var user = FirebaseAuth.DefaultInstance.CurrentUser;
-        if (user == null) throw new Exception("Not logged in.");
-
-        string uid = user.UserId;
-
-        // 1) accountEnc 로드
-        var encSnap = await EncRef(uid).GetValueAsync();
-        Account acc;
-
-        if (!encSnap.Exists || encSnap.Value == null)
-        {
-            // 없으면 생성 후 저장
-            acc = factory(user);
-            await SaveFullAsync(acc);
-            return acc;
-        }
-
-        // 2) 복호화 후 Account 복원
-        string enc = encSnap.Value.ToString();
-        string json = CryptoUtil.DecryptFromBase64(enc, uid);
-        acc = JsonConvert.DeserializeObject<Account>(json);
-
-        // 3) null 방어(컬렉션)
-        acc.ClaimedAttendanceDays ??= new List<int>();
-        acc.DiceInventory ??= new List<OwnedDice>();
-
-        // 4) money/nick 별도 필드가 존재하면 최신값으로 덮기
-        var moneySnap = await MoneyRef(uid).GetValueAsync();
-        if (moneySnap.Exists && moneySnap.Value != null)
-            acc.Money = Convert.ToSingle(moneySnap.Value);
-
-        var nickSnap = await NickRef(uid).GetValueAsync();
-        if (nickSnap.Exists && nickSnap.Value != null)
-            acc.NickName = nickSnap.Value.ToString();
-
-        return acc;
-    }
-
     static string ToNameKey(string name)
     {
         name = (name ?? "").Trim();

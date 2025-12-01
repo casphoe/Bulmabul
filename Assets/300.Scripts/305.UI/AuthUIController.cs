@@ -1,12 +1,9 @@
 ﻿using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Text.RegularExpressions;
 using System;
-using UnityEngine.Networking;
-using System.Text;
 
 [Serializable] class FindEmailReq { public string nameKey; public string nick; }
 [Serializable] class FindEmailRes { public bool ok; public string maskedEmail; }
@@ -14,7 +11,7 @@ using System.Text;
 public class AuthUIController : MonoBehaviour
 {
     [Header("Panels")]
-    public GameObject panelSignIn, panelSignUp, panelForgot, panelForgotEmail;
+    public GameObject panelSignIn, panelSignUp, panelForgot;
 
     [Header("SignIn UI")]
     public TMP_InputField inEmail;
@@ -32,8 +29,6 @@ public class AuthUIController : MonoBehaviour
 
     [Header("Forgot UI")]
     public TMP_InputField fgEmail;
-    public TMP_InputField fgName;
-    public TMP_InputField fgNickname;
 
     const string LAST_EMAIL_KEY = "last_email";
 
@@ -49,6 +44,8 @@ public class AuthUIController : MonoBehaviour
     #endregion
 
     public static AuthUIController instance;
+
+    private const string FUNCTIONS_REGION = "us-central1";
 
     private void Awake()
     {
@@ -98,13 +95,6 @@ public class AuthUIController : MonoBehaviour
         ClearMessage();
     }
 
-    public void ShowForgotEmail()
-    {
-        SetAll(false);
-        panelForgotEmail.SetActive(true);
-        ClearMessage();
-    }
-
     public void GameExit()
     {
 #if UNITY_EDITOR
@@ -119,7 +109,7 @@ public class AuthUIController : MonoBehaviour
         panelSignIn.SetActive(v);
         panelSignUp.SetActive(v);
         panelForgot.SetActive(v);
-        panelForgotEmail.SetActive(v);
+
     }
 
     public void ClearMessage() => toasstMessage.text = "";
@@ -244,7 +234,6 @@ public class AuthUIController : MonoBehaviour
 
             await FireBaseAuthManager.Instance.RegisterAsync(name, email, pw, nick);
 
-            ShowSignIn();
             inEmail.text = email;
         }
         catch (Exception e)
@@ -268,62 +257,5 @@ public class AuthUIController : MonoBehaviour
             ShowToast(e.Message);
         }
     }
-    #endregion
-
-    #region 이메일 찾기
-
-    // 이름 정규화(서버와 동일하게 맞추는 게 중요)
-    static string ToNameKey(string name)
-    {
-        name = (name ?? "").Trim();
-        name = Regex.Replace(name, @"\s+", " "); // 공백 정리
-        return name;
-    }
-
-    // 4) 이메일 찾기(마스킹) 버튼
-    public async void OnClickFindMaskedEmail()
-    {
-        try
-        {
-            string name = fgName != null ? fgName.text.Trim() : "";
-            string nick = fgNickname != null ? fgNickname.text.Trim() : "";
-
-            if (string.IsNullOrWhiteSpace(name)) throw new Exception("이름을 입력하세요.");
-            if (string.IsNullOrWhiteSpace(nick)) throw new Exception("닉네임을 입력하세요.");
-
-            var reqBody = new FindEmailReq
-            {
-                nameKey = ToNameKey(name),
-                nick = nick.Trim()
-            };
-
-            string json = JsonUtility.ToJson(reqBody);
-
-            string url = "https://<REGION>-<PROJECT_ID>.cloudfunctions.net/findMaskedEmail";
-
-            using var req = new UnityWebRequest(url, "POST");
-            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
-            req.downloadHandler = new DownloadHandlerBuffer();
-            req.SetRequestHeader("Content-Type", "application/json");
-
-            var op = req.SendWebRequest();
-            while (!op.isDone) await System.Threading.Tasks.Task.Yield();
-
-            if (req.result != UnityWebRequest.Result.Success)
-                throw new Exception($"요청 실패: {req.error}");
-
-            var resObj = JsonUtility.FromJson<FindEmailRes>(req.downloadHandler.text);
-
-            if (resObj == null || !resObj.ok || string.IsNullOrEmpty(resObj.maskedEmail))
-                ShowToast("일치하는 정보가 없습니다.");
-            else
-                ShowToast($"이메일: {resObj.maskedEmail}");
-        }
-        catch (Exception e)
-        {
-            ShowToast(e.Message);
-        }
-    }
-
     #endregion
 }

@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using Firebase;
 using Firebase.Auth;
 using UnityEngine;
-using TMPro;
+using UnityEngine.SceneManagement;
 using System.Collections;
 
 /// <summary>
@@ -102,15 +102,16 @@ public class FireBaseAuthManager : MonoBehaviour
             AuthResult res = await Auth.CreateUserWithEmailAndPasswordAsync(email, password);
             createdUser = res.User;
 
-            // 2) 닉네임 선점(중복 체크)
+            // 2) 닉네임 선점
             await NicknameService.ClaimAsync(createdUser.UserId, nickName);
 
-            // 3) Account 생성 + DB 저장
+            // 3) Account 저장
             var acc = CreateDefaultAccount(createdUser, name, nickName);
             await AccountCloudStore.SaveFullAsync(acc);
 
-            CurrentAccount = acc;
 
+            CurrentAccount = acc;
+            AuthUIController.instance.ShowSignIn();
             ShowToast("회원가입 성공!");
             Debug.Log($"Register OK: {email} / uid={createdUser.UserId} / nick={nickName}");
         }
@@ -151,6 +152,7 @@ public class FireBaseAuthManager : MonoBehaviour
 
             ShowToast("로그인 성공!");
             Debug.Log($"Login OK: {email} / uid={res.User.UserId} / nick={CurrentAccount?.NickName}");
+            StartCoroutine(SceneMove(1,1));
         }
         catch (Exception e)
         {
@@ -163,6 +165,12 @@ public class FireBaseAuthManager : MonoBehaviour
             //Debug.LogError($"Login Fail: {e}");
             throw;
         }
+    }
+
+    IEnumerator SceneMove(float timer, int num)
+    {
+        yield return new WaitForSeconds(timer);
+        SceneManager.LoadScene(num);
     }
 
     /// <summary>
