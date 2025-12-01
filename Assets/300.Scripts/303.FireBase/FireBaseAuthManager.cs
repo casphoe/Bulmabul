@@ -25,10 +25,10 @@ public class FireBaseAuthManager : MonoBehaviour
     public FirebaseUser CurrentUser => Auth?.CurrentUser;
 
     // 로그인 후 메모리에 들고 있을 현재 계정 데이터
-    public Account CurrentAccount { get; private set; }
+    public Account CurrentAccount { get; set; }
 
     // 초기화 완료 여부
-    public bool IsReady { get; private set; }
+    public bool IsReady { get; set; }
 
     private void Awake()
     {
