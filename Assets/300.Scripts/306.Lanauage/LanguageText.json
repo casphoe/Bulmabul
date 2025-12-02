@@ -91,6 +91,22 @@
     {
       "key": "lang.eng",
       "text": "영어"
+    },
+    {
+      "key": "log.out",
+      "text": "로그아웃"
+    },
+    {
+      "key": "withdraw,membership",
+      "text": "회원탈퇴"
+    },
+    {
+      "key": "option.title",
+      "text": "옵션"
+    },
+    {
+      "key": "membership.title",
+      "text": "회원 탈퇴"
     }
   ],
   "eng": [
@@ -185,6 +201,22 @@
     {
       "key": "lang.eng",
       "text": "Eng"
+    },
+    {
+      "key": "log.out",
+      "text": "LogOut"
+    },
+    {
+      "key": "withdraw,membership",
+      "text": "WithDrawMemberShip"
+    },
+    {
+      "key": "option.title",
+      "text": "Option"
+    },
+    {
+      "key": "membership.title",
+      "text": "Withdraw MemberShip"
     }
   ]
 }

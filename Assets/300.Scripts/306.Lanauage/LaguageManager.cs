@@ -2,7 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 [Serializable]
 public class LangItem { public string key; public string text; }
@@ -17,8 +17,6 @@ public class LangTable
 public class LaguageManager : MonoBehaviour
 {
     const string LANG_KEY = "lang"; // 0=Kor, 1=Eng
-    [Header("Language Toggles")]
-    public Toggle inKor, inEng;
 
     [Header("Language Json (TextAsset)")]
     public TextAsset languageJson;
@@ -36,13 +34,47 @@ public class LaguageManager : MonoBehaviour
 
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);   // 중복 제거
+            return;
+        }
         Instance = this;
+        DontDestroyOnLoad(gameObject);
     }
 
     private void Start()
     {
         LoadLanguageFromPrefs();
         LoadJsonTables();
+        ApplyLanguageToToggles_NoNotify(currentLang);
+        ApplyLanguageToUI(currentLang);
+    }
+
+    private void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        // 씬 로드 직후 1프레임 기다렸다가(새 UI 생성/Start 이후) 적용
+        StartCoroutine(CoReapplyNextFrame());
+    }
+
+    private IEnumerator CoReapplyNextFrame()
+    {
+        yield return null;
+        ReapplyToCurrentSceneUI();
+    }
+
+    private void ReapplyToCurrentSceneUI()
+    {
         ApplyLanguageToToggles_NoNotify(currentLang);
         ApplyLanguageToUI(currentLang);
     }
@@ -107,8 +139,16 @@ public class LaguageManager : MonoBehaviour
     {
         _isChangingLang = true;
 
-        if (inKor != null) inKor.SetIsOnWithoutNotify(lang == Lauaguage.Kor);
-        if (inEng != null) inEng.SetIsOnWithoutNotify(lang == Lauaguage.Eng);
+        // 핵심: static instance가 씬 재진입 때 null일 수 있으니 fallback
+        var auth = AuthUIController.instance != null
+            ? AuthUIController.instance
+            : FindFirstObjectByType<AuthUIController>();
+
+        if (auth != null)
+        {
+            if (auth.inKor != null) auth.inKor.SetIsOnWithoutNotify(lang == Lauaguage.Kor);
+            if (auth.inEng != null) auth.inEng.SetIsOnWithoutNotify(lang == Lauaguage.Eng);
+        }
 
         _isChangingLang = false;
     }
@@ -168,8 +208,16 @@ public class LaguageManager : MonoBehaviour
 
     private void ApplyLanguageToUI(Lauaguage lang)
     {
+        // null 정리(씬 이동으로 파괴된 오브젝트)
+        _targets.RemoveWhere(t => t == null);
+
         // 등록된 모든 LocalizedText 갱신
         foreach (var t in _targets)
             if (t != null) t.Refresh();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 }

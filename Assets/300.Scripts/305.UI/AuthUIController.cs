@@ -18,8 +18,6 @@ public class AuthUIController : MonoBehaviour
     public TMP_InputField inPassword;
     public Toggle inShowPw;
     public Toggle inRememberEmail;
-    public Toggle inKor;
-    public Toggle inEng;
 
     [Header("SignUp UI")]
     public TMP_InputField upName;
@@ -31,6 +29,9 @@ public class AuthUIController : MonoBehaviour
 
     [Header("Forgot UI")]
     public TMP_InputField fgEmail;
+
+    [Header("Language Toggles")]
+    public Toggle inKor, inEng;
 
     const string LAST_EMAIL_KEY = "last_email";
 
