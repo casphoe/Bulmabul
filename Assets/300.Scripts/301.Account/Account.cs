@@ -2,60 +2,141 @@
 //로그인 할 계정의 대한 정보가 담길 클래스
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 [Serializable]
 public class Account
 {
-    //해당 계정 이름
-    public string Name { get; set; }
+    // ===== 기본 정보 =====
 
-    //해당 계정 닉네임
-    public string NickName { get; set; }
+    [Header("기본 정보")]
+    [SerializeField] private string name;   // 실명/표시명 (예: 회원가입 시 입력한 이름)
+    public string Name
+    {
+        get => name;
+        set => name = value?.Trim();
+    }
 
-    //이메일 계정
-    public string Email { get; set; }
+    [SerializeField] private string nickName; // 게임 내 표시 닉네임(중복 체크 대상)
+    public string NickName
+    {
+        get => nickName;
+        set => nickName = value?.Trim();
+    }
 
-    //마지막 로그인 날짜
-    public string LoginDate { get; set; }
+    [SerializeField] private string email;  // 로그인 이메일(표시/고객지원/복구용)
+    public string Email
+    {
+        get => email;
+        set => email = value?.Trim();
+    }
 
-    //마지막 로그아웃 날짜
-    public string LogoutDate { get; set; }
+    [Header("로그인 기록")]
 
-    //계정 재화(돈)
-    public float Money { get; set; }
+    [SerializeField] private string loginDate;   // 마지막 로그인 날짜 (yyyy-MM-dd HH:mm:ss)
+    public string LoginDate
+    {
+        get => loginDate;
+        set => loginDate = value;
+    }
 
-    #region 출석 (월간)
-    // 마지막으로 "출석 처리"한 날짜 (yyyy-MM-dd)
-    public string LastAttendanceDate { get; set; }
+    [SerializeField] private string logoutDate;  // 마지막 로그아웃 날짜 (yyyy-MM-dd HH:mm:ss)
+    public string LogoutDate
+    {
+        get => logoutDate;
+        set => logoutDate = value;
+    }
 
-    // 지금 저장된 출석 데이터가 어느 달인지 (yyyy-MM)
-    public string AttendanceMonthKey { get; set; }
+    [Header("부루마불 재화")]
+    [SerializeField] private float cash; // 부루마불에서 사용하는 현금(캐시)
+    public float Cash 
+    { 
+        get => cash; set => cash = value;
+    }
 
-    // 이번 달 누적 출석 일수 (1일 1회만 증가)
-    public int AttendanceCountThisMonth { get; set; }
+    // ===== 출석 (월간) =====
+    [SerializeField] private string lastAttendanceDate;
+    public string LastAttendanceDate
+    {
+        get => lastAttendanceDate;
+        set => lastAttendanceDate = value;
+    }
 
-    // 이번 달에서 보상 수령한 "일차"들 (예: 1,2,5일차 보상 수령)
-    public List<int> ClaimedAttendanceDays { get; set; } = new List<int>();
-    #endregion
+    [SerializeField] private string attendanceMonthKey;
+    public string AttendanceMonthKey
+    {
+        get => attendanceMonthKey;
+        set => attendanceMonthKey = value;
+    }
 
-    #region 주사위 인벤토리
-    // 보유 주사위 목록 (grade/star/level + count)
-    public List<OwnedDice> DiceInventory { get; set; } = new List<OwnedDice>();
+    [SerializeField] private int attendanceCountThisMonth;
+    public int AttendanceCountThisMonth
+    {
+        get => attendanceCountThisMonth;
+        set => attendanceCountThisMonth = value;
+    }
 
-    // 현재 장착/선택한 주사위(없으면 null/빈값)
-    public OwnedDice EquippedDice { get; set; }
-    #endregion
+    //  List는 null로 들어올 수도 있으니, backing field + getter에서 null 방어를 권장
+    [SerializeField] private List<int> claimedAttendanceDays = new List<int>();
+    public List<int> ClaimedAttendanceDays
+    {
+        get => claimedAttendanceDays ??= new List<int>();
+        set => claimedAttendanceDays = value;
+    }
+
+    // ===== 주사위 인벤토리 =====
+    [SerializeField] private List<OwnedDice> diceInventory = new List<OwnedDice>();
+    public List<OwnedDice> DiceInventory
+    {
+        get => diceInventory ??= new List<OwnedDice>();
+        set => diceInventory = value;
+    }
+
+    [SerializeField] private OwnedDice equippedDice;
+    public OwnedDice EquippedDice
+    {
+        get => equippedDice;
+        set => equippedDice = value;
+    }
 }
 
 [Serializable]
 public class OwnedDice
 {
-    public DiceGrade Grade;
-    public int Star;   // 1..5
-    public int Level;  // 1..10
+    [SerializeField] private DiceGrade grade; // 등급 (Common/Rare/...)
+    public DiceGrade Grade
+    {
+        get => grade;
+        set => grade = value;
+    }
 
-    public int Count;  // 보유 개수(중복 관리용)
-    public int Exp; //경험치
+    [SerializeField] private int star;   // 1..5
+    public int Star
+    {
+        get => star;
+        set => star = value;
+    }
+
+    [SerializeField] private int level;  // 1..10
+    public int Level
+    {
+        get => level;
+        set => level = value;
+    }
+
+    [SerializeField] private int count; // 보유 개수
+    public int Count
+    {
+        get => count;
+        set => count = value;
+    }
+
+    [SerializeField] private int exp; // 경험치
+    public int Exp
+    {
+        get => exp;
+        set => exp = value;
+    }
 
     public string Key => $"{Grade}|{Star}|{Level}";
 }

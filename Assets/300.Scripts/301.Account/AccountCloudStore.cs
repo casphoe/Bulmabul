@@ -35,7 +35,7 @@ public static class AccountCloudStore
     static DatabaseReference UserRef(string uid) => Root.Child("users").Child(uid);
 
     static DatabaseReference EncRef(string uid) => UserRef(uid).Child("accountEnc");
-    static DatabaseReference MoneyRef(string uid) => UserRef(uid).Child("money");
+    static DatabaseReference MoneyRef(string uid) => UserRef(uid).Child("cash");
     static DatabaseReference NickRef(string uid) => UserRef(uid).Child("nick");
 
     static string ToNameKey(string name)
@@ -61,7 +61,7 @@ public static class AccountCloudStore
         var updates = new Dictionary<string, object>
         {
             [$"users/{uid}/accountEnc"] = enc,
-            [$"users/{uid}/money"] = acc.Money,
+            [$"users/{uid}/cash"] = acc.Cash,
             [$"users/{uid}/nick"] = acc.NickName,
             [$"users/{uid}/nameKey"] = ToNameKey(acc.Name)
         };
@@ -111,7 +111,7 @@ public static class AccountCloudStore
         // 4) money/nick 별도 필드가 존재하면 최신값으로 덮기
         var moneySnap = await MoneyRef(uid).GetValueAsync();
         if (moneySnap.Exists && moneySnap.Value != null)
-            acc.Money = Convert.ToSingle(moneySnap.Value);
+            acc.Cash = Convert.ToSingle(moneySnap.Value);
 
         var nickSnap = await NickRef(uid).GetValueAsync();
         if (nickSnap.Exists && nickSnap.Value != null)

@@ -5,6 +5,8 @@ using Firebase.Auth;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections;
+using Firebase.Database;
+using System.Collections.Generic;
 
 /// <summary>
 /// Firebase 이메일/비밀번호 회원가입 + 로그인 매니저
@@ -25,7 +27,7 @@ public class FireBaseAuthManager : MonoBehaviour
     public FirebaseUser CurrentUser => Auth?.CurrentUser;
 
     // 로그인 후 메모리에 들고 있을 현재 계정 데이터
-    public Account CurrentAccount { get; set; }
+    public Account CurrentAccount;
 
     // 초기화 완료 여부
     public bool IsReady { get; set; }
@@ -109,6 +111,8 @@ public class FireBaseAuthManager : MonoBehaviour
             var acc = CreateDefaultAccount(createdUser, name, nickName);
             await AccountCloudStore.SaveFullAsync(acc);
 
+            var verify = await AccountCloudStore.LoadOrThrowAsync();
+            Debug.Log($"[VERIFY] DiceCount={verify.DiceInventory?.Count}, AttendMonth={verify.AttendanceMonthKey}, Login={verify.LoginDate}");
 
             CurrentAccount = acc;
             AuthUIController.instance.ShowSignIn();
@@ -236,7 +240,7 @@ public class FireBaseAuthManager : MonoBehaviour
             LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             LogoutDate = "",
 
-            Money = 3000f,
+            Cash = 3000f,      
 
             LastAttendanceDate = "",
             AttendanceMonthKey = DateTime.Now.ToString("yyyy-MM"),
@@ -321,5 +325,9 @@ public class FireBaseAuthManager : MonoBehaviour
             default: return "인증 처리 중 오류가 발생했습니다.";
         }
     }
+    #endregion
+
+    #region 회원 탈퇴
+
     #endregion
 }
