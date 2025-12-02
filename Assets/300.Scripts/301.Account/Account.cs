@@ -54,7 +54,7 @@ public class Account
         get => cash; set => cash = value;
     }
 
-    // ===== 출석 (월간) =====
+    // 출석 (월간)
     [SerializeField] private string lastAttendanceDate;
     public string LastAttendanceDate
     {
@@ -84,7 +84,7 @@ public class Account
         set => claimedAttendanceDays = value;
     }
 
-    // ===== 주사위 인벤토리 =====
+    // 주사위 인벤토리
     [SerializeField] private List<OwnedDice> diceInventory = new List<OwnedDice>();
     public List<OwnedDice> DiceInventory
     {

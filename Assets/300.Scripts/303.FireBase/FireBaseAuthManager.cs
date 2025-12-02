@@ -328,6 +328,100 @@ public class FireBaseAuthManager : MonoBehaviour
     #endregion
 
     #region 회원 탈퇴
+    public async Task DeleteCurrentAccountAsync(string password)
+    {
+        EnsureReady();
 
+        var user = Auth.CurrentUser;
+        if (user == null)
+            throw new Exception("로그인 상태가 아닙니다.");
+
+        try
+        {
+            // 1) 먼저 입력 없이 바로 시도 (방금 로그인했으면 통과하는 경우 많음)
+            await DeleteAllUserDataAndAuthAsync(user);
+        }
+        catch (FirebaseException fe)
+        {
+            // RequiresRecentLogin이면 그때만 비번 요구
+            if ((AuthError)fe.ErrorCode != AuthError.RequiresRecentLogin)
+                throw;
+
+            if (string.IsNullOrWhiteSpace(password))
+                throw new Exception("보안을 위해 비밀번호를 한 번 더 입력해 주세요.");
+
+            // 2) 재인증(이메일은 CurrentUser에서 가져오면 됨)
+            var cred = EmailAuthProvider.GetCredential(user.Email, password);
+            await user.ReauthenticateAsync(cred);
+
+            // 3) 재시도
+            await DeleteAllUserDataAndAuthAsync(user);
+        }
+    }
+
+    private async Task DeleteAllUserDataAndAuthAsync(FirebaseUser user)
+    {
+        string uid = user.UserId;
+
+        // DB 삭제(닉네임 같이 쓰면 같이 제거)
+        var root = FirebaseDatabase.DefaultInstance.RootReference;
+
+        var updates = new Dictionary<string, object>
+        {
+            [$"users/{uid}"] = null
+        };
+
+        if (CurrentAccount != null && !string.IsNullOrWhiteSpace(CurrentAccount.NickName))
+        {
+            string nickKey = CurrentAccount.NickName.Trim().ToLowerInvariant();
+            updates[$"nicknames/{nickKey}"] = null;
+        }
+
+        await root.UpdateChildrenAsync(updates);
+
+        // Auth 삭제
+        await user.DeleteAsync();
+
+        // 로컬 정리
+        CurrentAccount = null;
+        try { Auth.SignOut(); } catch { }
+
+        ShowToast("회원 탈퇴가 완료되었습니다.");
+        SceneManager.LoadScene(0);
+    }
+    #endregion
+
+    #region 로그아웃
+    /// <summary>
+    /// 로그아웃:
+    /// 1) 로그아웃 시간 기록 + 클라우드 저장
+    /// 2) FirebaseAuth SignOut
+    /// 3) 메모리(CurrentAccount) 정리
+    /// 4) UI/씬 복귀
+    /// </summary>
+    public async Task LogoutToScene0Async()
+    {
+        EnsureReady();
+
+        var user = Auth.CurrentUser;
+        if (user == null)
+            throw new Exception("로그인 상태가 아닙니다. (로그아웃 불가)");
+
+        if (CurrentAccount == null)
+            throw new Exception("CurrentAccount가 없습니다. 저장 후 로그아웃할 수 없습니다.");
+
+        // 1) 로그아웃 날짜 갱신
+        CurrentAccount.LogoutDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+        // 2) 저장이 반드시 성공해야 함 (실패하면 여기서 예외 -> 아래 진행 안 됨)
+        await AccountCloudStore.SaveFullAsync(CurrentAccount);
+
+        // 3) 저장 성공 후에만 SignOut + 씬 이동
+        Auth.SignOut();
+        CurrentAccount = null;
+
+        SceneManager.LoadScene(0);
+
+    }
     #endregion
 }

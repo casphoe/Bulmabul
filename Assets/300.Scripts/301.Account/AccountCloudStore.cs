@@ -97,7 +97,7 @@ public static class AccountCloudStore
         // 1) accountEnc 로드
         var encSnap = await EncRef(uid).GetValueAsync();
         if (!encSnap.Exists || encSnap.Value == null)
-            return null; // ✅ 없으면 null
+            return null; // 없으면 null
 
         // 2) 복호화 후 Account 복원
         string enc = encSnap.Value.ToString();

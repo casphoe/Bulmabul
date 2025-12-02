@@ -7,7 +7,14 @@ public enum WinType
     BankruptcyLastSurvivor,   // 전원 파산
     LandmarkMonopoly,         // 관광지/랜드마크 독점
     LineMonopoly,             // 라인 통일
-    TurnLimitScore            // 턴 제한 점수제(옵션)
+    TurnLimitScore,            // 턴 제한 점수제(옵션)
+    None
+}
+
+public enum Lauaguage
+{
+    Kor,
+    Eng
 }
 
 //게임 룰
@@ -44,4 +51,7 @@ public class BulmabulRule
 
     [Tooltip("라인 통일 승리: 몇 개 라인을 완성해야 승리인가(게임 룰 선택)")]
     public int RequiredCompletedLinesToWin = 1;
+
+    [Header("게임 승리 조건")]
+    public WinType gameWineType = WinType.None;
 }

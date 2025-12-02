@@ -18,6 +18,8 @@ public class AuthUIController : MonoBehaviour
     public TMP_InputField inPassword;
     public Toggle inShowPw;
     public Toggle inRememberEmail;
+    public Toggle inKor;
+    public Toggle inEng;
 
     [Header("SignUp UI")]
     public TMP_InputField upName;
@@ -169,6 +171,12 @@ public class AuthUIController : MonoBehaviour
     {
         field.contentType = show ? TMP_InputField.ContentType.Standard : TMP_InputField.ContentType.Password;
         field.ForceLabelUpdate();
+    }
+
+    public void ToggleLangauge(int langauageNum)
+    {
+        // 0=Kor, 1=Eng
+        LaguageManager.Instance.SetLanguage(langauageNum == 0 ? Lauaguage.Kor : Lauaguage.Eng);
     }
 
     #region 이메일인지 아닌지 여부와 패스워드 강도 알아보게 하는 기능

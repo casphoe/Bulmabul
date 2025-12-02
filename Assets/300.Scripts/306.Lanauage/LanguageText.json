@@ -1,0 +1,190 @@
+{
+  "kor": [
+    {
+      "key": "login.title",
+      "text": "로그인"
+    },
+    {
+      "key": "login.email.placeholder",
+      "text": "이메일을 입력하세요..."
+    },
+    {
+      "key": "login.rememberEmail",
+      "text": "이메일 저장"
+    },
+    {
+      "key": "login.password.placeholder",
+      "text": "비밀번호를 입력하세요..."
+    },
+    {
+      "key": "login.showPassword",
+      "text": "비밀번호 표시"
+    },
+    {
+      "key": "login.btn.login",
+      "text": "로그인"
+    },
+    {
+      "key": "login.btn.register",
+      "text": "회원가입"
+    },
+    {
+      "key": "login.btn.forgotPassword",
+      "text": "비밀번호 찾기"
+    },
+    {
+      "key": "signup.title",
+      "text": "회원가입"
+    },
+    {
+      "key": "signup.email.placeholder",
+      "text": "이메일을 입력하세요..."
+    },
+    {
+      "key": "signup.password.placeholder",
+      "text": "비밀번호를 입력하세요..."
+    },
+    {
+      "key": "signup.passwordConfirm.placeholder",
+      "text": "비밀번호를 다시 입력하세요..."
+    },
+    {
+      "key": "signup.showPassword",
+      "text": "비밀번호 표시"
+    },
+    {
+      "key": "signup.name.placeholder",
+      "text": "이름을 입력하세요..."
+    },
+    {
+      "key": "signup.nickname.placeholder",
+      "text": "닉네임을 입력하세요..."
+    },
+    {
+      "key": "signup.btn.signup",
+      "text": "회원가입"
+    },
+    {
+      "key": "signup.btn.cancel",
+      "text": "취소"
+    },
+    {
+      "key": "pwreset.title",
+      "text": "비밀번호 재설정"
+    },
+    {
+      "key": "pwreset.email.placeholder",
+      "text": "이메일을 입력하세요..."
+    },
+    {
+      "key": "pwreset.btn.sendMail",
+      "text": "재설정 메일 전송"
+    },
+    {
+      "key": "pwreset.btn.back",
+      "text": "뒤로"
+    },
+    {
+      "key": "lang.kor",
+      "text": "한국어"
+    },
+    {
+      "key": "lang.eng",
+      "text": "영어"
+    }
+  ],
+  "eng": [
+    {
+      "key": "login.title",
+      "text": "Login"
+    },
+    {
+      "key": "login.email.placeholder",
+      "text": "Enter Email..."
+    },
+    {
+      "key": "login.rememberEmail",
+      "text": "Email Remember"
+    },
+    {
+      "key": "login.password.placeholder",
+      "text": "Enter Password..."
+    },
+    {
+      "key": "login.showPassword",
+      "text": "Show Password"
+    },
+    {
+      "key": "login.btn.login",
+      "text": "Login"
+    },
+    {
+      "key": "login.btn.register",
+      "text": "Register"
+    },
+    {
+      "key": "login.btn.forgotPassword",
+      "text": "Forgot Password"
+    },
+    {
+      "key": "signup.title",
+      "text": "Sign Up"
+    },
+    {
+      "key": "signup.email.placeholder",
+      "text": "Enter Email..."
+    },
+    {
+      "key": "signup.password.placeholder",
+      "text": "Enter Password..."
+    },
+    {
+      "key": "signup.passwordConfirm.placeholder",
+      "text": "Confirm Password..."
+    },
+    {
+      "key": "signup.showPassword",
+      "text": "Show Password"
+    },
+    {
+      "key": "signup.name.placeholder",
+      "text": "Enter Name..."
+    },
+    {
+      "key": "signup.nickname.placeholder",
+      "text": "Enter NickName..."
+    },
+    {
+      "key": "signup.btn.signup",
+      "text": "Sign Up"
+    },
+    {
+      "key": "signup.btn.cancel",
+      "text": "Cancel"
+    },
+    {
+      "key": "pwreset.title",
+      "text": "Password Reset"
+    },
+    {
+      "key": "pwreset.email.placeholder",
+      "text": "Enter Email..."
+    },
+    {
+      "key": "pwreset.btn.sendMail",
+      "text": "Send Mail"
+    },
+    {
+      "key": "pwreset.btn.back",
+      "text": "Back"
+    },
+    {
+      "key": "lang.kor",
+      "text": "Kor"
+    },
+    {
+      "key": "lang.eng",
+      "text": "Eng"
+    }
+  ]
+}
