@@ -178,27 +178,6 @@ public class FireBaseAuthManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 로그아웃
-    /// - 원하면 여기서 강제 저장(autosaver 쓴다면 ForceSaveAllAsync)
-    /// </summary>
-    public async Task LogoutAsync()
-    {
-        EnsureReady();
-
-        // 로그아웃 직전 저장하고 싶으면
-        if (CurrentAccount != null)
-        {
-            CurrentAccount.LogoutDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            await AccountCloudStore.SaveFullAsync(CurrentAccount);
-        }
-
-        Auth.SignOut();
-        CurrentAccount = null;
-
-        Debug.Log("Logout OK");
-    }
-
-    /// <summary>
     /// 로그인 후 Account 로드/생성
     /// - DB에 계정이 없으면 기본 계정을 만들고 저장
     /// </summary>
@@ -366,6 +345,7 @@ public class FireBaseAuthManager : MonoBehaviour
         // DB 삭제(닉네임 같이 쓰면 같이 제거)
         var root = FirebaseDatabase.DefaultInstance.RootReference;
 
+        //  한 번에 원자적으로 지우기 (users + nicknames)
         var updates = new Dictionary<string, object>
         {
             [$"users/{uid}"] = null
