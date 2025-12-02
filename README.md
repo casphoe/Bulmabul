@@ -2,6 +2,7 @@
 
 제작완료 된 기능
 1) FireBase를 통한 로그인 / 회원가입 기능 (로그인 정보는 암호화된 Json 정보로 넘겨주기 - FireBase DataBase에 저장) / 로그아웃 / 회원 탈퇴(FireBase DataBase 삭제 & Authentication 삭제)
+2) 한국어 / 영어 Toggle 기능
 
 제작중인 기능
 
