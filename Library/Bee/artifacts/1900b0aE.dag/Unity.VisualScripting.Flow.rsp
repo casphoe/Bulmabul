@@ -118,6 +118,14 @@
 -define:ENABLE_TIMELINE
 -define:ENABLE_LEGACY_INPUT_MANAGER
 -define:TEXTCORE_FONT_ENGINE_1_5_OR_NEWER
+-define:FUSION_LOGLEVEL_INFO
+-define:FUSION_WEAVER
+-define:FUSION2
+-define:FUSION_2
+-define:FUSION_2_0
+-define:FUSION_2_0_8
+-define:FUSION_2_OR_NEWER
+-define:FUSION_2_0_OR_NEWER
 -define:MODULE_AI_EXISTS
 -define:MODULE_ANIMATION_EXISTS
 -define:MODULE_PHYSICS_EXISTS
@@ -140,6 +148,14 @@
 -r:"Assets/Firebase/Plugins/Firebase.Storage.dll"
 -r:"Assets/Firebase/Plugins/Firebase.TaskExtension.dll"
 -r:"Assets/Firebase/Plugins/Google.MiniJson.dll"
+-r:"Assets/Photon/Fusion/Assemblies/Fusion.Common.dll"
+-r:"Assets/Photon/Fusion/Assemblies/Fusion.Log.dll"
+-r:"Assets/Photon/Fusion/Assemblies/Fusion.Realtime.dll"
+-r:"Assets/Photon/Fusion/Assemblies/Fusion.Runtime.dll"
+-r:"Assets/Photon/Fusion/Assemblies/Fusion.Sockets.dll"
+-r:"Assets/Photon/Fusion/Plugins/NanoSockets/NanoSockets/Dynamic/NanoSockets.dll"
+-r:"Assets/Photon/PhotonLibs/netstandard2.0/Photon3Unity3D.dll"
+-r:"Assets/Photon/PhotonLibs/WebSocket/websocket-sharp.dll"
 -r:"C:/Program Files/Unity/Hub/Editor/2022.3.42f1/Editor/Data/Managed/UnityEditor.Graphs.dll"
 -r:"C:/Program Files/Unity/Hub/Editor/2022.3.42f1/Editor/Data/Managed/UnityEngine/UnityEditor.CoreModule.dll"
 -r:"C:/Program Files/Unity/Hub/Editor/2022.3.42f1/Editor/Data/Managed/UnityEngine/UnityEditor.DeviceSimulatorModule.dll"
@@ -355,6 +371,7 @@
 -r:"Library/PackageCache/com.unity.collab-proxy@2.10.2/Lib/Editor/Unity.Plastic.Antlr3.Runtime.dll"
 -r:"Library/PackageCache/com.unity.collab-proxy@2.10.2/Lib/Editor/Unity.Plastic.Newtonsoft.Json.dll"
 -r:"Library/PackageCache/com.unity.collab-proxy@2.10.2/Lib/Editor/unityplastic.dll"
+-r:"Library/PackageCache/com.unity.nuget.mono-cecil@1.10.2/Mono.Cecil.dll"
 -r:"Library/PackageCache/com.unity.nuget.newtonsoft-json@3.2.2/Runtime/Newtonsoft.Json.dll"
 -r:"Library/PackageCache/com.unity.testtools.codecoverage@1.2.6/lib/ReportGenerator/ReportGeneratorMerged.dll"
 -r:"Library/PackageCache/com.unity.visualscripting@1.9.4/Editor/VisualScripting.Core/Dependencies/DotNetZip/Unity.VisualScripting.IonicZip.dll"
