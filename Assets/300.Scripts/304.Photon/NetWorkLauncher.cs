@@ -44,7 +44,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     private bool _joinedLobby;
 
     // 로비에서 받은 방(세션) 리스트를 여기 저장
-    private readonly List<SessionInfo> _cachedSessions = new List<SessionInfo>();
+    public List<SessionInfo> _cachedSessions = new List<SessionInfo>();
 
     public IReadOnlyList<SessionInfo> CachedSessions => _cachedSessions;
     public int RoomCount => _cachedSessions.Count;
@@ -61,6 +61,11 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
 
     private void Awake()
     {
+        if (instance != null && instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
         instance = this;
         DontDestroyOnLoad(gameObject);
         CreateRunnerOnce();
@@ -328,7 +333,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     private System.Threading.Tasks.Task<StartGameResult> StartGameInternal(
         GameMode mode, string sessionName, MatchMode modeValue, int forcedMaxPlayers)
     {
-        var scene = SceneRef.FromIndex(SceneManager.GetActiveScene().buildIndex);
+        var scene = SceneRef.FromIndex(2);
 
         // 방 설정(모드/최대인원)을 세션 프로퍼티로 저장 -> 참가자들이 읽을 수 있음
         var props = new Dictionary<string, SessionProperty>
@@ -343,7 +348,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
             SessionName = sessionName,
             Scene = scene,
             SceneManager = _sceneManager,
-            PlayerCount = forcedMaxPlayers,        // ✅ 최대 인원 강제 적용
+            PlayerCount = forcedMaxPlayers,        //  최대 인원 강제 적용
             SessionProperties = props
         });
     }
