@@ -107,6 +107,42 @@
     {
       "key": "membership.title",
       "text": "회원 탈퇴"
+    },
+    {
+      "key": "create.room",
+      "text": "방 만들기"
+    },
+    {
+      "key": "input.roomtitle",
+      "text": "방 제목을 입력해주세요..."
+    },
+    {
+      "key": "single.toggle",
+      "text": "개인전"
+    },
+    {
+      "key": "team.toggle",
+      "text": "팀전"
+    },
+    {
+      "key": "gamemode.select",
+      "text": "게임 모드 선택"
+    },
+    {
+      "key": "people.settings",
+      "text": "인원 설정"
+    },
+    {
+      "key": "input.playercount",
+      "text": "플레이할 플레이어 수를 입력해주세요..."
+    },
+    {
+      "key": "btn.create",
+      "text": "만들기"
+    },
+    {
+      "key": "btn.cannel",
+      "text": "취소"
     }
   ],
   "eng": [
@@ -217,6 +253,42 @@
     {
       "key": "membership.title",
       "text": "Withdraw MemberShip"
+    },
+    {
+      "key": "create.room",
+      "text": "Create Room"
+    },
+    {
+      "key": "input.roomtitle",
+      "text": "Please enter a room title..."
+    },
+    {
+      "key": "single.toggle",
+      "text": "solo exhibition"
+    },
+    {
+      "key": "team.toggle",
+      "text": "team fight"
+    },
+    {
+      "key": "gamemode.select",
+      "text": "Select game mode"
+    },
+    {
+      "key": "people.settings",
+      "text": "People settings"
+    },
+    {
+      "key": "input.playercount",
+      "text": "Please enter the number of players you wish to play..."
+    },
+    {
+      "key": "btn.create",
+      "text": "Create"
+    },
+    {
+      "key": "btn.cannel",
+      "text": "Cannel"
     }
   ]
 }

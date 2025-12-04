@@ -221,6 +221,9 @@ public class FireBaseAuthManager : MonoBehaviour
 
             Cash = 3000f,      
 
+            AccountLevel = 1,
+            AccountExp = 0,
+
             LastAttendanceDate = "",
             AttendanceMonthKey = DateTime.Now.ToString("yyyy-MM"),
             AttendanceCountThisMonth = 0,

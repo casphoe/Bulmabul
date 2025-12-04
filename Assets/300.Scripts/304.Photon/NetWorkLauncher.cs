@@ -37,6 +37,22 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     [Header("표시용: 현재 방 모드")]
     public MatchMode currentMode = MatchMode.Solo;
 
+    #region 방 리스트
+    [Header("Lobby(방 리스트)")]
+    [SerializeField] public SessionLobby lobby = SessionLobby.Shared; // 보통 Shared 사용
+
+    private bool _joinedLobby;
+
+    // 로비에서 받은 방(세션) 리스트를 여기 저장
+    private readonly List<SessionInfo> _cachedSessions = new List<SessionInfo>();
+
+    public IReadOnlyList<SessionInfo> CachedSessions => _cachedSessions;
+    public int RoomCount => _cachedSessions.Count;
+
+    // UI가 갱신되게 이벤트로 뿌리고 싶으면 사용(선택)
+    public event Action<IReadOnlyList<SessionInfo>> OnRoomsUpdated;
+    #endregion
+
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private bool _starting;
@@ -46,6 +62,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     private void Awake()
     {
         instance = this;
+        DontDestroyOnLoad(gameObject);
         CreateRunnerOnce();
     }
 
@@ -379,12 +396,31 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
         ResetRunner();
     }
 
+    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
+    {
+        _cachedSessions.Clear();
+
+        // 유효한 것만 담기(선택)
+        foreach (var s in sessionList)
+        {
+            if (s.IsValid)
+                _cachedSessions.Add(s);
+        }
+
+        // 이름순 정렬(선택)
+        _cachedSessions.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
+
+        Debug.Log($"[Fusion] Lobby Rooms: {_cachedSessions.Count}");
+
+        // UI 갱신 이벤트(선택)
+        OnRoomsUpdated?.Invoke(_cachedSessions);
+    }
+
     public void OnInput(NetworkRunner runner, NetworkInput input) { }
     public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
     public void OnConnectedToServer(NetworkRunner runner) { }
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason) { }
-    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnSceneLoadStart(NetworkRunner runner) { }

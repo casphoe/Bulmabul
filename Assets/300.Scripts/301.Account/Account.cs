@@ -98,6 +98,14 @@ public class Account
         get => equippedDice;
         set => equippedDice = value;
     }
+
+    [Header("계정 레벨 / 경험치")]
+    [SerializeField] private int accountLevel = 1;   // 기본 1레벨
+    public int AccountLevel { get => accountLevel; set => accountLevel = Mathf.Max(1, value); }
+
+    [SerializeField] private long accountExp = 0;    // 누적 경험치(크면 int 넘을 수 있어 long 추천)
+    public long AccountExp { get => accountExp; set => accountExp = Math.Max(0, value); }
+
 }
 
 [Serializable]

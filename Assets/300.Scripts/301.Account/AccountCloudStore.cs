@@ -38,6 +38,11 @@ public static class AccountCloudStore
     static DatabaseReference MoneyRef(string uid) => UserRef(uid).Child("cash");
     static DatabaseReference NickRef(string uid) => UserRef(uid).Child("nick");
 
+    static DatabaseReference NameKeyRef(string uid) => UserRef(uid).Child("nameKey");
+
+    static DatabaseReference LevelRef(string uid) => UserRef(uid).Child("accountLevel");
+    static DatabaseReference ExpRef(string uid) => UserRef(uid).Child("accountExp");
+
     static string ToNameKey(string name)
     {
         name = (name ?? "").Trim();
@@ -63,7 +68,9 @@ public static class AccountCloudStore
             [$"users/{uid}/accountEnc"] = enc,
             [$"users/{uid}/cash"] = acc.Cash,
             [$"users/{uid}/nick"] = acc.NickName,
-            [$"users/{uid}/nameKey"] = ToNameKey(acc.Name)
+            [$"users/{uid}/nameKey"] = ToNameKey(acc.Name),
+            [$"users/{uid}/accountLevel"] = acc.AccountLevel,
+            [$"users/{uid}/accountExp"] = acc.AccountExp
         };
 
         await Root.UpdateChildrenAsync(updates);
@@ -76,6 +83,20 @@ public static class AccountCloudStore
     {
         string uid = Uid;
         await MoneyRef(uid).SetValueAsync(money);
+    }
+
+    //계정 경험치 만 빠르게 저장하는 함수
+    public static async Task SaveProgressAsync(int level, long exp)
+    {
+        string uid = Uid;
+
+        var updates = new Dictionary<string, object>
+        {
+            [$"users/{uid}/accountLevel"] = level,
+            [$"users/{uid}/accountExp"] = exp
+        };
+
+        await Root.UpdateChildrenAsync(updates);
     }
 
     /// <summary>
@@ -116,6 +137,20 @@ public static class AccountCloudStore
         var nickSnap = await NickRef(uid).GetValueAsync();
         if (nickSnap.Exists && nickSnap.Value != null)
             acc.NickName = nickSnap.Value.ToString();
+
+        //이름도 최신값으로 불러오기
+        var nameSnap = await NameKeyRef(uid).GetValueAsync();
+        if (nameSnap.Exists && nameSnap.Value != null)
+            acc.Name = nameSnap.Value.ToString();
+
+        // level / exp 최신값 덮기
+        var lvSnap = await LevelRef(uid).GetValueAsync();
+        if (lvSnap.Exists && lvSnap.Value != null)
+            acc.AccountLevel = Convert.ToInt32(lvSnap.Value);
+
+        var expSnap = await ExpRef(uid).GetValueAsync();
+        if (expSnap.Exists && expSnap.Value != null)
+            acc.AccountExp = Convert.ToInt64(expSnap.Value);
 
         return acc;
     }
