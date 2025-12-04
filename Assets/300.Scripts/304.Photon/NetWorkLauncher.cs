@@ -251,6 +251,8 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
                 _starting = false;
 
                 Debug.Log($"[Fusion] Host created. Room={roomName} Mode={mode} Max={maxPlayers}");
+
+                SceneManager.LoadScene(2);
                 return;
             }
 
@@ -303,7 +305,14 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
 
         _starting = false;
 
-        if (!result.Ok)
+        if (result.Ok)
+        {
+            //  Client 참가 성공 시 씬 이동
+            Debug.Log($"[Fusion] Join success. Mode={mode} Room={sessionName} Max={forcedMaxPlayers}");
+
+            SceneManager.LoadScene(2);
+        }
+        else
         {
             Debug.LogWarning($"[Fusion] StartGame failed. Mode={mode} Room={sessionName} " +
                              $"Reason={result.ShutdownReason} Msg={result.ErrorMessage}");
