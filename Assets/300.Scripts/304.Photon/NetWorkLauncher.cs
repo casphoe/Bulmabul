@@ -37,9 +37,14 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     [Header("표시용: 현재 방 모드")]
     public MatchMode currentMode = MatchMode.Solo;
 
+    [Header("방 선택 인덱스")]
+    public int selectindex = 0;
+
     #region 방 리스트
     [Header("Lobby(방 리스트)")]
     [SerializeField] public SessionLobby lobby = SessionLobby.Shared; // 보통 Shared 사용
+
+    public List<RoomPrefabData> roomPrefabList = new List<RoomPrefabData>();
 
     private bool _joinedLobby;
 
@@ -67,6 +72,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
             return;
         }
         instance = this;
+        selectindex = -1;
         DontDestroyOnLoad(gameObject);
         CreateRunnerOnce();
     }
@@ -214,6 +220,37 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     }
     #endregion
 
+    public async void JoinLobbyIfNeeded()
+    {
+        CreateRunnerOnce();
+        if (_runner == null) return;
+        if (_joinedLobby) return;
+
+        var res = await _runner.JoinSessionLobby(lobby);
+        _joinedLobby = res.Ok;
+
+        Debug.Log(_joinedLobby
+            ? $"[Fusion] Joined Lobby: {lobby}"
+            : $"[Fusion] JoinLobby Failed: {res.ShutdownReason}");
+    }
+
+    // RoomPrefab에서 Join 버튼 누를 때 쓰기
+    public void JoinRoomByIndex(int roomIndex)
+    {
+        if (_starting) return;
+        if (roomIndex < 0 || roomIndex >= _cachedSessions.Count) return;
+
+        var s = _cachedSessions[roomIndex];
+        string sessionName = s.Name;
+
+        // 방 모드 읽기(없으면 현재값)
+        MatchMode mode = currentMode;
+        if (s.Properties != null && s.Properties.TryGetValue("mode", out var pm))
+            mode = (MatchMode)(int)pm;
+
+        StartGame(GameMode.Client, sessionName, mode);
+    }
+
     #region 방 참가하기 & 등록하기의 대한 내부 함수 기능 구현
 
     /// <summary>
@@ -256,7 +293,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
                 _starting = false;
 
                 Debug.Log($"[Fusion] Host created. Room={roomName} Mode={mode} Max={maxPlayers}");
-
+                
                 SceneManager.LoadScene(2);
                 return;
             }
@@ -315,7 +352,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
             //  Client 참가 성공 시 씬 이동
             Debug.Log($"[Fusion] Join success. Mode={mode} Room={sessionName} Max={forcedMaxPlayers}");
 
-            SceneManager.LoadScene(2);
+            //SceneManager.LoadScene(2);
         }
         else
         {

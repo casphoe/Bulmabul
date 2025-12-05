@@ -143,6 +143,34 @@
     {
       "key": "btn.cannel",
       "text": "취소"
+    },
+    {
+      "key": "title.lobby",
+      "text": "로비"
+    },
+    {
+      "key": "input.room",
+      "text": "방 이름을 입력해주세요..."
+    },
+    {
+      "key": "alpha.toggle",
+      "text": "가나다순"
+    },
+    {
+      "key": "last.toggle",
+      "text": "최신순"
+    },
+    {
+      "key": "btn.join",
+      "text": "참여"
+    },
+    {
+      "key": "txt.mode",
+      "text": "게임 모드 :"
+    },
+    {
+      "key": "txt.player",
+      "text": "플레이어 수 :"
     }
   ],
   "eng": [
@@ -289,6 +317,34 @@
     {
       "key": "btn.cannel",
       "text": "Cannel"
+    },
+    {
+      "key": "title.lobby",
+      "text": "Lobby"
+    },
+    {
+      "key": "input.room",
+      "text": "Please enter the room name..."
+    },
+    {
+      "key": "alpha.toggle",
+      "text": "Alpha"
+    },
+    {
+      "key": "last.toggle",
+      "text": "Last"
+    },
+    {
+      "key": "btn.join",
+      "text": "Join"
+    },
+    {
+      "key": "txt.mode",
+      "text": "Game Mode :"
+    },
+    {
+      "key": "txt.player",
+      "text": "Player Count :"
     }
   ]
 }

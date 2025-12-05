@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using System;
 using TMPro;
+using Fusion;
 
 public class LobbyUIManager : MonoBehaviour
 {
@@ -45,6 +46,13 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] int teamFixed = 4;
     #endregion
 
+    #region 방을 보여주는 곳
+    [Header("만들어준 방을 보여주는 Panel 오브젝트")]
+    [SerializeField] GameObject roomPanel;
+
+    [SerializeField] RoomList roomList;
+    #endregion
+
     public static LobbyUIManager instance;
 
     ToggleGroup _modeGroup;
@@ -79,6 +87,7 @@ public class LobbyUIManager : MonoBehaviour
             inputTeamCount.onValueChanged.AddListener(_ => EnforcePlayerCountRule_Live());
             inputTeamCount.onEndEdit.AddListener(_ => ClampPlayerCountFinal());
         }
+        NetWorkLauncher.instance.JoinLobbyIfNeeded();
     }
 
     #region UI 켜주는 기능
@@ -87,6 +96,7 @@ public class LobbyUIManager : MonoBehaviour
         optionPanel.SetActive(isActive);
         memberShipDwraw.SetActive(isActive);
         createRoomPanel.SetActive(isActive);
+        roomPanel.SetActive(!isActive);
     }
 
     public async void BtnClick(int num)
@@ -355,6 +365,30 @@ public class LobbyUIManager : MonoBehaviour
             NetWorkLauncher.instance.OnClickCreateRoom_Team();
         else
             NetWorkLauncher.instance.OnClickCreateRoom_Solo();
+    }
+    #endregion
+
+    #region 방 보여지는 기능
+    private void OnEnable()
+    {
+        NetWorkLauncher.instance.OnRoomsUpdated += OnRoomsUpdated;
+        roomLoad();
+    }
+
+    private void OnDisable()
+    {
+        if (NetWorkLauncher.instance != null)
+            NetWorkLauncher.instance.OnRoomsUpdated -= OnRoomsUpdated;
+    }
+
+    private void OnRoomsUpdated(IReadOnlyList<SessionInfo> _)
+    {
+        roomLoad();
+    }
+
+    public void roomLoad()
+    {
+        roomList.RoomLoadList();
     }
     #endregion
 }
