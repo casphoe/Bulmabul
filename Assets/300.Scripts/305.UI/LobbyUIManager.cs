@@ -24,6 +24,9 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] TMP_InputField password;
 
     [SerializeField] TMP_InputField confirmPassword;
+
+    [Header("회원 탈퇴 비밀번호 보기 Toggle")]
+    [SerializeField] Toggle showPasswordToggle;
     #endregion
 
     #region 방 만들기
@@ -67,6 +70,17 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] Toggle alphaToggle;
     #endregion
 
+    #region 토스 메시지 설정 변수
+    [Header("토스 메시지")]
+    public TextMeshProUGUI toasstMessage;
+
+    [Header("토스트 설정")]
+    public float toastShowSeconds = 1.2f; // 완전히 보이는 유지 시간
+    public float toastFadeSeconds = 0.8f; // 페이드 아웃 시간
+
+    public Coroutine toastRoutine;
+    #endregion
+
     public static LobbyUIManager instance;
 
     ToggleGroup _modeGroup;
@@ -101,6 +115,16 @@ public class LobbyUIManager : MonoBehaviour
             inputTeamCount.onValueChanged.AddListener(_ => EnforcePlayerCountRule_Live());
             inputTeamCount.onEndEdit.AddListener(_ => ClampPlayerCountFinal());
         }
+
+        if (toasstMessage != null)
+        {
+            var c = toasstMessage.color;
+            c.a = 0f;
+            toasstMessage.color = c;
+            toasstMessage.text = "";
+        }
+        showPasswordToggle.isOn = false;
+        LeaveToggleOnOff();
         NetWorkLauncher.instance.JoinLobbyIfNeeded();
         SetupSortToggles();
     }
@@ -125,6 +149,7 @@ public class LobbyUIManager : MonoBehaviour
             case 1:
                 try
                 {
+                    ShowToast("로그아웃 성공");
                     await FireBaseAuthManager.Instance.LogoutToScene0Async();
                 }
                 catch (Exception e)
@@ -134,6 +159,8 @@ public class LobbyUIManager : MonoBehaviour
                 break;
             case 2:
                 memberShipDwraw.SetActive(true);
+                password.text = "";
+                confirmPassword.text = "";
                 break;
             case 3:
                 try
@@ -142,7 +169,12 @@ public class LobbyUIManager : MonoBehaviour
                     string pass2 = confirmPassword.text;
                     if(pass1 == pass2)
                     {
+                        ShowToast("회원 탈퇴 성공");
                         await FireBaseAuthManager.Instance.DeleteCurrentAccountAsync(password.text);
+                    }
+                    else
+                    {
+                        ShowToast("비밀번호가 틀렸습니다. 확인 부탁드립니다.");
                     }
                 }
                 catch (Exception e)
@@ -152,6 +184,8 @@ public class LobbyUIManager : MonoBehaviour
                 break;
             case 4:
                 memberShipDwraw.SetActive(false);
+                showPasswordToggle.isOn = false;
+                LeaveToggleOnOff();
                 break;
             case 5:
                 createRoomPanel.SetActive(true);
@@ -170,8 +204,6 @@ public class LobbyUIManager : MonoBehaviour
                 ApplyModeUI(); // 개인전 기준 UI 세팅(placeholder 등)
 
                 MapSelectUI_Korea();
-
-
                 break;
             case 6:
                 createRoomPanel.SetActive(false);
@@ -507,5 +539,61 @@ public class LobbyUIManager : MonoBehaviour
         NetWorkLauncher.instance.SetSortMode(RoomSortMode.Latest);
         RoomLoad();
     }
+    #endregion
+
+    #region 토스트 메세지
+
+    public void ShowToast(string msg)
+    {
+        if (toasstMessage == null) return;
+
+        if (toastRoutine != null) StopCoroutine(toastRoutine);
+        toastRoutine = StartCoroutine(CoToastFadeOut(msg, toastShowSeconds, toastFadeSeconds));
+    }
+
+    IEnumerator CoToastFadeOut(string msg, float showSec, float fadeSec)
+    {
+        toasstMessage.text = msg;
+
+        Color c = toasstMessage.color;
+        c.a = 1f;
+        toasstMessage.color = c;
+
+        if (showSec > 0f)
+            yield return new WaitForSeconds(showSec);
+
+        float t = 0f;
+        float dur = Mathf.Max(0.01f, fadeSec);
+
+        while (t < dur)
+        {
+            t += Time.unscaledDeltaTime;
+            c.a = Mathf.Lerp(1f, 0f, t / dur);
+            toasstMessage.color = c;
+            yield return null;
+        }
+
+        c.a = 0f;
+        toasstMessage.color = c;
+        toasstMessage.text = "";
+        toastRoutine = null;
+    }
+
+    #endregion
+
+    #region 비밀번호 보기 Toggle
+
+    public void LeaveToggleOnOff()
+    {
+        TogglePassword(password, showPasswordToggle.isOn);
+        TogglePassword(confirmPassword, showPasswordToggle.isOn);
+    }
+
+    void TogglePassword(TMP_InputField field, bool show)
+    {
+        field.contentType = show ? TMP_InputField.ContentType.Standard : TMP_InputField.ContentType.Password;
+        field.ForceLabelUpdate();
+    }
+
     #endregion
 }
