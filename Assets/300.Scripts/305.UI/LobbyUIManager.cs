@@ -44,6 +44,16 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] int soloMin = 2;
     [SerializeField] int soloMax = 4;
     [SerializeField] int teamFixed = 4;
+
+    [Header("게임 맵 선택")]
+    [SerializeField] Button[] btnMapSelect;
+
+    int mapSelect = 0;
+    [Header("게임 맵 이미지")]
+    [SerializeField] Image mapImage;
+
+    [Header("맵 선택 스프라이트 들")]
+    public Sprite[] mapSprites;
     #endregion
 
     #region 방을 보여주는 곳
@@ -51,6 +61,10 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] GameObject roomPanel;
 
     [SerializeField] RoomList roomList;
+
+    [Header("최신순, 가나다 정렬")]
+    [SerializeField] Toggle lastToggle;
+    [SerializeField] Toggle alphaToggle;
     #endregion
 
     public static LobbyUIManager instance;
@@ -88,6 +102,7 @@ public class LobbyUIManager : MonoBehaviour
             inputTeamCount.onEndEdit.AddListener(_ => ClampPlayerCountFinal());
         }
         NetWorkLauncher.instance.JoinLobbyIfNeeded();
+        SetupSortToggles();
     }
 
     #region UI 켜주는 기능
@@ -153,6 +168,10 @@ public class LobbyUIManager : MonoBehaviour
                 _suppressToggleCallback = false;
 
                 ApplyModeUI(); // 개인전 기준 UI 세팅(placeholder 등)
+
+                MapSelectUI_Korea();
+
+
                 break;
             case 6:
                 createRoomPanel.SetActive(false);
@@ -354,6 +373,8 @@ public class LobbyUIManager : MonoBehaviour
             return;
         }
 
+        NetWorkLauncher.instance.SetSelectedMap(mapSelect);
+
         // 방 이름 세팅
         NetWorkLauncher.instance.SetRoomName(title);
 
@@ -372,7 +393,7 @@ public class LobbyUIManager : MonoBehaviour
     private void OnEnable()
     {
         NetWorkLauncher.instance.OnRoomsUpdated += OnRoomsUpdated;
-        roomLoad();
+        RoomLoad();
     }
 
     private void OnDisable()
@@ -383,12 +404,108 @@ public class LobbyUIManager : MonoBehaviour
 
     private void OnRoomsUpdated(IReadOnlyList<SessionInfo> _)
     {
-        roomLoad();
+        RoomLoad();
     }
 
-    public void roomLoad()
+    public void RoomLoad()
     {
         roomList.RoomLoadList();
+    }
+    #endregion
+
+
+    #region 방 만들 때 맵 선택하는 기능
+    public void BtnMapSelect(int num)
+    {
+        if (num < 0 || num > 1) return;
+
+        mapSelect = num;
+
+        // 미리보기 갱신
+        if (mapImage != null && mapSprites != null && mapSprites.Length > mapSelect)
+            mapImage.sprite = mapSprites[mapSelect];
+
+        UpdateMapButtonsInteractable();
+    }
+    
+    void MapSelectUI_Korea()
+    {
+        mapSelect = 0;
+
+        if (mapImage != null && mapSprites != null && mapSprites.Length > 0)
+            mapImage.sprite = mapSprites[0];
+
+        UpdateMapButtonsInteractable();
+    }
+
+    void UpdateMapButtonsInteractable()
+    {
+        if (btnMapSelect == null) return;
+
+        // 안전 처리(버튼이 2개라고 가정: 0=한국, 1=미국)
+        if (btnMapSelect.Length > 0 && btnMapSelect[0] != null)
+            btnMapSelect[0].interactable = (mapSelect != 0); // 한국 선택 중이면 한국 버튼 비활성화
+
+        if (btnMapSelect.Length > 1 && btnMapSelect[1] != null)
+            btnMapSelect[1].interactable = (mapSelect != 1); // 미국 선택 중이면 미국 버튼 비활성화
+    }
+
+    #endregion
+
+    #region 방 정렬
+
+    ToggleGroup _sortGroup;
+    bool _suppressSortToggle;
+
+    void SetupSortToggles()
+    {
+        // 토글 그룹(하나만 켜지게)
+        _sortGroup = roomPanel.GetComponent<ToggleGroup>();
+        if (_sortGroup == null) _sortGroup = roomPanel.AddComponent<ToggleGroup>();
+        _sortGroup.allowSwitchOff = false;
+
+        if (alphaToggle != null) alphaToggle.group = _sortGroup;
+        if (lastToggle != null) lastToggle.group = _sortGroup;
+
+        if (alphaToggle != null)
+        {
+            alphaToggle.onValueChanged.RemoveListener(OnAlphaSortChanged);
+            alphaToggle.onValueChanged.AddListener(OnAlphaSortChanged);
+        }
+
+        if (lastToggle != null)
+        {
+            lastToggle.onValueChanged.RemoveListener(OnLastSortChanged);
+            lastToggle.onValueChanged.AddListener(OnLastSortChanged);
+        }
+
+        // 시작은 가나다순
+        _suppressSortToggle = true;
+        if (alphaToggle != null) alphaToggle.isOn = true;
+        if (lastToggle != null) lastToggle.isOn = false;
+        _suppressSortToggle = false;
+
+        // 정렬모드 적용 + UI 갱신
+        NetWorkLauncher.instance.SetSortMode(RoomSortMode.Alpha);
+        RoomLoad();
+    }
+
+    void OnAlphaSortChanged(bool isOn)
+    {
+        if (_suppressSortToggle) return;
+        if (!isOn) return;
+
+        NetWorkLauncher.instance.SetSortMode(RoomSortMode.Alpha);
+        RoomLoad();
+    }
+
+    void OnLastSortChanged(bool isOn)
+    {
+        if (_suppressSortToggle) return;
+        if (!isOn) return;
+
+        NetWorkLauncher.instance.SetSortMode(RoomSortMode.Latest);
+        RoomLoad();
     }
     #endregion
 }

@@ -171,6 +171,10 @@
     {
       "key": "txt.player",
       "text": "플레이어 수 :"
+    },
+    {
+      "key": "gamemap.select",
+      "text": "게임 맵 선택"
     }
   ],
   "eng": [
@@ -345,6 +349,10 @@
     {
       "key": "txt.player",
       "text": "Player Count :"
+    },
+    {
+      "key": "gamemap.select",
+      "text": "GameMap Select"
     }
   ]
 }

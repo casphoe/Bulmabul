@@ -4,6 +4,20 @@ using Fusion;
 using Fusion.Sockets;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Globalization;
+using System.Linq;
+
+[Serializable]
+/// <summary>
+/// 방 리스트 정렬 모드
+/// - Alpha : 가나다(한글->영어->숫자) 정렬
+/// - Latest: 최신순(생성시간 createdAt 내림차순)
+/// </summary>
+public enum RoomSortMode
+{
+    Alpha = 0,   // 가나다(한글->영어->숫자)
+    Latest = 1,  // 최신(생성시간 내림차순)
+}
 
 [Serializable]
 //방이 개인전인지 팀전인지 나누는 enum
@@ -40,9 +54,18 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     [Header("방 선택 인덱스")]
     public int selectindex = 0;
 
+    [Header("방 정렬 모드")]
+    public RoomSortMode sortMode = RoomSortMode.Alpha;
+
+    [Header("Game Scene (Fusion 네트워크 로드용)")]
+    [SerializeField] private SceneRef gameScene;
+
+    [Header("Lobby Scene Name (언로드용)")]
+    [SerializeField] private string lobbySceneName = "LobbyScene"; // 너 로비씬 이름으로
+
     #region 방 리스트
     [Header("Lobby(방 리스트)")]
-    [SerializeField] public SessionLobby lobby = SessionLobby.Shared; // 보통 Shared 사용
+    [SerializeField] public SessionLobby lobby = SessionLobby.ClientServer; // 보통 Shared 사용
 
     public List<RoomPrefabData> roomPrefabList = new List<RoomPrefabData>();
 
@@ -54,7 +77,10 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     public IReadOnlyList<SessionInfo> CachedSessions => _cachedSessions;
     public int RoomCount => _cachedSessions.Count;
 
-    // UI가 갱신되게 이벤트로 뿌리고 싶으면 사용(선택)
+    /// <summary>
+    /// 방 리스트가 갱신되면 UI가 다시 로드할 수 있도록 이벤트 발생
+    /// LobbyUIManager.OnEnable에서 구독해서 roomLoad() 호출하는 구조
+    /// </summary>
     public event Action<IReadOnlyList<SessionInfo>> OnRoomsUpdated;
     #endregion
 
@@ -220,6 +246,13 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     }
     #endregion
 
+
+    #region 로비 참가
+    /// <summary>
+    /// 로비 참가(방 리스트 수신 받기 시작)
+    /// - LobbyUIManager.Start()에서 1회 호출해주면 됨
+    /// - _joinedLobby 체크로 중복 참가 방지
+    /// </summary>
     public async void JoinLobbyIfNeeded()
     {
         CreateRunnerOnce();
@@ -233,8 +266,14 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
             ? $"[Fusion] Joined Lobby: {lobby}"
             : $"[Fusion] JoinLobby Failed: {res.ShutdownReason}");
     }
+    #endregion
 
-    // RoomPrefab에서 Join 버튼 누를 때 쓰기
+    #region UI 리스트에서 방 참가
+    /// <summary>
+    /// RoomPrefab에서 Join 버튼 누를 때 호출하도록 쓰는 함수
+    /// - roomIndex는 "현재 CachedSessions의 인덱스"여야 함
+    /// - 따라서 CachedSessions가 정렬되면, UI index도 그 정렬 결과 기준으로 맞춰야 함
+    /// </summary>
     public void JoinRoomByIndex(int roomIndex)
     {
         if (_starting) return;
@@ -250,6 +289,138 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
 
         StartGame(GameMode.Client, sessionName, mode);
     }
+    #endregion
+
+    #region 방이 가득 찼는지 판단(가득 찬 방 숨김)
+    /// <summary>
+    /// 세션 최대 인원값 얻기
+    /// - Fusion SessionInfo.MaxPlayers가 정상일 때가 많지만
+    /// - 혹시 0으로 오면 우리가 심어둔 SessionProperties["max"]로 보정
+    /// </summary>
+    private int GetSessionMax(SessionInfo s)
+    {
+        int max = s.MaxPlayers; // 보통 이게 들어옴
+        if (max <= 0 && s.Properties != null && s.Properties.TryGetValue("max", out var px))
+            max = (int)px; // 너가 넣어둔 백업
+        return max;
+    }
+    /// <summary>
+    /// 현재 인원이 max에 도달했으면 full 처리
+    /// </summary>
+    private bool IsSessionFull(SessionInfo s)
+    {
+        int max = GetSessionMax(s);
+        if (max <= 0) return false; // max를 모르면 일단 숨기지 않음(보수적으로)
+        return s.PlayerCount >= max;
+    }
+
+    #endregion
+
+    #region 방 맵 선택
+
+    [Header("방 맵 선택 (0=Korea, 1=USA)")]
+    public int selectedMap = 0;
+
+    public void SetSelectedMap(int map)
+    {
+        selectedMap = Mathf.Clamp(map, 0, 1);
+    }
+
+    #endregion
+
+
+    #region 방 정렬하기 
+
+    private readonly Dictionary<string, int> _firstSeenOrder = new Dictionary<string, int>();
+    private int _firstSeenCounter = 0;
+
+
+    private int GetSessionCreatedAt(SessionInfo s)
+    {
+        // 1) createdAt 프로퍼티(초) 우선
+        if (s.Properties != null && s.Properties.TryGetValue("createdAt", out var ca))
+            return (int)ca;
+
+        // 2) 없으면 "처음 본 순서"로 대체
+        if (!_firstSeenOrder.TryGetValue(s.Name, out int order))
+        {
+            order = ++_firstSeenCounter;
+            _firstSeenOrder[s.Name] = order;
+        }
+        return order;
+    }
+
+    // 한글 / 영어 / 숫자 순서용 카테고리
+    private int GetNameCategory(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return 3;
+        char c = name[0];
+
+        if (c >= '가' && c <= '힣') return 0;                 // 한글
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return 1; // 영어
+        if (char.IsDigit(c)) return 2;                        // 숫자
+        return 3;                                             // 기타
+    }
+
+    private int CompareRoomName(string a, string b)
+    {
+        a ??= "";
+        b ??= "";
+
+        int ca = GetNameCategory(a);
+        int cb = GetNameCategory(b);
+        if (ca != cb) return ca.CompareTo(cb);
+
+        // 같은 카테고리 내부 정렬
+        if (ca == 0)
+        {
+            // 한글: ko-KR 정렬(가나다)
+            return string.Compare(a, b, CultureInfo.GetCultureInfo("ko-KR"),
+                CompareOptions.StringSort);
+        }
+        if (ca == 1)
+        {
+            // 영어: 대소문자 무시
+            return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+        if (ca == 2)
+        {
+            // 숫자: 가능한 숫자로 비교
+            bool pa = int.TryParse(a, out int ia);
+            bool pb = int.TryParse(b, out int ib);
+            if (pa && pb) return ia.CompareTo(ib);
+            // 숫자가 섞인 문자열이면 그냥 문자열 비교
+            return string.Compare(a, b, StringComparison.Ordinal);
+        }
+
+        // 기타는 그냥 문자열
+        return string.Compare(a, b, StringComparison.Ordinal);
+    }
+
+    private void ApplyRoomSort()
+    {
+        if (_cachedSessions == null || _cachedSessions.Count <= 1) return;
+
+        if (sortMode == RoomSortMode.Latest)
+        {
+            // 최신: createdAt 내림차순(큰 값이 최신)
+            _cachedSessions.Sort((x, y) => GetSessionCreatedAt(y).CompareTo(GetSessionCreatedAt(x)));
+        }
+        else
+        {
+            // 가나다: 한글 -> 영어 -> 숫자, 각 내부는 가나다/알파/숫자
+            _cachedSessions.Sort((x, y) => CompareRoomName(x.Name, y.Name));
+        }
+    }
+
+    public void SetSortMode(RoomSortMode mode)
+    {
+        sortMode = mode;
+        ApplyRoomSort();
+        OnRoomsUpdated?.Invoke(_cachedSessions);
+    }
+
+    #endregion
 
     #region 방 참가하기 & 등록하기의 대한 내부 함수 기능 구현
 
@@ -294,7 +465,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
 
                 Debug.Log($"[Fusion] Host created. Room={roomName} Mode={mode} Max={maxPlayers}");
                 
-                SceneManager.LoadScene(2);
+                //SceneManager.LoadScene(2);
                 return;
             }
 
@@ -365,28 +536,34 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     }
 
     /// <summary>
-    /// StartGame 실제 호출(재사용)
+    /// 실제 Fusion StartGame 호출
+    /// 
+    /// SessionProperties:
+    /// - mode      : 0=Solo, 1=Team
+    /// - max       : 강제 최대 인원(표시/백업용)
+    /// - createdAt : 방 생성 시간(UTC 초) -> 최신정렬에 사용
     /// </summary>
     private System.Threading.Tasks.Task<StartGameResult> StartGameInternal(
         GameMode mode, string sessionName, MatchMode modeValue, int forcedMaxPlayers)
     {
-        var scene = SceneRef.FromIndex(2);
 
         // 방 설정(모드/최대인원)을 세션 프로퍼티로 저장 -> 참가자들이 읽을 수 있음
         var props = new Dictionary<string, SessionProperty>
         {
             { "mode", (int)modeValue },           // 0=Solo, 1=Team
             { "max",  forcedMaxPlayers },         // 참고용
+            { "createdAt", (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
+            { "map", selectedMap },
         };
 
         return _runner.StartGame(new StartGameArgs
         {
             GameMode = mode,
             SessionName = sessionName,
-            Scene = scene,
+            Scene = gameScene,
             SceneManager = _sceneManager,
             PlayerCount = forcedMaxPlayers,        //  최대 인원 강제 적용
-            SessionProperties = props
+            SessionProperties = props,
         });
     }
 
@@ -447,6 +624,13 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
         ResetRunner();
     }
 
+    /// <summary>
+    /// 로비에서 방 리스트가 갱신될 때 호출됨 (매우 중요)
+    /// - 여기서 _cachedSessions를 새로 구성하고
+    /// - 가득 찬 방은 숨기고
+    /// - 정렬을 적용하고
+    /// - OnRoomsUpdated 이벤트를 쏴서 UI 갱신
+    /// </summary>
     public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
     {
         _cachedSessions.Clear();
@@ -454,16 +638,16 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
         // 유효한 것만 담기(선택)
         foreach (var s in sessionList)
         {
-            if (s.IsValid)
-                _cachedSessions.Add(s);
+            if (!s.IsValid) continue;
+            //가득찬 방은 숨김
+            if (IsSessionFull(s)) continue;
+
+            _cachedSessions.Add(s);
         }
 
-        // 이름순 정렬(선택)
-        _cachedSessions.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
-
+        ApplyRoomSort();
         Debug.Log($"[Fusion] Lobby Rooms: {_cachedSessions.Count}");
-
-        // UI 갱신 이벤트(선택)
+        // UI 갱신 이벤트
         OnRoomsUpdated?.Invoke(_cachedSessions);
     }
 
@@ -474,8 +658,32 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason) { }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
-    public void OnSceneLoadStart(NetworkRunner runner) { }
-    public void OnSceneLoadDone(NetworkRunner runner) { }
+    public void OnSceneLoadStart(NetworkRunner runner)
+    {
+        Debug.Log("[Fusion] OnSceneLoadStart");
+    }
+
+    public void OnSceneLoadDone(NetworkRunner runner)
+    {
+        // 1) 게임씬을 활성씬으로 바꾸기
+        // SceneRef의 BuildIndex를 사용하려면 gameScene이 올바르게 세팅되어 있어야 함
+        var loadedGameScene = SceneManager.GetSceneByBuildIndex(2);
+        if (loadedGameScene.IsValid() && loadedGameScene.isLoaded)
+        {
+            SceneManager.SetActiveScene(loadedGameScene);
+        }
+
+        // 2) 로비씬 언로드 (로비 UI/카메라/오디오리스너 제거)
+        var lobby = SceneManager.GetSceneByName(lobbySceneName);
+        if (lobby.IsValid() && lobby.isLoaded)
+        {
+            SceneManager.UnloadSceneAsync(lobby);
+        }
+
+        Debug.Log($"[Fusion] SceneLoadDone -> ActiveScene: {SceneManager.GetActiveScene().name}");
+    }
+
+
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
     public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
     public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
