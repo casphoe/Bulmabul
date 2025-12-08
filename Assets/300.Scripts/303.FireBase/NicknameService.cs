@@ -48,7 +48,9 @@ public static class NicknameService
         string nickKey = ToNickKey(nick);
         var r = Root.Child("nicknames").Child(nickKey);
 
-        _ = r.RunTransaction(mutable =>
+        //  중요: await로 트랜잭션 완료까지 대기
+        //  중요: fireLocalEvents=false 로컬 중간 상태 노출 최소화
+        await r.RunTransaction(mutable =>
         {
             // 비어있으면 선점
             if (mutable.Value == null)
@@ -56,33 +58,24 @@ public static class NicknameService
                 mutable.Value = uid;
                 return TransactionResult.Success(mutable);
             }
-            // 이미 내가 소유한 닉이면 그대로 성공
+
+            // 이미 내가 소유중이면 OK
             if (mutable.Value != null && mutable.Value.ToString() == uid)
                 return TransactionResult.Success(mutable);
-            // 다른 사람이 이미 사용 중
+
+            // 다른 사람이 이미 사용중
             return TransactionResult.Abort();
-        }, true);
+        }, false);
 
 
-        // 2) 결과 확인 (네트워크/동기화 타이밍 때문에 짧게 재시도)
-        // - 값이 uid면 성공
-        // - 값이 다른 uid면 중복(실패)
-        // - 여전히 null이면 반영 지연일 수 있어 몇 번 더 확인
-        for (int i = 0; i < 10; i++)
-        {
-            await Task.Delay(80 + i * 80);
-            var snap = await r.GetValueAsync();
+        ///  최종 확정: 서버에 실제로 누가 소유자인지 확인
+        var snap = await r.GetValueAsync();
+        if (snap.Exists && snap.Value != null && snap.Value.ToString() == uid)
+            return;
 
-            if (snap.Exists && snap.Value != null)
-            {
-                string owner = snap.Value.ToString();
-                if (owner == uid) return;              // 성공
-                throw new Exception("이미 사용 중인 닉네임입니다."); // 실패
-            }
-        }
-
+        AuthUIController.instance.ShowToast("닉네임이 중복입니다.");
         // 여기까지 왔다면 반영/확인이 애매한 상태(거의 규칙/네트워크)
-        throw new Exception("닉네임 선점 결과 확인에 실패했습니다. 네트워크/DB 규칙을 확인하세요.");
+        throw new Exception("이미 사용 중인 닉네임입니다.");
     }
 
 

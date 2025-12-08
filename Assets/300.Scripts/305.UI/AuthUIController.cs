@@ -89,12 +89,14 @@ public class AuthUIController : MonoBehaviour
     {
         SetAll(false);
         panelSignUp.SetActive(true);
+        SignUpSetDeafualt();
         ClearMessage();
     }
     public void ShowForgot()
     {
         SetAll(false);
         panelForgot.SetActive(true);
+        ForgotInputClear();
         ClearMessage();
     }
 
@@ -112,7 +114,22 @@ public class AuthUIController : MonoBehaviour
         panelSignIn.SetActive(v);
         panelSignUp.SetActive(v);
         panelForgot.SetActive(v);
+    }
 
+    void SignUpSetDeafualt()
+    {
+        upName.text = "";
+        upEmail.text = "";
+        upPassword.text = "";
+        upPasswordConfirm.text = "";
+        upShowPw.isOn = false;
+        upNickname.text = "";
+        TogglePassword_SignUp();
+    }
+
+    void ForgotInputClear()
+    {
+        fgEmail.text = "";
     }
 
     public void ClearMessage() => toasstMessage.text = "";

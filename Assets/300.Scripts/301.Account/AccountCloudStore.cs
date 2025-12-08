@@ -63,15 +63,19 @@ public static class AccountCloudStore
         string json = JsonConvert.SerializeObject(acc);
         string enc = CryptoUtil.EncryptToBase64(json, uid);
 
+        string nickKey = NicknameService.ToNickKey(acc.NickName);
+        string nameKey = NameService.ToNameKey(acc.Name);
+
         var updates = new Dictionary<string, object>
         {
             [$"users/{uid}/accountEnc"] = enc,
             [$"users/{uid}/cash"] = acc.Cash,
-            [$"users/{uid}/nick"] = acc.NickName,
-            [$"users/{uid}/nameKey"] = ToNameKey(acc.Name),
+            [$"users/{uid}/nick"] = nickKey,        
+            [$"users/{uid}/nameKey"] = nameKey,     
             [$"users/{uid}/accountLevel"] = acc.AccountLevel,
             [$"users/{uid}/accountExp"] = acc.AccountExp
         };
+
 
         await Root.UpdateChildrenAsync(updates);
     }

@@ -97,17 +97,30 @@ public class FireBaseAuthManager : MonoBehaviour
 
 
         FirebaseUser createdUser = null;
+        bool nickClaimed = false;
+        bool nameClaimed = false;
+
+        string stage = "시작";
 
         try
         {
             // 1) Auth 회원가입
+            stage = "Auth 계정 생성";
             AuthResult res = await Auth.CreateUserWithEmailAndPasswordAsync(email, password);
             createdUser = res.User;
 
             // 2) 닉네임 선점
+            stage = "닉네임 중복 선점";
             await NicknameService.ClaimAsync(createdUser.UserId, nickName);
+            nickClaimed = true;
 
-            // 3) Account 저장
+            // 3) 이름 선점
+            stage = "이름 중복 선점";
+            await NameService.ClaimAsync(createdUser.UserId, name);
+            nameClaimed = true;
+
+            // 4) Account 저장
+            stage = "계정 데이터 저장";
             var acc = CreateDefaultAccount(createdUser, name, nickName);
             await AccountCloudStore.SaveFullAsync(acc);
 
@@ -121,10 +134,17 @@ public class FireBaseAuthManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            ShowToast($"회원가입 실패: {ExtractFriendlyError(e)}");
-            //Debug.LogError($"Register Fail: {e}");
-            // (중요) Auth는 만들어졌는데 닉네임 선점/DB 저장에서 실패하면
-            // 계정이 “반쪽”으로 남을 수 있으니 롤백(삭제) 시도
+            string reason = Friendly(e);
+            string userMsg = $"회원가입 실패({stage}): {reason}";
+
+            Debug.LogWarning($"[RegisterFail] stage={stage}\n{e}");
+            ShowToast(userMsg);
+
+            //  선점한 것들 반환
+            try { if (nameClaimed && createdUser != null) await NameService.ReleaseAsync(createdUser.UserId, name); } catch { }
+            try { if (nickClaimed && createdUser != null) await NicknameService.ReleaseAsync(createdUser.UserId, nickName); } catch { }
+
+            // Auth 생성만 되고 중간에서 실패하면 계정이 반쪽이므로 삭제 롤백
             try
             {
                 if (createdUser != null && Auth.CurrentUser != null && Auth.CurrentUser.UserId == createdUser.UserId)
@@ -134,7 +154,9 @@ public class FireBaseAuthManager : MonoBehaviour
             {
                 Debug.LogWarning($"Register rollback(DeleteAsync) failed: {rollbackErr}");
             }
-            throw;
+
+            //  UI(OnClickRegister)에서 e.Message로도 보이게
+            throw new Exception(userMsg, e);
         }
     }
 
@@ -307,6 +329,46 @@ public class FireBaseAuthManager : MonoBehaviour
             default: return "인증 처리 중 오류가 발생했습니다.";
         }
     }
+
+
+    private Exception Unwrap(Exception e)
+    {
+        // Firebase는 AggregateException으로 감싸져 오는 경우가 많음
+        if (e is AggregateException ae && ae.InnerExceptions != null && ae.InnerExceptions.Count > 0)
+            return Unwrap(ae.InnerExceptions[0]);
+        if (e.InnerException != null) return Unwrap(e.InnerException);
+        return e;
+    }
+
+    private string Friendly(Exception e)
+    {
+        e = Unwrap(e);
+
+        // 닉네임/이름 중복은 우리가 던진 메시지 그대로 쓰는 게 제일 명확
+        if (e.Message.Contains("닉네임")) return e.Message;
+        if (e.Message.Contains("이름")) return e.Message;
+
+        // RTDB Rules 권한 문제 흔함
+        string msg = e.Message ?? "";
+        if (msg.Contains("Permission denied") || msg.Contains("permission_denied"))
+            return "DB 권한 거부입니다. Realtime Database Rules에 /names, /nicknames 쓰기 허용이 있는지 확인하세요.";
+
+        if (e is FirebaseException fe)
+        {
+            // Auth 에러면 AuthError로 해석 가능
+            try
+            {
+                var authErr = (AuthError)fe.ErrorCode;
+                return AuthErrorToKorean(authErr);
+            }
+            catch
+            {
+                return $"Firebase 오류: {fe.Message}";
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(msg) ? e.GetType().Name : msg;
+    }
     #endregion
 
     #region 회원 탈퇴
@@ -348,16 +410,25 @@ public class FireBaseAuthManager : MonoBehaviour
         // DB 삭제(닉네임 같이 쓰면 같이 제거)
         var root = FirebaseDatabase.DefaultInstance.RootReference;
 
-        //  한 번에 원자적으로 지우기 (users + nicknames)
+        // 한 번에 원자적으로 지우기 (users + nicknames + names)
         var updates = new Dictionary<string, object>
         {
             [$"users/{uid}"] = null
         };
 
+
+        // 닉네임 인덱스 제거
         if (CurrentAccount != null && !string.IsNullOrWhiteSpace(CurrentAccount.NickName))
         {
-            string nickKey = CurrentAccount.NickName.Trim().ToLowerInvariant();
+            string nickKey = NicknameService.ToNickKey(CurrentAccount.NickName);
             updates[$"nicknames/{nickKey}"] = null;
+        }
+
+        // 이름 인덱스 제거
+        if (CurrentAccount != null && !string.IsNullOrWhiteSpace(CurrentAccount.Name))
+        {
+            string nameKey = NameService.ToNameKey(CurrentAccount.Name);
+            updates[$"names/{nameKey}"] = null;
         }
 
         await root.UpdateChildrenAsync(updates);
