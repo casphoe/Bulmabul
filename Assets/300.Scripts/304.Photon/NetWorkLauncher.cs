@@ -417,6 +417,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     {
         sortMode = mode;
         ApplyRoomSort();
+        RebuildRoomPrefabList();
         OnRoomsUpdated?.Invoke(_cachedSessions);
     }
 
@@ -646,6 +647,9 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
         }
 
         ApplyRoomSort();
+
+        RebuildRoomPrefabList();
+
         Debug.Log($"[Fusion] Lobby Rooms: {_cachedSessions.Count}");
         // UI 갱신 이벤트
         OnRoomsUpdated?.Invoke(_cachedSessions);
@@ -690,5 +694,56 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
 
+    #endregion
+
+
+    #region 방 검색에 따른 변수 및 기능
+    [Header("방 검색 키워드(부분 일치)")]
+    [SerializeField] private string _roomSearchKeyword = "";
+    public string RoomSearchKeyword => _roomSearchKeyword;
+
+    /// <summary>
+    /// 로비 방 검색 키워드 세팅 (부분검색)
+    /// - 비우면 전체 표시
+    /// </summary>
+    public void SetRoomSearchKeyword(string keyword)
+    {
+        _roomSearchKeyword = (keyword ?? "").Trim();
+        RebuildRoomPrefabList();
+        // UI에게 "갱신" 신호 (LobbyUIManager가 구독 중) :contentReference[oaicite:4]{index=4}
+        OnRoomsUpdated?.Invoke(_cachedSessions);
+    }
+
+    private bool PassSearchFilter(string roomName, string keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword)) return true;
+        if (string.IsNullOrEmpty(roomName)) return false;
+
+        // 대/소문자 무시(영문). 한글은 그대로 포함검색.
+        return roomName.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
+    /// 현재 _cachedSessions(정렬/가득찬방 제외된 리스트)에 대해
+    /// 검색 필터를 적용해서 roomPrefabList를 재생성.
+    /// RoomPrefabData.index는 "CachedSessions 인덱스" 그대로 유지.
+    /// </summary>
+    private void RebuildRoomPrefabList()
+    {
+        roomPrefabList.Clear();
+
+        for (int i = 0; i < _cachedSessions.Count; i++)
+        {
+            var s = _cachedSessions[i];
+            if (!PassSearchFilter(s.Name, _roomSearchKeyword))
+                continue;
+
+            roomPrefabList.Add(new RoomPrefabData
+            {
+                index = i,                 // RoomPrefab가 CachedSessions에서 찾아 쓰는 인덱스
+                number = roomPrefabList.Count
+            });
+        }
+    }
     #endregion
 }

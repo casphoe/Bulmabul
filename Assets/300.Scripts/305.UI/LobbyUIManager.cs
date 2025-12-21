@@ -68,6 +68,12 @@ public class LobbyUIManager : MonoBehaviour
     [Header("최신순, 가나다 정렬")]
     [SerializeField] Toggle lastToggle;
     [SerializeField] Toggle alphaToggle;
+
+    [Header("방 입력 및 찾는 기능")]
+    [SerializeField] TMP_InputField inputRoomSearch;
+
+    [Header("방 검색 버튼")]
+    [SerializeField] Button btnRoomSearch;
     #endregion
 
     #region 토스 메시지 설정 변수
@@ -123,6 +129,21 @@ public class LobbyUIManager : MonoBehaviour
             toasstMessage.color = c;
             toasstMessage.text = "";
         }
+
+
+        if (btnRoomSearch != null)
+        {
+            btnRoomSearch.onClick.RemoveListener(OnClickRoomSearch);
+            btnRoomSearch.onClick.AddListener(OnClickRoomSearch);
+        }
+
+        if (inputRoomSearch != null)
+        {
+            // 엔터(Submit)로도 검색되게
+            inputRoomSearch.onSubmit.RemoveListener(OnSubmitRoomSearch);
+            inputRoomSearch.onSubmit.AddListener(OnSubmitRoomSearch);
+        }
+
         showPasswordToggle.isOn = false;
         LeaveToggleOnOff();
         NetWorkLauncher.instance.JoinLobbyIfNeeded();
@@ -537,6 +558,36 @@ public class LobbyUIManager : MonoBehaviour
         if (!isOn) return;
 
         NetWorkLauncher.instance.SetSortMode(RoomSortMode.Latest);
+        RoomLoad();
+    }
+    #endregion
+
+    #region 방 찾기 기능(검색)
+    public void OnClickRoomSearch()
+    {
+        ApplyRoomSearch();
+    }
+
+    private void OnSubmitRoomSearch(string _)
+    {
+        ApplyRoomSearch();
+    }
+
+    private void ApplyRoomSearch()
+    {
+        var launcher = NetWorkLauncher.instance;
+        if (launcher == null) return;
+
+        string keyword = inputRoomSearch != null ? inputRoomSearch.text : "";
+        launcher.SetRoomSearchKeyword(keyword);
+
+        // 결과 없으면 토스트(원하면 문구 다국어 처리)
+        if (launcher.roomPrefabList.Count == 0)
+        {
+            ShowToast(string.IsNullOrWhiteSpace(keyword) ? "방이 없습니다." : "해당 이름의 방이 없습니다.");
+        }
+
+        // 이미 너 구조상 RoomLoad()가 roomList.RoomLoadList() 호출 :contentReference[oaicite:10]{index=10}
         RoomLoad();
     }
     #endregion
