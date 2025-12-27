@@ -587,7 +587,6 @@ public class LobbyUIManager : MonoBehaviour
             ShowToast(string.IsNullOrWhiteSpace(keyword) ? "방이 없습니다." : "해당 이름의 방이 없습니다.");
         }
 
-        // 이미 너 구조상 RoomLoad()가 roomList.RoomLoadList() 호출 :contentReference[oaicite:10]{index=10}
         RoomLoad();
     }
     #endregion
