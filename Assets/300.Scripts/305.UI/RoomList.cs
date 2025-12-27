@@ -17,8 +17,9 @@ public class RoomList : MonoBehaviour
     {
         roomScrollList.AddSelectCallback((data) =>
         {
-            NetWorkLauncher.instance.selectindex = ((RoomPrefabData)data).index;
-            selectIndex = NetWorkLauncher.instance.selectindex;
+            var d = (RoomPrefabData)data;
+            if (NetWorkLauncher.instance != null)
+                NetWorkLauncher.instance.selectindex = d.index; // CachedSessions 인덱스
         });
     }
 
@@ -26,40 +27,33 @@ public class RoomList : MonoBehaviour
     {
         dataList.Clear();
         roomScrollList.ClearData();
-
-        NetWorkLauncher.instance.roomPrefabList.Clear();
-        index = 0;
-    }
-
-    void InfinteScrollReboot()
-    {
-        int count = dataList.Count;
-        for(int i = 0; i < count; i++)
-        {
-            RoomPrefabData data = dataList[i];
-            data.index = i;
-            data.number = i + 1;
-        }
     }
 
     public void RoomLoadList()
     {
+        var launcher = NetWorkLauncher.instance;
+        if (launcher == null) return;
+
+        //  1) 화면만 싹 비우기
         RoomListClear();
-        int count = NetWorkLauncher.instance.CachedSessions.Count;
-        for (int i = 0; i < count; i++)
-            RoomInsertData();
-        AllUpdate();
-    }
 
-    void RoomInsertData()
-    {
-        RoomPrefabData data = new RoomPrefabData();
-        data.index = index++;
-        data.number = roomScrollList.GetItemCount() + 1;
-        dataList.Add(data);
-        roomScrollList.InsertData(data);
+        // 2) “검색/정렬 결과” 리스트로만 다시 채우기
+        var src = launcher.roomPrefabList;
 
-        NetWorkLauncher.instance.roomPrefabList.Add(data);
+        for (int i = 0; i < src.Count; i++)
+        {
+            // src[i].index = CachedSessions 인덱스(진짜 참가 인덱스)
+            var d = new RoomPrefabData
+            {
+                index = src[i].index,
+                number = i + 1
+            };
+
+            dataList.Add(d);
+            roomScrollList.InsertData(d);
+        }
+
+        roomScrollList.UpdateAllData();
     }
 
     private void OnEnable()

@@ -7,9 +7,10 @@ using System;
 
 public class RoomPrefabData : InfiniteScrollData
 {
-    public int index = 0;
-    public int number = 0;
+    public int index;   // CachedSessions의 인덱스(= 참가에 쓰는 진짜 인덱스)
+    public int number;  // UI 표시용(1..n)
 }
+
 [Serializable]
 public class RoomPrefab : InfiniteScrollItem
 {
@@ -24,7 +25,7 @@ public class RoomPrefab : InfiniteScrollItem
         base.UpdateData(scrollData);
 
         RoomPrefabData itemData = (RoomPrefabData)scrollData;
-        _sessionIndex = itemData.index;
+        _sessionIndex = itemData.index; //  진짜 세션 인덱스
 
         var launcher = NetWorkLauncher.instance;
         if (launcher == null) return;
