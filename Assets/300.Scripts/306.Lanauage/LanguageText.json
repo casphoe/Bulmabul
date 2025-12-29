@@ -175,6 +175,34 @@
     {
       "key": "gamemap.select",
       "text": "게임 맵 선택"
+    },
+    {
+      "key": "txt.Proflie",
+      "text": "프로필"
+    },
+    {
+      "key": "txt.NickName",
+      "text": "닉네임 변경"
+    },
+    {
+      "key": "txt.inputNickName",
+      "text": "변경할 닉네임을 입력해주세요."
+    },
+    {
+      "key": "txt.Password",
+      "text": "비밀번호 변경"
+    },
+    {
+      "key": "txt.currentPassword",
+      "text": "현재 비밀번호를 입력해주세요."
+    },
+    {
+      "key": "txt.changePassowrd",
+      "text": "변경할 비밀번호를 입력해주세요."
+    },
+    {
+      "key": "txt.proflieChange",
+      "text": "프로필 변경"
     }
   ],
   "eng": [
@@ -353,6 +381,34 @@
     {
       "key": "gamemap.select",
       "text": "GameMap Select"
+    },
+    {
+      "key": "txt.Proflie",
+      "text": "Profile"
+    },
+    {
+      "key": "txt.NickName",
+      "text": "NickName Change"
+    },
+    {
+      "key": "txt.inputNickName",
+      "text": "Please enter the nickname you want to change."
+    },
+    {
+      "key": "txt.Password",
+      "text": "Password Change"
+    },
+    {
+      "key": "txt.currentPassword",
+      "text": "Please enter your current password."
+    },
+    {
+      "key": "txt.changePassowrd",
+      "text": "Please enter the password you want to change."
+    },
+    {
+      "key": "txt.proflieChange",
+      "text": "Proflie Change"
     }
   ]
 }

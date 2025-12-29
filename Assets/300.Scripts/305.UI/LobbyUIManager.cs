@@ -87,6 +87,20 @@ public class LobbyUIManager : MonoBehaviour
     public Coroutine toastRoutine;
     #endregion
 
+    #region 레벨 및 플레이어 데이터 UI
+    [Header("레벨 및 플레이어 데이터 UI")]
+    [SerializeField] Text[] txtPlayerData;
+
+    #region 프로필 설정
+    [Header("프로필 UI Panel")]
+    [SerializeField] GameObject profilePanel;
+
+    [Header("프로필 이미지")]
+    [SerializeField] RawImage profileImage;
+    #endregion
+
+    #endregion
+
     public static LobbyUIManager instance;
 
     ToggleGroup _modeGroup;
@@ -157,6 +171,7 @@ public class LobbyUIManager : MonoBehaviour
         memberShipDwraw.SetActive(isActive);
         createRoomPanel.SetActive(isActive);
         roomPanel.SetActive(!isActive);
+        profilePanel.SetActive(isActive);
     }
 
     public async void BtnClick(int num)
@@ -231,6 +246,9 @@ public class LobbyUIManager : MonoBehaviour
                 break;
             case 7: //방 만들기
                 CreateRoomFromUI();
+                break;
+            case 8:
+                profilePanel.SetActive(true);
                 break;
         }
     }
@@ -447,6 +465,7 @@ public class LobbyUIManager : MonoBehaviour
     {
         NetWorkLauncher.instance.OnRoomsUpdated += OnRoomsUpdated;
         RoomLoad();
+        OnPlayerDataUI();
     }
 
     private void OnDisable()
@@ -645,5 +664,26 @@ public class LobbyUIManager : MonoBehaviour
         field.ForceLabelUpdate();
     }
 
+    #endregion
+
+    #region 플레이어 데이터
+    void OnPlayerDataUI()
+    {
+        switch (LaguageManager.Instance.currentLang)
+        {
+            case Lauaguage.Kor:
+                txtPlayerData[0].text = "이름 : " + FireBaseAuthManager.Instance.CurrentAccount.Name;
+                txtPlayerData[1].text = "닉네임 : " + FireBaseAuthManager.Instance.CurrentAccount.NickName;
+                txtPlayerData[2].text = "레벨 : " + FireBaseAuthManager.Instance.CurrentAccount.AccountLevel.ToString();
+                txtPlayerData[3].text = " : " + FireBaseAuthManager.Instance.CurrentAccount.Cash.ToString("N0");
+                break;
+            case Lauaguage.Eng:
+                txtPlayerData[0].text = "Name : " + FireBaseAuthManager.Instance.CurrentAccount.Name;
+                txtPlayerData[1].text = "NickName : " + FireBaseAuthManager.Instance.CurrentAccount.NickName;
+                txtPlayerData[2].text = "Level : " + FireBaseAuthManager.Instance.CurrentAccount.AccountLevel.ToString();
+                txtPlayerData[3].text = " : " + FireBaseAuthManager.Instance.CurrentAccount.Cash.ToString("N0");
+                break;
+        }
+    }
     #endregion
 }
