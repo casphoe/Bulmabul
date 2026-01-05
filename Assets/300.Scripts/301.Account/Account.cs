@@ -106,6 +106,14 @@ public class Account
     [SerializeField] private long accountExp = 0;    // 누적 경험치(크면 int 넘을 수 있어 long 추천)
     public long AccountExp { get => accountExp; set => accountExp = Math.Max(0, value); }
 
+    [Header("프로필")]
+    [SerializeField] private string photoUrl;   // Firebase Storage download URL (또는 빈 문자열)
+    public string PhotoUrl
+    {
+        get => photoUrl;
+        set => photoUrl = value?.Trim();
+    }
+
 }
 
 [Serializable]

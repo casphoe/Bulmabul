@@ -5,6 +5,8 @@ using UnityEngine.UI;
 using System;
 using TMPro;
 using Fusion;
+using System.Threading.Tasks;
+using UnityEngine.Networking;
 
 public class LobbyUIManager : MonoBehaviour
 {
@@ -93,15 +95,20 @@ public class LobbyUIManager : MonoBehaviour
 
     #region 프로필 설정
     [Header("프로필 UI Panel")]
-    [SerializeField] GameObject profilePanel;
+    public GameObject profilePanel;
 
     [Header("프로필 이미지")]
     [SerializeField] RawImage profileImage;
+
+    Texture2D _profileTexCache;
+    string _loadedPhotoUrl;
+    bool _loadingProfile;
     #endregion
 
     #endregion
 
     public static LobbyUIManager instance;
+    ProflieManger profileManger;
 
     ToggleGroup _modeGroup;
     bool _suppressToggleCallback;
@@ -114,9 +121,8 @@ public class LobbyUIManager : MonoBehaviour
     private void Start()
     {
         SetActive(false);
-
         SetupToggleGroup();
-
+        profileManger = profilePanel.GetComponent<ProflieManger>();
         if (singleToggle != null)
         {
             singleToggle.onValueChanged.RemoveListener(OnSingleToggleChanged);
@@ -249,6 +255,7 @@ public class LobbyUIManager : MonoBehaviour
                 break;
             case 8:
                 profilePanel.SetActive(true);
+                profileManger.ProfileSaveOnOff(false);
                 break;
         }
     }
@@ -465,7 +472,8 @@ public class LobbyUIManager : MonoBehaviour
     {
         NetWorkLauncher.instance.OnRoomsUpdated += OnRoomsUpdated;
         RoomLoad();
-        OnPlayerDataUI();
+        toasstMessage.transform.parent.GetComponent<CanvasGroup>().blocksRaycasts = false;
+        RefreshPlayerUI();
     }
 
     private void OnDisable()
@@ -684,6 +692,73 @@ public class LobbyUIManager : MonoBehaviour
                 txtPlayerData[3].text = " : " + FireBaseAuthManager.Instance.CurrentAccount.Cash.ToString("N0");
                 break;
         }
+    }
+
+    async Task RefreshProfileImageAsync()
+    {
+        if (_loadingProfile) return;
+        _loadingProfile = true;
+
+        try
+        {
+            if (profileImage == null) return;
+
+            var acc = FireBaseAuthManager.Instance?.CurrentAccount;
+            string url = acc != null ? acc.PhotoUrl : null;   //  Account에 PhotoUrl 필드 있어야 함
+
+            // url 없으면 이미지 제거
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                profileImage.texture = null;
+                _loadedPhotoUrl = null;
+
+                if (_profileTexCache != null)
+                {
+                    Destroy(_profileTexCache);
+                    _profileTexCache = null;
+                }
+                return;
+            }
+
+            // 이미 같은 URL을 로드했고 texture도 있으면 스킵
+            if (_loadedPhotoUrl == url && profileImage.texture != null)
+                return;
+
+            _loadedPhotoUrl = url;
+
+            using (var req = UnityWebRequestTexture.GetTexture(url, true))
+            {
+                var op = req.SendWebRequest();
+                while (!op.isDone) await Task.Yield();
+
+                // 오브젝트가 비활성/파괴됐으면 중단
+                if (this == null || !gameObject.activeInHierarchy) return;
+
+                if (req.result != UnityWebRequest.Result.Success)
+                {
+                    Debug.LogWarning($"[ProfileImage] download fail: {req.error} / url={url}");
+                    return;
+                }
+
+                var tex = DownloadHandlerTexture.GetContent(req);
+
+                // 이전 캐시 제거
+                if (_profileTexCache != null) Destroy(_profileTexCache);
+                _profileTexCache = tex;
+
+                profileImage.texture = _profileTexCache;
+            }
+        }
+        finally
+        {
+            _loadingProfile = false;
+        }
+    }
+
+    public void RefreshPlayerUI()
+    {
+        OnPlayerDataUI();
+        _ = RefreshProfileImageAsync();
     }
     #endregion
 }

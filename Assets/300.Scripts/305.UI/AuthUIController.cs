@@ -5,6 +5,10 @@ using TMPro;
 using System.Text.RegularExpressions;
 using System;
 
+using System.IO;
+using SFB;
+
+
 [Serializable] class FindEmailReq { public string nameKey; public string nick; }
 [Serializable] class FindEmailRes { public bool ok; public string maskedEmail; }
 
@@ -45,6 +49,21 @@ public class AuthUIController : MonoBehaviour
 
     public Coroutine toastRoutine;
     #endregion
+
+    [Header("Profile Photo")]
+    [SerializeField] Button btnPickPhoto;
+    [SerializeField] RawImage previewRawImage; //  미리보기
+    [SerializeField] string defaultOpenFolder = ""; // 비우면 "내 문서" 등 기본 위치
+    [SerializeField] int maxUploadMB = 5;
+
+    // 네 Storage 버킷 주소로 바꿔줘 (Firebase 콘솔 Storage에서 확인 가능)
+    // 예: "gs://burumabul.appspot.com"
+    [SerializeField] string storageBucketUrl = "gs://YOUR_BUCKET.appspot.com";
+
+    Texture2D _previewTex;
+
+    byte[] _pickedImageBytes = null;
+    string _pickedContentType = null;
 
     public static AuthUIController instance;
 
@@ -125,6 +144,9 @@ public class AuthUIController : MonoBehaviour
         upShowPw.isOn = false;
         upNickname.text = "";
         TogglePassword_SignUp();
+        _pickedImageBytes = null;
+        _pickedContentType = null;
+        if (previewRawImage) previewRawImage.texture = null;
     }
 
     void ForgotInputClear()
@@ -258,7 +280,7 @@ public class AuthUIController : MonoBehaviour
             if (pw != pw2) throw new Exception("비밀번호 확인이 일치하지 않습니다.");
             if (string.IsNullOrWhiteSpace(nick)) throw new Exception("닉네임은 필수입니다.");
 
-            await FireBaseAuthManager.Instance.RegisterAsync(name, email, pw, nick);
+            await FireBaseAuthManager.Instance.RegisterAsync(name, email, pw, nick, _pickedImageBytes, _pickedContentType, storageBucketUrl);
 
             inEmail.text = email;
         }
@@ -283,5 +305,57 @@ public class AuthUIController : MonoBehaviour
             ShowToast(e.Message);
         }
     }
+    #endregion
+
+    #region 회원 가입 프로필 이미지
+
+    public void OnClickPickSignUpPhoto()
+    {
+        try
+        {
+            var exts = new[]
+            {
+            new ExtensionFilter("Image Files", "png", "jpg", "jpeg"),
+        };
+
+            string startDir = string.IsNullOrWhiteSpace(defaultOpenFolder)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)
+                : defaultOpenFolder;
+
+            string[] paths = StandaloneFileBrowser.OpenFilePanel("프로필 이미지 선택", startDir, exts, false);
+            if (paths == null || paths.Length == 0) return;
+
+            string path = paths[0];
+            if (!File.Exists(path)) throw new Exception("파일이 존재하지 않습니다.");
+
+            long bytesLen = new FileInfo(path).Length;
+            long maxBytes = (long)maxUploadMB * 1024L * 1024L;
+            if (bytesLen > maxBytes) throw new Exception($"이미지 용량이 너무 큽니다. ({maxUploadMB}MB 이하)");
+
+            _pickedImageBytes = File.ReadAllBytes(path);
+
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            _pickedContentType = (ext == ".png") ? "image/png" : "image/jpeg";
+
+            ApplyPreview(_pickedImageBytes); // 미리보기
+        }
+        catch (Exception e)
+        {
+            ShowToast(e.Message);
+        }
+    }
+
+    void ApplyPreview(byte[] imageBytes)
+    {
+        if (_previewTex == null)
+            _previewTex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+
+        if (!_previewTex.LoadImage(imageBytes))
+            throw new Exception("이미지 로드 실패(지원되지 않는 파일일 수 있음).");
+
+        if (previewRawImage != null)
+            previewRawImage.texture = _previewTex;
+    }
+
     #endregion
 }

@@ -7,6 +7,7 @@ using UnityEngine.SceneManagement;
 using System.Collections;
 using Firebase.Database;
 using System.Collections.Generic;
+using Firebase.Storage;
 
 /// <summary>
 /// Firebase 이메일/비밀번호 회원가입 + 로그인 매니저
@@ -66,34 +67,33 @@ public class FireBaseAuthManager : MonoBehaviour
     /// 2) 닉네임 선점(중복 체크)
     /// 3) Account 생성 + DB 저장
     /// </summary>
-    public async Task RegisterAsync(string name,string email, string password, string nickName)
+    public async Task RegisterAsync(string name,string email, string password, string nickName, byte[] profileImageBytes, 
+    string profileContentType, string storageBucketUrl)
     {
         EnsureReady();
 
         // 0) 필수 처리(빈 값 방지)
         if (string.IsNullOrWhiteSpace(name))
-        {
-            ShowToast("이름은 필수입니다.");
-            throw new Exception("이름은 필수입니다.");
-        }
+            Fail("이름은 필수입니다.");
 
         if (string.IsNullOrWhiteSpace(nickName))
-        {
-            ShowToast("닉네임은 필수입니다.");
-            throw new Exception("닉네임은 필수입니다.");
-        }
+            Fail("닉네임은 필수입니다.");
 
         if (string.IsNullOrWhiteSpace(email))
-        {
-            ShowToast("이메일은 필수입니다.");
-            throw new Exception("이메일은 필수입니다.");
-        }
+            Fail("이메일은 필수입니다.");
 
         if (string.IsNullOrWhiteSpace(password))
-        {
-            ShowToast("비밀번호는 필수입니다.");
-            throw new Exception("비밀번호는 필수입니다.");
-        }
+            Fail("비밀번호는 필수입니다.");
+
+        //  프로필 이미지 필수
+        if (profileImageBytes == null || profileImageBytes.Length == 0)
+            Fail("프로필 이미지는 필수입니다.");
+
+        if (string.IsNullOrWhiteSpace(profileContentType))
+            Fail("프로필 이미지 타입이 없습니다.");
+
+        if (profileContentType != "image/png" && profileContentType != "image/jpeg")
+            Fail("프로필 이미지는 PNG 또는 JPG만 가능합니다.");
 
 
         FirebaseUser createdUser = null;
@@ -101,6 +101,7 @@ public class FireBaseAuthManager : MonoBehaviour
         bool nameClaimed = false;
 
         string stage = "시작";
+        string uploadedObjectPath = null; // users/{uid}/profile.png
 
         try
         {
@@ -119,9 +120,29 @@ public class FireBaseAuthManager : MonoBehaviour
             await NameService.ClaimAsync(createdUser.UserId, name);
             nameClaimed = true;
 
-            // 4) Account 저장
+            // 4) 프로필 이미지 업로드
+            stage = "프로필 이미지 업로드";
+
+            var storage = FirebaseStorage.DefaultInstance;
+
+            // 디버그로 현재 프로젝트 기본 버킷 확인
+            Debug.Log($"[Storage] Default bucket = {storage.App.Options.StorageBucket}");
+
+            
+            var rootRef = storage.RootReference;
+
+            string fileName = (profileContentType == "image/png") ? "profile.png" : "profile.jpg";
+            var fileRef = rootRef.Child("users").Child(createdUser.UserId).Child(fileName);
+
+            var metadata = new MetadataChange { ContentType = profileContentType };
+            await fileRef.PutBytesAsync(profileImageBytes, metadata);
+
+            var url = await fileRef.GetDownloadUrlAsync();
+            string photoUrl = url.ToString();
+
+            // 5) Account 저장
             stage = "계정 데이터 저장";
-            var acc = CreateDefaultAccount(createdUser, name, nickName);
+            var acc = CreateDefaultAccount(createdUser, name, nickName, photoUrl);
             await AccountCloudStore.SaveFullAsync(acc);
 
             var verify = await AccountCloudStore.LoadOrThrowAsync();
@@ -220,7 +241,7 @@ public class FireBaseAuthManager : MonoBehaviour
     /// 기본 Account 생성 함수
     /// - 여기서 게임 기본값(초기 돈/출석/인벤 등)을 설정
     /// </summary>
-    private Account CreateDefaultAccount(FirebaseUser user, string name, string nickName)
+    private Account CreateDefaultAccount(FirebaseUser user, string name, string nickName, string photoUrl)
     {
         // 시작 주사위 1개 지급
         var starterDice = new OwnedDice
@@ -237,6 +258,7 @@ public class FireBaseAuthManager : MonoBehaviour
             Name = name.Trim(),
             NickName = nickName.Trim(),
             Email = user.Email,
+            PhotoUrl = photoUrl,
 
             LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             LogoutDate = "",
@@ -289,6 +311,13 @@ public class FireBaseAuthManager : MonoBehaviour
 
         AuthUIController.instance.ShowToast(msg);
     }
+
+    void Fail(string msg)
+    {
+        ShowToast(msg);               //  여기서 토스트
+        throw new Exception(msg);     // 흐름 중단
+    }
+
 
     private string ExtractFriendlyError(Exception e)
     {
@@ -406,6 +435,21 @@ public class FireBaseAuthManager : MonoBehaviour
     private async Task DeleteAllUserDataAndAuthAsync(FirebaseUser user)
     {
         string uid = user.UserId;
+        // Storage 프로필 이미지 삭제(있으면)
+        try
+        {
+            var storage = FirebaseStorage.DefaultInstance;
+            var rootRef = storage.RootReference;
+
+            // 둘 다 시도 (없으면 예외 -> 무시)
+            try { await rootRef.Child("users").Child(uid).Child("profile.png").DeleteAsync(); } catch { }
+            try { await rootRef.Child("users").Child(uid).Child("profile.jpg").DeleteAsync(); } catch { }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[DeleteAccount] Storage delete failed: {e.Message}");
+            // 스토리지 삭제 실패해도 탈퇴 자체는 계속 진행할지 정책 선택
+        }
 
         // DB 삭제(닉네임 같이 쓰면 같이 제거)
         var root = FirebaseDatabase.DefaultInstance.RootReference;
