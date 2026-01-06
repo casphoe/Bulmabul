@@ -866,6 +866,7 @@ GameObject:
   - component: {fileID: 1207770328}
   - component: {fileID: 1207770329}
   - component: {fileID: 1207770330}
+  - component: {fileID: 1207770331}
   m_Layer: 0
   m_Name: LoginManager
   m_TagString: Untagged
@@ -950,6 +951,22 @@ MonoBehaviour:
   folderName: Csv
   csvFileName: BrumabulAccountLevelExp.csv
   autoLoadOnStart: 1
+--- !u!114 &1207770331
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1207770326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 65252a4e58562bd458fa6b1d0c161923, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mapSprite:
+  - {fileID: 21300000, guid: 2841627178ae5d44eb00aec961f28b27, type: 3}
+  - {fileID: 21300000, guid: dbe1a5dab6af52c4b8daff6493bd67f8, type: 3}
+  leaderSprite: {fileID: -1611400383, guid: a5e645d0b2507ac42807ef8e886f7d45, type: 3}
 --- !u!1 &1215501366
 GameObject:
   m_ObjectHideFlags: 0

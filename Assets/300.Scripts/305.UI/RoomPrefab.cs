@@ -18,7 +18,6 @@ public class RoomPrefab : InfiniteScrollItem
 
     public Text[] txtData;
     private int _sessionIndex = -1;
-    public Sprite[] mapSprites;
 
     public override void UpdateData(InfiniteScrollData scrollData)
     {
@@ -47,10 +46,9 @@ public class RoomPrefab : InfiniteScrollItem
             map = (int)pMap;
 
         map = Mathf.Clamp(map, 0, 1);
-        
+
         //이미지 세팅
-        if (mapImage != null && mapSprites != null && mapSprites.Length > map)
-            mapImage.sprite = mapSprites[map];
+        SpriteManager.instance.imageMapSpriteChange(mapImage, map);
 
         switch (LaguageManager.Instance.currentLang)
         {

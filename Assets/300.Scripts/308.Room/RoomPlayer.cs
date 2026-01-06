@@ -34,6 +34,8 @@ public class RoomPlayer : InfiniteScrollItem
     public Text txtReady;
     public Text txtMe;
 
+    public RawImage profileImage;
+
     [Header("UI Icons (or GameObjects)")]
     public GameObject leaderIcon;   // 리더 이미지 오브젝트
 
@@ -93,30 +95,34 @@ public class RoomPlayer : InfiniteScrollItem
 
         if (txtMe != null) txtMe.text = d.isMe ? "ME" : "";
 
-        bool amLeader = (RoomState.instance != null &&
-                     RoomMembersState.Instance != null &&
-                     RoomState.instance.Leader != PlayerRef.None &&
-                     RoomMembersState.Instance.Runner.LocalPlayer == RoomState.instance.Leader);
+        bool amLeader = false;
+        var members = RoomMembersState.Instance;
+        if (members != null && members.Runner != null && members.Leader != PlayerRef.None)
+        {
+            amLeader = (members.Runner.LocalPlayer == members.Leader);
+        }
 
         bool canGive = amLeader && !d.isEmpty && !d.isMe && d.player != PlayerRef.None;
 
         bool canKick = amLeader && !d.isEmpty && !d.isMe && d.player != PlayerRef.None;
 
+        ApplyButtons(canGive, canKick);
+    }
+
+    private void ApplyButtons(bool canGive, bool canKick)
+    {
         if (btnMakeLeader != null)
         {
             btnMakeLeader.gameObject.SetActive(canGive);
             btnMakeLeader.onClick.RemoveAllListeners();
-
-            if (canGive)
-                btnMakeLeader.onClick.AddListener(OnClickMakeLeader);
+            if (canGive) btnMakeLeader.onClick.AddListener(OnClickMakeLeader);
         }
 
         if (btnKick != null)
         {
             btnKick.gameObject.SetActive(canKick);
             btnKick.onClick.RemoveAllListeners();
-            if (canKick)
-                btnKick.onClick.AddListener(OnClickKick);
+            if (canKick) btnKick.onClick.AddListener(OnClickKick);
         }
     }
 
@@ -128,21 +134,17 @@ public class RoomPlayer : InfiniteScrollItem
 
     private void OnClickMakeLeader()
     {
-        var roomState = RoomState.instance;
         var members = RoomMembersState.Instance;
-        if (roomState == null || members == null) return;
+        if (members == null) return;
 
-        var me = members.Runner.LocalPlayer;
-        roomState.RPC_RequestTransferLeader(me, d.player);
+        members.RPC_RequestTransferLeader(d.player);
     }
 
     private void OnClickKick()
     {
-        var roomState = RoomState.instance;
         var members = RoomMembersState.Instance;
-        if (roomState == null || members == null) return;
+        if (members == null) return;
 
-        var me = members.Runner.LocalPlayer;
-        roomState.RPC_RequestKick(me, d.player);
+        members.RPC_RequestKick(d.player);
     }
 }

@@ -56,9 +56,6 @@ public class LobbyUIManager : MonoBehaviour
     int mapSelect = 0;
     [Header("게임 맵 이미지")]
     [SerializeField] Image mapImage;
-
-    [Header("맵 선택 스프라이트 들")]
-    public Sprite[] mapSprites;
     #endregion
 
     #region 방을 보여주는 곳
@@ -502,8 +499,7 @@ public class LobbyUIManager : MonoBehaviour
         mapSelect = num;
 
         // 미리보기 갱신
-        if (mapImage != null && mapSprites != null && mapSprites.Length > mapSelect)
-            mapImage.sprite = mapSprites[mapSelect];
+        SpriteManager.instance.imageMapSpriteChange(mapImage, mapSelect);
 
         UpdateMapButtonsInteractable();
     }
@@ -512,8 +508,7 @@ public class LobbyUIManager : MonoBehaviour
     {
         mapSelect = 0;
 
-        if (mapImage != null && mapSprites != null && mapSprites.Length > 0)
-            mapImage.sprite = mapSprites[0];
+        SpriteManager.instance.imageMapSpriteChange(mapImage, mapSelect);
 
         UpdateMapButtonsInteractable();
     }

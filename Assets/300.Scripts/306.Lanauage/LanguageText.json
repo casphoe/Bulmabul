@@ -203,6 +203,26 @@
     {
       "key": "txt.proflieChange",
       "text": "프로필 변경"
+    },
+    {
+      "key": "shop.title",
+      "text": "상점"
+    },
+    {
+      "key": "txt.Leader",
+      "text": "리더 만들기"
+    },
+    {
+      "key": "txt.Banish",
+      "text": "추방하기"
+    },
+    {
+      "key": "txt.Leave",
+      "text": "나가기"
+    },
+    {
+      "key": "txt.Start",
+      "text": "시작"
     }
   ],
   "eng": [
@@ -409,6 +429,26 @@
     {
       "key": "txt.proflieChange",
       "text": "Proflie Change"
+    },
+    {
+      "key": "shop.title",
+      "text": "Shop"
+    },
+    {
+      "key": "txt.Leader",
+      "text": "Make Leader"
+    },
+    {
+      "key": "txt.Banish",
+      "text": "Banish"
+    },
+    {
+      "key": "txt.Leave",
+      "text": "Leave"
+    },
+    {
+      "key": "txt.Start",
+      "text": "Start"
     }
   ]
 }

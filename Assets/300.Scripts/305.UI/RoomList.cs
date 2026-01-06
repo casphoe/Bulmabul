@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Gpm.Ui;
@@ -19,7 +19,7 @@ public class RoomList : MonoBehaviour
         {
             var d = (RoomPrefabData)data;
             if (NetWorkLauncher.instance != null)
-                NetWorkLauncher.instance.selectindex = d.index; // CachedSessions ÀÎµ¦½º
+                NetWorkLauncher.instance.selectindex = d.index; // CachedSessions ì¸ë±ìŠ¤
         });
     }
 
@@ -34,15 +34,15 @@ public class RoomList : MonoBehaviour
         var launcher = NetWorkLauncher.instance;
         if (launcher == null) return;
 
-        //  1) È­¸é¸¸ ½Ï ºñ¿ì±â
+        //  1) í™”ë©´ë§Œ ì‹¹ ë¹„ìš°ê¸°
         RoomListClear();
 
-        // 2) ¡°°Ë»ö/Á¤·Ä °á°ú¡± ¸®½ºÆ®·Î¸¸ ´Ù½Ã Ã¤¿ì±â
+        // 2) â€œê²€ìƒ‰/ì •ë ¬ ê²°ê³¼â€ ë¦¬ìŠ¤íŠ¸ë¡œë§Œ ë‹¤ì‹œ ì±„ìš°ê¸°
         var src = launcher.roomPrefabList;
 
         for (int i = 0; i < src.Count; i++)
         {
-            // src[i].index = CachedSessions ÀÎµ¦½º(ÁøÂ¥ Âü°¡ ÀÎµ¦½º)
+            // src[i].index = CachedSessions ì¸ë±ìŠ¤(ì§„ì§œ ì°¸ê°€ ì¸ë±ìŠ¤)
             var d = new RoomPrefabData
             {
                 index = src[i].index,

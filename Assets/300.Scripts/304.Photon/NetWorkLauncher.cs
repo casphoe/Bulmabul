@@ -77,6 +77,8 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     public IReadOnlyList<SessionInfo> CachedSessions => _cachedSessions;
     public int RoomCount => _cachedSessions.Count;
 
+    public NetworkRunner Runner => _runner;
+
     /// <summary>
     /// 방 리스트가 갱신되면 UI가 다시 로드할 수 있도록 이벤트 발생
     /// LobbyUIManager.OnEnable에서 구독해서 roomLoad() 호출하는 구조
