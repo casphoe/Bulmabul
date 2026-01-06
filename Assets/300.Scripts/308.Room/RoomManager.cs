@@ -137,8 +137,14 @@ public class RoomManager : MonoBehaviour
     {
         RefreshRoomTitle();
         RefreshRoomSettingsUI();
+
+        SyncLocalReadyFromNetwork();
+
         RefreshPlayersUI();
         UpdateButtons();
+
+        if (!AmILeader())
+            UpdateReadyButtonText();
     }
 
     #region Leader helper
@@ -435,9 +441,6 @@ public class RoomManager : MonoBehaviour
         // 리더가 되면 로컬 ready 상태는 false로 리셋
         if (amLeader)
             _localReady = false;
-
-        if (!amLeader)
-            UpdateReadyButtonText();
     }
 
     private void BindMapButtons()
@@ -633,6 +636,27 @@ public class RoomManager : MonoBehaviour
             txt.text = (lang == Lauaguage.Kor) ? "준비 취소" : "CANCEL";
         else
             txt.text = (lang == Lauaguage.Kor) ? "준비" : "READY";
+    }
+
+    private void SyncLocalReadyFromNetwork()
+    {
+        var m = Members;
+        if (m == null || m.Runner == null) return;
+
+        var me = m.Runner.LocalPlayer;
+
+        int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
+        for (int i = 0; i < n; i++)
+        {
+            var s = m.Slots.Get(i);
+            if (s.occupied == 1 && s.player == me)
+            {
+                _localReady = s.ready;
+                return;
+            }
+        }
+
+        _localReady = false;
     }
     #endregion
 }
