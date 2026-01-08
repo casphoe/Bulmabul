@@ -4,7 +4,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using TMPro;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -29,6 +28,7 @@ public struct RoomMemberInfo
 {
     public PlayerRef player;
     public string nickname;
+    public string name;
     public int level;
     public bool isLeader;
     public bool isReady;
@@ -289,7 +289,7 @@ public class RoomManager : MonoBehaviour
         if (NetWorkLauncher.instance != null)
         {
             // 네 프로젝트에 Leave 함수가 있으면 여기서 호출
-            // await NetWorkLauncher.instance.LeaveRoomToLobby(1);
+            await NetWorkLauncher.instance.LeaveRoomToLobby(1);
             return;
         }
 
@@ -314,34 +314,21 @@ public class RoomManager : MonoBehaviour
         var me = m.Runner.LocalPlayer;
         var leader = m.Leader;
 
-        // 1) 데이터 생성 (빈 슬롯도 표시)
+        // 1) 데이터 생성 
         List<RoomMemberInfo> list = new List<RoomMemberInfo>(maxSlots);
         int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
 
         for (int i = 0; i < n; i++)
         {
             var s = m.Slots.Get(i);
-
-            if (s.occupied == 0)
-            {
-                list.Add(new RoomMemberInfo
-                {
-                    slotIndex = i,
-                    player = PlayerRef.None,
-                    nickname = "-",
-                    level = 0,
-                    isLeader = false,
-                    isReady = false,
-                    isMe = false
-                });
-                continue;
-            }
+            if (s.occupied == 0) continue; // 빈 슬롯은 표시 안 함
 
             list.Add(new RoomMemberInfo
             {
-                slotIndex = i,
+                slotIndex = i, // 필요하면 유지(슬롯 번호를 그대로 보여주고 싶을 때)
                 player = s.player,
                 nickname = s.nickname.ToString(),
+                name = s.name.ToString(),
                 level = s.level,
                 isLeader = (leader != PlayerRef.None && s.player == leader),
                 isReady = s.ready,
@@ -349,23 +336,40 @@ public class RoomManager : MonoBehaviour
             });
         }
 
-        // 2) InfiniteScroll 갱신
+        // 2) UI 정렬: 리더가 항상 0번째, 그 다음은 slotIndex(=들어온/배정 순서)
+        list.Sort((a, b) =>
+        {
+            // 리더 먼저(true가 앞으로 오게)
+            int leaderCmp = b.isLeader.CompareTo(a.isLeader);
+            if (leaderCmp != 0) return leaderCmp;
+
+            // 그 다음은 슬롯 인덱스 오름차순
+            return a.slotIndex.CompareTo(b.slotIndex);
+        });
+
+
+        // 3) InfiniteScroll 갱신
         RoomInfiniteScrollUtil.ClearAll(playerScroll);
 
         foreach (var mm in list)
         {
+            // slotIndex로 다시 Slots를 읽어서 photoUrl을 안전하게 가져옴
+            var s = m.Slots.Get(mm.slotIndex);
             var data = new RoomPlayerData
             {
                 slotIndex = mm.slotIndex,
-                isEmpty = (mm.player == PlayerRef.None || mm.nickname == "-"),
+                isEmpty = false,
                 player = mm.player,
                 nickname = mm.nickname,
+                name = mm.name,
                 level = mm.level,
                 isLeader = mm.isLeader,
                 isReady = mm.isReady,
-                isMe = mm.isMe
-            };
+                isMe = mm.isMe,
 
+                photoUrl = s.photoUrl.ToString()
+            };
+            //Debug.Log($"[RoomManager] slot={mm.slotIndex} player={mm.player.PlayerId} url='{s.photoUrl}'");
             RoomInfiniteScrollUtil.Insert(playerScroll, data);
         }
 
@@ -423,7 +427,7 @@ public class RoomManager : MonoBehaviour
             case "KOREA":
                 if (lang == Lauaguage.Kor) txtMapName.text = "한국 맵";
                 else txtMapName.text = "KOREA Map";
-                    break;
+                break;
             case "USA":
                 if (lang == Lauaguage.Kor) txtMapName.text = "미국 맵";
                 else txtMapName.text = "USA Map";
@@ -437,7 +441,7 @@ public class RoomManager : MonoBehaviour
 
         if (btnReady != null)
             btnReady.gameObject.SetActive(!amLeader);
-    
+
         // 리더가 되면 로컬 ready 상태는 false로 리셋
         if (amLeader)
             _localReady = false;

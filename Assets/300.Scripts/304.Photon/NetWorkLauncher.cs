@@ -5,7 +5,8 @@ using Fusion.Sockets;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Globalization;
-using System.Linq;
+using System.Collections;
+using System.Threading.Tasks;
 
 [Serializable]
 /// <summary>
@@ -37,7 +38,7 @@ public enum MatchMode
 /// 2) 하지만 "한 게임 실행(한 NetworkRunner)"은 동시에 하나의 방만 들어갈 수 있음.
 ///    -> 다른 방 만들기/참가하려면 기존 방에서 나가야 함(Shutdown/Reset).
 /// </summary>
-public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
+public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 {
     [Header("Room")]
     public string roomName = "BulmabulRoom";
@@ -68,6 +69,8 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     [SerializeField] public SessionLobby lobby = SessionLobby.ClientServer; // 보통 Shared 사용
 
     public List<RoomPrefabData> roomPrefabList = new List<RoomPrefabData>();
+
+    private bool _resetting;
 
     private bool _joinedLobby;
 
@@ -111,16 +114,27 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     /// </summary>
     private void CreateRunnerOnce()
     {
-        if (_runner != null) return;
+        // 파괴 중이면 아무 것도 하지 않음
+        if (!this || gameObject == null) return;
 
-        _runner = gameObject.AddComponent<NetworkRunner>();
+        // 이미 붙어있는 Runner가 있으면 그걸 잡아온다 (중복 AddComponent 방지)
+        if (_runner == null)
+            _runner = GetComponent<NetworkRunner>();
+
+        if (_runner == null)
+            _runner = gameObject.AddComponent<NetworkRunner>();
+
         _runner.ProvideInput = true;
 
-        // 콜백 등록(이거 안 하면 INetworkRunnerCallbacks 함수들이 안 불림)
+        // 콜백 중복 등록 방지 (Fusion 버전에 따라 RemoveCallbacks가 없을 수도 있음)
+        // 있으면 쓰고, 컴파일 에러 나면 이 줄만 지워도 됨
+        _runner.RemoveCallbacks(this);
         _runner.AddCallbacks(this);
 
-        // 씬 매니저도 1번만 생성해서 재사용(매번 AddComponent 하면 쌓임)
-        // 로비와 게임씬을 분리하기 위해서 사용
+        //  SceneManager도 마찬가지로 재사용
+        if (_sceneManager == null)
+            _sceneManager = GetComponent<NetworkSceneManagerDefault>();
+
         if (_sceneManager == null)
             _sceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>();
     }
@@ -133,22 +147,32 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     /// </summary>
     private async void ResetRunner()
     {
-        if (_runner == null) return;
+        if (_resetting) return;
+        _resetting = true;
 
-        // 방에 들어가 있었다면 정상 종료
-        if (_runner.IsRunning)
+        try
         {
-            await _runner.Shutdown(destroyGameObject: false);
+            if (_runner != null && _runner.IsRunning)
+                await _runner.Shutdown(destroyGameObject: false);
+
+            if (_runner != null)
+                Destroy(_runner);
+
+            _runner = null;
+
+            // 오브젝트가 파괴 중이면 더 진행하지 않기
+            if (this == null) return;
+
+            CreateRunnerOnce();
+
+            _starting = false;
+            playerCount = 0;
+            _joinedLobby = false;
         }
-
-        // Runner 컴포넌트 제거 후 새로 생성
-        Destroy(_runner);
-        _runner = null;
-
-        CreateRunnerOnce();
-
-        _starting = false;
-        playerCount = 0;
+        finally
+        {
+            _resetting = false;
+        }
     }
 
 
@@ -467,7 +491,7 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
                 _starting = false;
 
                 Debug.Log($"[Fusion] Host created. Room={roomName} Mode={mode} Max={maxPlayers}");
-                
+
                 //SceneManager.LoadScene(2);
                 return;
             }
@@ -624,7 +648,9 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
     public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason)
     {
         Debug.LogWarning($"[Fusion] Shutdown: {shutdownReason}");
-        ResetRunner();
+        _starting = false;
+        playerCount = 0;
+        _joinedLobby = false;
     }
 
     /// <summary>
@@ -747,5 +773,22 @@ public class NetWorkLauncher : MonoBehaviour , INetworkRunnerCallbacks
             });
         }
     }
+    #endregion
+
+    #region 방 나가기
+
+    public async Task LeaveRoomToLobby(int lobbySceneIndex)
+    {
+        try
+        {
+            if (Runner != null && Runner.IsRunning)
+                await Runner.Shutdown(destroyGameObject: false);
+        }
+        finally
+        {
+            SceneManager.LoadScene(lobbySceneIndex, LoadSceneMode.Single);
+        }
+    }
+
     #endregion
 }

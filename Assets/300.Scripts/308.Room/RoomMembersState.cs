@@ -1,4 +1,5 @@
 ﻿using Fusion;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -17,8 +18,16 @@ public class RoomMembersState : NetworkBehaviour
     {
         public PlayerRef player;
         public NetworkString<_16> nickname;
+
+        //  이름 추가 (한글 이름/실명 고려해서 32 추천)
+        public NetworkString<_32> name;
+
         public int level;
+        //준비 상태
         public NetworkBool ready;
+        //프로필 URL
+        public NetworkString<_256> photoUrl;
+
         public byte occupied; // 1=사용, 0=비어있음
     }
     // ===== 멤버 슬롯 =====
@@ -42,6 +51,8 @@ public class RoomMembersState : NetworkBehaviour
     private const int SOLO_MAX = 4;
     private const int TEAM_FIXED = 4;
 
+    private bool _profileSubmitted;
+
     public override void Spawned()
     {
         Instance = this;
@@ -60,22 +71,56 @@ public class RoomMembersState : NetworkBehaviour
                 ServerElectLeader();
         }
 
-        // 로컬 플레이어: Firebase에서 내 정보 가져와 서버에 제출
-        if (Runner.LocalPlayer != PlayerRef.None)
+        // 로컬 플레이어 프로필 제출 (Firebase 준비가 늦을 수 있어서 재시도 코루틴 포함)
+        TrySubmitLocalProfileOnce();
+        if (!_profileSubmitted)
+            StartCoroutine(CoWaitFirebaseThenSubmit());
+    }
+
+    private IEnumerator CoWaitFirebaseThenSubmit()
+    {
+        float timeout = 6f; // 너무 길게 기다릴 필요 없음(원하면 늘려)
+        float t = 0f;
+
+        while (!_profileSubmitted && t < timeout)
         {
-            string nick = $"Player_{Runner.LocalPlayer.PlayerId}";
-            int level = 1;
-
-            var fb = FireBaseAuthManager.Instance;
-            if (fb != null && fb.IsReady && fb.CurrentAccount != null)
-            {
-                nick = fb.CurrentAccount.NickName;
-                level = fb.CurrentAccount.AccountLevel;
-            }
-
-            RPC_SubmitProfile(Runner.LocalPlayer, nick, level);
+            TrySubmitLocalProfileOnce();
+            t += 0.2f;
+            yield return new WaitForSeconds(0.2f);
         }
     }
+
+    private void TrySubmitLocalProfileOnce()
+    {
+        if (_profileSubmitted) return;
+        if (Runner == null) return;
+        if (Runner.LocalPlayer == PlayerRef.None) return;
+
+        string nick = $"Player_{Runner.LocalPlayer.PlayerId}";
+        string name = "-";
+        int level = 1;
+        string photoUrl = "";
+
+        var fb = FireBaseAuthManager.Instance;
+        if (fb != null && fb.IsReady && fb.CurrentAccount != null)
+        {
+            nick = fb.CurrentAccount.NickName;
+            name = fb.CurrentAccount.Name;
+            level = fb.CurrentAccount.AccountLevel;
+
+            // Account에 PhotoUrl 있어야 함
+            photoUrl = (fb.CurrentAccount.PhotoUrl ?? "").Trim();
+        }
+        else
+        {
+            // Firebase 준비 안 됐으면 아직 제출하지 않음
+            return;
+        }
+
+        RPC_SubmitProfile(Runner.LocalPlayer, nick, name, level, photoUrl);
+        _profileSubmitted = true;
+    }
+
 
     private void ServerInitSettingsFromSessionProperties()
     {
@@ -107,13 +152,22 @@ public class RoomMembersState : NetworkBehaviour
 
     // ===== 프로필/레디 =====
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    public void RPC_SubmitProfile(PlayerRef who, string nick, int level, RpcInfo info = default)
+    public void RPC_SubmitProfile(PlayerRef who, string nick, string name, int level, string photoUrl, RpcInfo info = default)
     {
         if (!Object.HasStateAuthority) return;
 
         nick = (nick ?? "").Trim();
         if (nick.Length == 0) nick = $"Player_{who.PlayerId}";
         if (nick.Length > 16) nick = nick.Substring(0, 16);
+
+        name = (name ?? "").Trim();
+        if (name.Length == 0) name = "-";
+        if (name.Length > 32) name = name.Substring(0, 32);
+
+        photoUrl = (photoUrl ?? "").Trim();
+        // NetworkString<_256> 초과 방지(안전)
+        if (photoUrl.Length > 256) photoUrl = photoUrl.Substring(0, 256);
+
         level = Mathf.Clamp(level, 1, 999);
 
         int idx = EnsureSlot(who);
@@ -121,8 +175,12 @@ public class RoomMembersState : NetworkBehaviour
 
         var s = Slots.Get(idx);
         s.nickname = nick;
+        s.name = name;
         s.level = level;
+        s.photoUrl = photoUrl;
         Slots.Set(idx, s);
+
+        //Debug.Log($"[Slots] who={who.PlayerId} idx={idx} url='{photoUrl}'");
 
         // 리더가 아직 없으면 선출
         if (Leader == PlayerRef.None)
@@ -258,8 +316,10 @@ public class RoomMembersState : NetworkBehaviour
                 s.occupied = 1;
                 s.player = who;
                 s.nickname = default;
+                s.name = default;
                 s.level = 1;
                 s.ready = false;
+                s.photoUrl = default;
                 Slots.Set(i, s);
                 return i;
             }
@@ -278,8 +338,10 @@ public class RoomMembersState : NetworkBehaviour
             s.occupied = 0;
             s.player = default;
             s.nickname = default;
+            s.name = default;
             s.level = 1;
             s.ready = false;
+            s.photoUrl = default;
             Slots.Set(idx, s);
         }
 
@@ -311,12 +373,21 @@ public class RoomMembersState : NetworkBehaviour
         if (!Object.HasStateAuthority) return;
 
         var requester = info.Source;
-        if (requester != Leader) return; // ✅ 리더만
+        if (requester != Leader) return; // 리더만
 
         newTitle = (newTitle ?? "").Trim();
         if (newTitle.Length == 0) newTitle = "Room";
         if (newTitle.Length > 32) newTitle = newTitle.Substring(0, 32);
 
         RoomTitle = newTitle;
+    }
+
+    public override void Despawned(NetworkRunner runner, bool hasState)
+    {
+        if (Instance == this) Instance = null;
+    }
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 }
