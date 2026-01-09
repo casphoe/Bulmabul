@@ -66,13 +66,18 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
     #region 방 리스트
     [Header("Lobby(방 리스트)")]
-    [SerializeField] public SessionLobby lobby = SessionLobby.ClientServer; // 보통 Shared 사용
+    public SessionLobby lobby = SessionLobby.Shared; // 보통 Shared 사용
 
     public List<RoomPrefabData> roomPrefabList = new List<RoomPrefabData>();
 
     private bool _resetting;
 
     private bool _joinedLobby;
+
+    private bool _leavingByUser = false;   // 내가 나가기 눌러서 나가는 중인지
+    private bool _returningToLobby = false;
+    private Task _shutdownTask;
+    private bool _quitting;
 
     // 로비에서 받은 방(세션) 리스트를 여기 저장
     public List<SessionInfo> _cachedSessions = new List<SessionInfo>();
@@ -145,23 +150,44 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     ///         Runner가 붙은 게임오브젝트가 파괴될 수 있음.
     ///         우리는 런처 오브젝트를 유지해야 하니 destroyGameObject:false로 종료.
     /// </summary>
-    private async void ResetRunner()
+    /// 
+
+    private async void RequestResetRunner(string from)
+    {
+        if (_quitting) return;
+
+        try
+        {
+            // await 못 하는 콜백에서 ResetRunner를 안전하게 실행시키는 래퍼
+            // ResetRunner 내부에서 SafeShutdownRunnerAsync가 중복을 막아줌
+            await ResetRunner();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[Fusion] RequestResetRunner({from}) error: {e.Message}");
+        }
+    }
+
+    private async Task ResetRunner()
     {
         if (_resetting) return;
         _resetting = true;
 
         try
         {
-            if (_runner != null && _runner.IsRunning)
-                await _runner.Shutdown(destroyGameObject: false);
+            await SafeShutdownRunnerAsync("ResetRunner");
 
             if (_runner != null)
+            {
+                // 콜백 정리(있으면)
+                try { _runner.RemoveCallbacks(this); } catch { }
                 Destroy(_runner);
+            }
 
             _runner = null;
+            _shutdownTask = null;
 
-            // 오브젝트가 파괴 중이면 더 진행하지 않기
-            if (this == null) return;
+            if (this == null || _quitting) return;
 
             CreateRunnerOnce();
 
@@ -223,10 +249,20 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     /// <summary>
     /// 현재 방 나가기
     /// </summary>
-    public void OnClickLeaveRoom()
+    public async void OnClickLeaveRoom()
     {
-        ResetRunner();
-        Debug.Log("[Fusion] Left room (runner reset).");
+        if (_starting || _returningToLobby) return;
+
+        _leavingByUser = true;
+        try
+        {
+            await ResetRunner();
+            Debug.Log("[Fusion] Left room (runner reset).");
+        }
+        finally
+        {
+            _leavingByUser = false;
+        }
     }
 
     #endregion
@@ -465,7 +501,9 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         if (_runner.IsRunning)
         {
             Debug.LogWarning("[Fusion] Already in a room. Leaving current room then create new.");
-            ResetRunner();
+            await ResetRunner();
+            CreateRunnerOnce();
+            if (_runner == null) return;
         }
 
         string baseName = NormalizeRoomName(roomName);
@@ -515,7 +553,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         _starting = false;
         // 실패했으니 Runner를 리셋해 다시 시도 가능하게
-        ResetRunner();
+        await ResetRunner();
     }
 
     /// <summary>
@@ -558,7 +596,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
                              $"Reason={result.ShutdownReason} Msg={result.ErrorMessage}");
 
             // 참가 실패(GameNotFound 등) 시 다시 시도 가능하게 리셋
-            ResetRunner();
+            await ResetRunner();
         }
     }
 
@@ -637,12 +675,22 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         playerCount = count;
 
         Debug.Log($"[Fusion] Player Left: {player} / Count={playerCount}");
+
+        // 서버(Host)가 "실제 연결 끊김"을 받았을 때 무조건 슬롯 정리
+        if (runner.IsServer)
+        {
+            var members = RoomMembersState.Instance;
+            if (members != null)
+            {
+                members.Server_RemovePlayer(player);   // 내부에서 HasStateAuthority 체크
+            }
+        }
     }
 
     public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason)
     {
         Debug.LogWarning($"[Fusion] ConnectFailed: {reason} (방이 없거나 네트워크 문제일 수 있음)");
-        ResetRunner();
+        _ = ResetRunner();  
     }
 
     public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason)
@@ -651,6 +699,9 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         _starting = false;
         playerCount = 0;
         _joinedLobby = false;
+
+        if (_leavingByUser) return;          // 내가 나간거면 무시
+        ForceReturnToLobby();                // 강퇴/끊김이면 로비 복귀
     }
 
     /// <summary>
@@ -687,7 +738,17 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
     public void OnConnectedToServer(NetworkRunner runner) { }
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
-    public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason) { }
+    public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
+    {
+        Debug.LogWarning($"[Fusion] DisconnectedFromServer: {reason}");
+
+        // 내가 누른 나가기면 이미 LeaveRoomToLobby가 처리함
+        if (_leavingByUser) return;
+
+        // 강퇴 포함: 연결 끊긴 클라는 로비로 보내기
+        ForceReturnToLobby();
+    }
+
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnSceneLoadStart(NetworkRunner runner)
@@ -779,16 +840,118 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
     public async Task LeaveRoomToLobby(int lobbySceneIndex)
     {
+        _leavingByUser = true; // 내가 눌러서 나가는 중
+
         try
         {
-            if (Runner != null && Runner.IsRunning)
-                await Runner.Shutdown(destroyGameObject: false);
+            await SafeShutdownRunnerAsync("LeaveRoomToLobby");
         }
         finally
         {
+            ClearLocalRoomView();
             SceneManager.LoadScene(lobbySceneIndex, LoadSceneMode.Single);
+            _leavingByUser = false; // 복귀 완료 후 해제
         }
     }
 
+    private void ClearLocalRoomView()
+    {
+        roomName = "BulmabulRoom";
+        maxPlayers = 4;
+        playerCount = 0;
+        currentMode = MatchMode.Solo;
+        selectindex = -1;
+        selectedMap = 0;
+    }
+
+    private async void ForceReturnToLobby()
+    {
+        if (_returningToLobby) return;
+        _returningToLobby = true;
+
+        try
+        {
+            await SafeShutdownRunnerAsync("ForceReturnToLobby");
+        }
+        finally
+        {
+            ClearLocalRoomView();
+
+            // 로비로 이동만 하고, 로비 씬에서 JoinLobbyIfNeeded() 다시 호출하는 구조가 가장 안전함
+            SceneManager.LoadScene(1, LoadSceneMode.Single);
+
+            _returningToLobby = false;
+        }
+    }
+
+    private async Task SafeShutdownRunnerAsync(string from)
+    {
+        if (_quitting) return;
+
+        if (_runner == null) return;
+        if (!_runner.IsRunning) return;
+
+        // 이미 Shutdown 진행 중이면 그거 기다리기
+        if (_shutdownTask != null && !_shutdownTask.IsCompleted)
+        {
+            try { await _shutdownTask; } catch { }
+            return;
+        }
+
+        try
+        {
+            _shutdownTask = _runner.Shutdown(destroyGameObject: false);
+            await _shutdownTask;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[Fusion] SafeShutdownRunnerAsync({from}) error: {e.Message}");
+        }
+    }
+
+    public void ReturnToLobbyFromKicked()
+    {
+        if (_returningToLobby || _quitting) return;
+        ForceReturnToLobby();
+    }
+
+    public void OnKickedByServer()
+    {
+        if (_returningToLobby) return;
+
+        // 강퇴는 '내가 나가기 누른 것'이 아니니까 _leavingByUser는 건드리지 않는 게 안전
+        ForceReturnToLobby();
+    }
+
+    public void HandleKicked()
+    {
+        if (_returningToLobby) return;
+        _ = HandleKickedAsync();
+    }
+
+    private async Task HandleKickedAsync()
+    {
+        _returningToLobby = true;
+
+        // OnShutdown에서 또 ForceReturnToLobby 타지 않게 막기
+        _leavingByUser = true;
+
+        try
+        {
+            await SafeShutdownRunnerAsync("Kicked");
+        }
+        finally
+        {
+            ClearLocalRoomView();
+            SceneManager.LoadScene(1, LoadSceneMode.Single); // 네 로비 인덱스
+            _leavingByUser = false;
+            _returningToLobby = false;
+        }
+    }
     #endregion
+
+    private void OnApplicationQuit()
+    {
+        _quitting = true;
+    }
 }

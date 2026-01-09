@@ -2088,7 +2088,7 @@ MonoBehaviour:
   gameScene:
     RawValue: 3
   lobbySceneName: LobbyScene
-  lobby: 1
+  lobby: 2
   selectedMap: 0
   _roomSearchKeyword: 
 --- !u!1 &432764525

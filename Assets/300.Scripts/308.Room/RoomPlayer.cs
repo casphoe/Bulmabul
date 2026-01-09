@@ -135,7 +135,7 @@ public class RoomPlayer : InfiniteScrollItem
     public Text txtNick;
     public Text txtLevel;
     public Text txtName;
-    public Text txtMe;
+    public Text txtReady;
 
     [Header("기본 프로필(인스펙터에 넣는 기본값)")]
     [SerializeField] private Texture _defaultSeed;   //  인스펙터용 기본 이미지
@@ -172,7 +172,7 @@ public class RoomPlayer : InfiniteScrollItem
             if (txtNick != null) txtNick.text = "-";
             if (txtLevel != null) txtLevel.text = "";
             if (txtName != null) txtName.text = "";
-            if (txtMe != null) txtMe.text = "";
+            if (txtReady != null) txtReady.text = "";
             SetActiveSafe(leaderIcon, false);
             defaultProfileTexture = _defaultSeed;          //  빈 슬롯은 기본값으로
             if (profileImage != null) profileImage.texture = _defaultSeed; // or null
@@ -201,8 +201,6 @@ public class RoomPlayer : InfiniteScrollItem
             else txtName.text = $"Name : {d.name}";
         }
 
-        if (txtMe != null) txtMe.text = d.isMe ? "ME" : "";
-
         ApplyProfileImage(d.photoUrl);
 
 
@@ -217,7 +215,11 @@ public class RoomPlayer : InfiniteScrollItem
 
         bool canKick = amLeader && !d.isEmpty && !d.isMe && d.player != PlayerRef.None;
 
+        bool showReady = !d.isEmpty && d.player != PlayerRef.None && !d.isLeader;
+
         ApplyButtons(canGive, canKick);
+
+        ApplyTxtReady(showReady, lang);
     }
 
     private void ApplyProfileImage(string url)
@@ -280,14 +282,51 @@ public class RoomPlayer : InfiniteScrollItem
         {
             btnMakeLeader.gameObject.SetActive(canGive);
             btnMakeLeader.onClick.RemoveAllListeners();
-            if (canGive) btnMakeLeader.onClick.AddListener(OnClickMakeLeader);
+            if (canGive)
+            {
+                var target = d.player;
+                btnMakeLeader.onClick.AddListener(() => RequestMakeLeader(target));
+            }
         }
 
         if (btnKick != null)
         {
             btnKick.gameObject.SetActive(canKick);
             btnKick.onClick.RemoveAllListeners();
-            if (canKick) btnKick.onClick.AddListener(OnClickKick);
+            if (canKick)
+            {
+                var target = d.player;
+                btnKick.onClick.AddListener(() => RequestKick(target));
+            }
+        }
+    }
+
+    private void ApplyTxtReady(bool canReady, Lauaguage lang)
+    {
+        if(txtReady != null)
+        {
+            txtReady.gameObject.SetActive(canReady);
+
+            Debug.Log(d.isReady);
+
+            if (lang == Lauaguage.Kor)
+            {
+                if (d.isReady)
+                {
+                    txtReady.text = "준비";
+                }
+                else
+                    txtReady.text = "";
+            }
+            else
+            {
+                if (d.isReady)
+                {
+                    txtReady.text = "Ready";
+                }
+                else
+                    txtReady.text = "";
+            }
         }
     }
 
@@ -297,19 +336,17 @@ public class RoomPlayer : InfiniteScrollItem
             go.SetActive(on);
     }
 
-    private void OnClickMakeLeader()
+    private void RequestMakeLeader(PlayerRef target)
     {
         var members = RoomMembersState.Instance;
         if (members == null) return;
-
-        members.RPC_RequestTransferLeader(d.player);
+        members.RPC_RequestTransferLeader(target);
     }
 
-    private void OnClickKick()
+    private void RequestKick(PlayerRef target)
     {
         var members = RoomMembersState.Instance;
         if (members == null) return;
-
-        members.RPC_RequestKick(d.player);
+        members.RPC_RequestKick(target);
     }
 }

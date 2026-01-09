@@ -66,7 +66,8 @@ public class RoomManager : MonoBehaviour
     [SerializeField] int maxSlots = 4;
 
     private bool _localReady;
-    private float _nextRefresh;
+    private int _lastRevision = -1;
+    private float _nextLightTick = 0f;
 
     // settings cache
     private MatchMode _mode = MatchMode.Solo;
@@ -116,31 +117,45 @@ public class RoomManager : MonoBehaviour
         }
 
         // --- 맵 버튼 ---
-        BindMapButtons();
-
-
-        // 첫 갱신
-        RefreshAllUI();
+        BindMapButtons();    
     }
 
     private void Update()
     {
         // 방 상태 변화(입장/퇴장/레디/리더) 반영용 - 가벼운 폴링
-        if (Time.time >= _nextRefresh)
+        var m = Members;
+        if (m == null || m.Runner == null) return;
+
+        // 네트워크 상태가 바뀐 경우(Revision 변경)만 "무거운 갱신"
+        if (m.Revision != _lastRevision)
         {
-            _nextRefresh = Time.time + 0.2f;
-            RefreshAllUI();
+            _lastRevision = m.Revision;
+            RefreshAllUI_Heavy();
+            return;
+        }
+
+        // 가벼운 갱신은 짧은 주기(0.1초 정도)로만
+        if (Time.time >= _nextLightTick)
+        {
+            _nextLightTick = Time.time + 0.1f;
+            RefreshUI_Light();
         }
     }
 
-    private void RefreshAllUI()
+    private void RefreshAllUI_Heavy()
     {
+        // 상태가 바뀌면 한 번만:
         RefreshRoomTitle();
         RefreshRoomSettingsUI();
-
-        SyncLocalReadyFromNetwork();
-
         RefreshPlayersUI();
+
+        // 버튼/텍스트는 마지막에 가볍게 정리
+        RefreshUI_Light();
+    }
+
+    private void RefreshUI_Light()
+    {
+        SyncLocalReadyFromNetwork();
         UpdateButtons();
 
         if (!AmILeader())
@@ -225,7 +240,10 @@ public class RoomManager : MonoBehaviour
         bool amLeader = AmILeader();
 
         if (btnGameStart != null)
-            btnGameStart.interactable = amLeader;
+        {
+            //  리더 + (리더 제외 전원 ready) 조건일 때만 true
+            btnGameStart.interactable = CanLeaderStartGame();
+        }
 
         ApplySettingsInteractable(amLeader);
         UpdateMapButtonsInteractable(_map, amLeader);
@@ -262,6 +280,9 @@ public class RoomManager : MonoBehaviour
         // 리더만 시작 가능
         if (!AmILeader()) return;
 
+        // 버튼이 true일 때만 시작
+        if (!CanLeaderStartGame()) return;
+
         // 전원 Ready 검사(occupied만)
         int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
         for (int i = 0; i < n; i++)
@@ -284,6 +305,8 @@ public class RoomManager : MonoBehaviour
 
         // 서버에게 나가기 요청(슬롯 정리 + 리더 재선출)
         m.RPC_RequestLeave(me);
+
+        await Task.Yield();
 
         // 런처가 있다면 런처가 Shutdown/씬이동 담당하는게 더 좋음
         if (NetWorkLauncher.instance != null)
@@ -351,10 +374,11 @@ public class RoomManager : MonoBehaviour
         // 3) InfiniteScroll 갱신
         RoomInfiniteScrollUtil.ClearAll(playerScroll);
 
-        foreach (var mm in list)
+        for (int i = 0; i < list.Count; i++)
         {
-            // slotIndex로 다시 Slots를 읽어서 photoUrl을 안전하게 가져옴
+            var mm = list[i];
             var s = m.Slots.Get(mm.slotIndex);
+
             var data = new RoomPlayerData
             {
                 slotIndex = mm.slotIndex,
@@ -366,11 +390,11 @@ public class RoomManager : MonoBehaviour
                 isLeader = mm.isLeader,
                 isReady = mm.isReady,
                 isMe = mm.isMe,
-
                 photoUrl = s.photoUrl.ToString()
             };
-            //Debug.Log($"[RoomManager] slot={mm.slotIndex} player={mm.player.PlayerId} url='{s.photoUrl}'");
-            RoomInfiniteScrollUtil.Insert(playerScroll, data);
+
+            // i번째에 넣기(정렬 순서 유지)
+            RoomInfiniteScrollUtil.Insert(playerScroll, data, i);
         }
 
         RoomInfiniteScrollUtil.UpdateAll(playerScroll);
@@ -661,6 +685,40 @@ public class RoomManager : MonoBehaviour
         }
 
         _localReady = false;
+    }
+
+    private bool CanLeaderStartGame()
+    {
+        var m = Members;
+        if (m == null || m.Runner == null) return false;
+
+        // 리더만 시작 가능
+        if (!AmILeader()) return false;
+
+        var leader = m.Leader;
+        if (leader == PlayerRef.None) return false;
+
+        int nonLeaderCount = 0;
+
+        int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
+        for (int i = 0; i < n; i++)
+        {
+            var s = m.Slots.Get(i);
+            if (s.occupied == 0) continue;
+
+            // 리더는 Ready 검사 제외
+            if (s.player == leader) continue;
+
+            nonLeaderCount++;
+
+            // 리더 제외 인원 중 한명이라도 ready=false면 시작 불가
+            if (!s.ready) return false;
+        }
+
+        // (선택) 리더 혼자면 시작 불가
+        if (nonLeaderCount == 0) return false;
+
+        return true;
     }
     #endregion
 }
