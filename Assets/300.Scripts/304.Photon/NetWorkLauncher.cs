@@ -83,9 +83,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     public List<SessionInfo> _cachedSessions = new List<SessionInfo>();
 
     public IReadOnlyList<SessionInfo> CachedSessions => _cachedSessions;
-    public int RoomCount => _cachedSessions.Count;
-
-    public NetworkRunner Runner => _runner;
 
     /// <summary>
     /// 방 리스트가 갱신되면 UI가 다시 로드할 수 있도록 이벤트 발생
@@ -113,9 +110,49 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         CreateRunnerOnce();
     }
 
+    #region Runner Lifecycle (생성/콜백등록/리셋/재생성)
+
+    /*
+──────────────────────────────────────────────────────────────────────────────
+[Runner Lifecycle 설계 의도]
+- Fusion 2에서는 StartGame에 사용된 NetworkRunner를 Shutdown 후 재사용하면
+  "[Fusion] Failed: NetworkRunner should not be reused."가 발생할 수 있다.
+- 따라서 "강퇴/끊김/나가기/재접속" 흐름에서는
+  1) 안전 종료(Shutdown)
+  2) 컴포넌트 폐기(DestroyRunnerComponents)
+  3) 다음 참가를 위한 새 Runner 생성(EnsureRunner)
+  이 3단계를 명확히 분리해야 한다.
+
+[역할 분리]
+- CreateRunnerOnce():
+  런처(Awake 등)에서 "처음" Runner/SceneManager를 안정적으로 보장하는 초기화.
+  (가능하면 1회만 호출, 중복 AddComponent/콜백 중복을 막는 용도)
+
+- ResetRunner():
+  방을 나가거나 강퇴/끊김/실패 시 "Runner 재사용 금지" 문제를 해결하기 위해
+  Shutdown + Dispose(= Destroy)까지 진행하고, 새 Runner를 준비하는 리셋 함수.
+
+- EnsureRunner():
+  ResetRunner로 Runner가 사라진 상태에서 "다음 JoinLobby / StartGame"을 할 수 있게
+  Runner를 다시 붙이고(없으면 생성), 콜백/SceneManager까지 보장하는 함수.
+──────────────────────────────────────────────────────────────────────────────
+*/
+
     /// <summary>
-    /// Runner는 "반드시 한 번만" 만들기.
-    /// - 중복 AddComponent 하면 이상 증상(콜백 2번, 세션 꼬임) 생김
+    ///  Runner는 "반드시 한 번만" 만들기 (초기화/보장용)
+    ///
+    /// 목적:
+    /// - DontDestroyOnLoad 런처 오브젝트에 NetworkRunner를 1개만 붙여서 유지.
+    /// - 중복 AddComponent 방지 → 콜백 2번 호출 / 세션 꼬임 / 상태 불일치 방지.
+    ///
+    /// 언제 사용?
+    /// - 보통 Awake()에서 1회 호출.
+    /// - 혹시 런처 재생성/재진입 구조가 있더라도, "이미 있으면 재사용"이라 안전.
+    ///
+    /// 주의:
+    /// - 이 함수는 "Runner를 유지하면서 쓰는" 초기화 성격.
+    /// - 하지만 "강퇴 후 재참가" 같은 케이스에서는 Runner 재사용 금지 문제 때문에
+    ///   ResetRunner()로 완전 폐기 후 EnsureRunner()로 새 Runner를 만들어야 한다.
     /// </summary>
     private void CreateRunnerOnce()
     {
@@ -133,7 +170,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         // 콜백 중복 등록 방지 (Fusion 버전에 따라 RemoveCallbacks가 없을 수도 있음)
         // 있으면 쓰고, 컴파일 에러 나면 이 줄만 지워도 됨
-        _runner.RemoveCallbacks(this);
+        try { _runner.RemoveCallbacks(this); } catch { }
         _runner.AddCallbacks(this);
 
         //  SceneManager도 마찬가지로 재사용
@@ -144,13 +181,28 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
             _sceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>();
     }
 
-    /// <summary>
-    /// 현재 방에서 나가기(러너 리셋)
-    /// - 주의: NetworkRunner.Shutdown()의 destroyGameObject 기본값이 true면
-    ///         Runner가 붙은 게임오브젝트가 파괴될 수 있음.
-    ///         우리는 런처 오브젝트를 유지해야 하니 destroyGameObject:false로 종료.
+    // <summary>
+    ///  현재 방에서 나가기/강퇴/실패 후 재시도를 위해 Runner를 "완전 리셋"하는 함수.
+    ///
+    /// 핵심:
+    /// - Fusion 2는 Runner 재사용 금지 케이스가 많다.
+    /// - 그래서 단순 Shutdown만 하면 "재입장"에서 NetworkRunner should not be reused 에러가 난다.
+    /// - 이 함수는 "Shutdown → Destroy(폐기) → 새 Runner 준비"까지 끝낸다.
+    ///
+    /// 동작 단계:
+    /// 1) _resetting 플래그로 중복 호출 방지 (OnShutdown/OnDisconnected가 동시에 올 수 있음)
+    /// 2) ShutdownAndDisposeRunnerAsync:
+    ///    - 러너 실행 중이면 Shutdown(destroyGameObject:false)로 방에서 나감
+    ///    - 그 다음 Runner/SceneManager 컴포넌트를 Destroy해서 재사용 불가 상태 제거
+    ///    - Destroy는 end-of-frame 반영이므로 Task.Yield()로 1프레임 양보
+    /// 3) 로컬 상태값 초기화 (UI/로직 리셋)
+    /// 4) EnsureRunner로 새 Runner를 만들어 다음 JoinLobby/StartGame 준비
+    ///
+    /// 언제 호출?
+    /// - 나가기 버튼
+    /// - 강퇴 처리 후 로비 복귀 직전/직후
+    /// - StartGame 실패(GameNotFound 등) 후 재시도 가능하게 만들 때
     /// </summary>
-    /// 
 
     private async Task ResetRunner()
     {
@@ -159,25 +211,54 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         try
         {
-            await SafeShutdownRunnerAsync("ResetRunner");
+            await ShutdownAndDisposeRunnerAsync("ResetRunner");
 
             _starting = false;
             playerCount = 0;
             _joinedLobby = false;
-
-            // 로컬 표시값/캐시 초기화(원하는 것만)
             selectindex = -1;
 
-            // 콜백은 1번만 붙어있게 보장(혹시 중복이면 제거 후 다시)
-            try { _runner.RemoveCallbacks(this); } catch { }
-            _runner.AddCallbacks(this);
+            // 다음 로비/참가 때는 새 Runner 만들도록
+            EnsureRunner();
+            _joinedLobby = false;
         }
         finally
         {
             _resetting = false;
         }
     }
+    /// <summary>
+    ///  "Runner가 없으면 생성하고, 있으면 설정을 보장"하는 확보 함수.
+    ///
+    /// CreateRunnerOnce()와 차이:
+    /// - CreateRunnerOnce(): 런처 초기화용(중복 AddComponent 방지 중심)
+    /// - EnsureRunner(): ResetRunner로 Runner를 Destroy한 이후 "다음 실행을 위한 재생성" 중심
+    ///
+    /// 하는 일:
+    /// - _runner가 null이면 AddComponent로 새로 붙임
+    /// - ProvideInput, 콜백 등록을 항상 보장(중복 방지 포함)
+    /// - _sceneManager도 없으면 생성
+    ///
+    /// 언제 호출?
+    /// - ResetRunner 끝난 직후
+    /// - 로비 씬으로 돌아왔는데 Runner가 사라졌을 수 있는 구조에서 안전장치로
+    /// </summary>
+    private void EnsureRunner()
+    {
+        if (!this || gameObject == null) return;
 
+        if (_runner == null)
+            _runner = gameObject.AddComponent<NetworkRunner>();
+
+        _runner.ProvideInput = true;
+
+        try { _runner.RemoveCallbacks(this); } catch { }
+        _runner.AddCallbacks(this);
+
+        if (_sceneManager == null)
+            _sceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>();
+    }
+    #endregion
 
     #region UI 버튼
     public void SetRoomName(string name)
@@ -294,7 +375,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     /// </summary>
     public async void JoinLobbyIfNeeded()
     {
-        CreateRunnerOnce();
+        EnsureRunner();
         if (_runner == null) return;
         if (_joinedLobby) return;
 
@@ -825,6 +906,9 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         finally
         {
             ClearLocalRoomView();
+
+            EnsureRunner();
+
             SceneManager.LoadScene(lobbySceneIndex, LoadSceneMode.Single);
             _leavingByUser = false; // 복귀 완료 후 해제
         }
@@ -847,15 +931,16 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         try
         {
-            await SafeShutdownRunnerAsync("ForceReturnToLobby");
+            await SafeShutdownRunnerAsync("ForceReturnToLobby"); // 이제 dispose 포함
         }
         finally
         {
             ClearLocalRoomView();
 
-            // 로비로 이동만 하고, 로비 씬에서 JoinLobbyIfNeeded() 다시 호출하는 구조가 가장 안전함
-            SceneManager.LoadScene(1, LoadSceneMode.Single);
+            // 다음 로비에서 JoinLobbyIfNeeded가 바로 돌아가게 Runner 준비
+            EnsureRunner();
 
+            SceneManager.LoadScene(1, LoadSceneMode.Single);
             _returningToLobby = false;
         }
     }
@@ -864,28 +949,11 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     {
         if (_quitting) return;
 
-        if (_runner == null) return;
-        if (!_runner.IsRunning) return;
+        // 핵심: Shutdown만 하지 말고 "Runner 폐기"까지 해버려야 재참가 가능
+        await ShutdownAndDisposeRunnerAsync(from);
 
-        // 이미 Shutdown 진행 중이면 그거 기다리기
-        if (_shutdownTask != null && !_shutdownTask.IsCompleted)
-        {
-            try { await _shutdownTask; } catch { }
-            return;
-        }
-
-        // 이미 안 돌고 있으면 종료할 것도 없음
-        if (!_runner.IsRunning) return;
-
-        try
-        {
-            _shutdownTask = _runner.Shutdown(destroyGameObject: false);
-            await _shutdownTask;
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[Fusion] SafeShutdownRunnerAsync({from}) error: {e.Message}");
-        }
+        // 로비는 다시 들어가야 하므로
+        _joinedLobby = false;
     }
 
     public void ReturnToLobbyFromKicked()
@@ -927,6 +995,58 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
             _returningToLobby = false;
         }
     }
+    #endregion
+
+    #region 방 재참가 하기 위한 함수
+
+    private void DestroyRunnerComponents()
+    {
+        if (_runner != null)
+        {
+            try { _runner.RemoveCallbacks(this); } catch { }
+            Destroy(_runner);          // 컴포넌트 파괴 (End of frame)
+            _runner = null;
+        }
+
+        if (_sceneManager != null)
+        {
+            Destroy(_sceneManager);
+            _sceneManager = null;
+        }
+    }
+
+    // Shutdown + Dispose를 한 번에
+    private async Task ShutdownAndDisposeRunnerAsync(string from)
+    {
+        if (_quitting) return;
+        if (_runner == null) { DestroyRunnerComponents(); return; }
+
+        // 이미 Shutdown 진행 중이면 기다림
+        if (_shutdownTask != null && !_shutdownTask.IsCompleted)
+        {
+            try { await _shutdownTask; } catch { }
+        }
+
+        if (_runner != null && _runner.IsRunning)
+        {
+            try
+            {
+                _shutdownTask = _runner.Shutdown(destroyGameObject: false);
+                await _shutdownTask;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Fusion] ShutdownAndDisposeRunnerAsync({from}) error: {e.Message}");
+            }
+        }
+
+        // 핵심: Shutdown 끝났으면 Runner는 폐기
+        DestroyRunnerComponents();
+
+        // Destroy()가 프레임 끝에 반영되므로 1프레임 양보(중요)
+        await Task.Yield();
+    }
+
     #endregion
 
     private void OnApplicationQuit()

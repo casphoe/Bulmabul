@@ -406,6 +406,10 @@ public class RoomMembersState : NetworkBehaviour
         // 3) 킥 알림 RPC (이게 씬 이동을 “확실”하게 만든다)
         RPC_NotifyKicked(target, KickSignalNonce);
 
+        if (Runner != null && Runner.IsServer)
+        {
+            Runner.Disconnect(target);
+        }
 
         BumpRevision();
     }

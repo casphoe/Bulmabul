@@ -86,6 +86,9 @@ public class RoomManager : MonoBehaviour
     private float _readyPendingUntil = 0f;
     private const float READY_PENDING_TIMEOUT = 0.6f; // 0.4~0.8 사이 추천
 
+    private float _readyClickCooldownUntil = 0f;
+    private const float READY_CLICK_COOLDOWN = 0.12f; // 연타만 방지(취소는 가능)
+
     private void Start()
     {
         if (btnReady != null) btnReady.onClick.AddListener(OnClickReady);
@@ -120,6 +123,8 @@ public class RoomManager : MonoBehaviour
             inputRoomTitle.onEndEdit.RemoveListener(OnRoomTitleEndEdit);
             inputRoomTitle.onEndEdit.AddListener(OnRoomTitleEndEdit);
         }
+
+        UpdateReadyButtonText();
 
         // --- 맵 버튼 ---
         BindMapButtons();    
@@ -162,9 +167,6 @@ public class RoomManager : MonoBehaviour
     {
         SyncLocalReadyFromNetwork();
         UpdateButtons();
-
-        if (!AmILeader() && !_readyPending)
-            UpdateReadyButtonText();
     }
 
     #region Leader helper
@@ -270,20 +272,23 @@ public class RoomManager : MonoBehaviour
     {
         var m = Members;
         if (m == null || m.Runner == null) return;
+        if (AmILeader()) return; // 리더는 Ready 버튼 자체가 안 보이지만 안전장치
 
-        // pending 중 연타 방지
-        if (_readyPending) return;
+        if (Time.time < _readyClickCooldownUntil) return;
+        _readyClickCooldownUntil = Time.time + READY_CLICK_COOLDOWN;
 
-        _readyPendingValue = !_localReady;      // 내가 바꾸고 싶은 값
-        _localReady = _readyPendingValue;       // UI는 즉시 반영(깜빡임 방지)
+        //  지금 화면에 보이는 값 기준으로 토글
+        bool desired = !_localReady;
+
+        //  UI 즉시 반영(깜빡임 방지)
+        _localReady = desired;
+
+        //  pending 갱신(서버 값이 따라오면 확정)
         _readyPending = true;
+        _readyPendingValue = desired;
         _readyPendingUntil = Time.time + READY_PENDING_TIMEOUT;
 
-        // 버튼 잠깐 잠그기(UX)
-        if (btnReady != null) btnReady.interactable = false;
-
-        m.RPC_SetReady(m.Runner.LocalPlayer, _readyPendingValue);
-
+        m.RPC_SetReady(m.Runner.LocalPlayer, desired);
         UpdateReadyButtonText();
     }
 
@@ -686,10 +691,18 @@ public class RoomManager : MonoBehaviour
         var m = Members;
         if (m == null || m.Runner == null) return;
 
+        // 리더면 ready 의미 없음
+        if (AmILeader())
+        {
+            _localReady = false;
+            _readyPending = false;
+            return;
+        }
+
         var me = m.Runner.LocalPlayer;
 
-        bool netReady = false;
         bool found = false;
+        bool netReady = false;
 
         int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
         for (int i = 0; i < n; i++)
@@ -697,48 +710,50 @@ public class RoomManager : MonoBehaviour
             var s = m.Slots.Get(i);
             if (s.occupied == 1 && s.player == me)
             {
-                _localReady = s.ready;
                 found = true;
-                return;
+                netReady = s.ready;
+                break;
             }
         }
 
+        // 내 슬롯 자체가 없으면(강퇴/나가기 등) pending 해제
         if (!found)
         {
             _localReady = false;
             _readyPending = false;
-            if (btnReady != null) btnReady.interactable = true;
             return;
         }
 
-        // pending 중이면: 네트워크가 따라오면 확정, 타임아웃이면 네트워크로 롤백
+        // pending 중이면: 서버 값이 따라오는 순간 확정
         if (_readyPending)
         {
             if (netReady == _readyPendingValue)
             {
-                // 확정
                 _readyPending = false;
                 _localReady = netReady;
-                if (btnReady != null) btnReady.interactable = true;
-                return;
-            }
-
-            if (Time.time > _readyPendingUntil)
-            {
-                // 타임아웃 -> 네트워크로 수용(롤백)
-                _readyPending = false;
-                _localReady = netReady;
-                if (btnReady != null) btnReady.interactable = true;
                 UpdateReadyButtonText();
                 return;
             }
 
-            // pending 유지 중: UI는 내가 누른 값 유지
+            // 타임아웃이면 서버값을 채택(롤백)
+            if (Time.time >= _readyPendingUntil)
+            {
+                _readyPending = false;
+                _localReady = netReady;
+                UpdateReadyButtonText();
+                return;
+            }
+
+            // 아직 서버 반영 전: UI는 내가 누른 값 유지
             return;
         }
 
-        // 일반 동기화
-        _localReady = netReady;
+        // 일반 동기화: 값이 바뀔 때만 갱신
+        if (_localReady != netReady)
+        {
+            _localReady = netReady;
+            UpdateReadyButtonText();
+        }
     }
 
     private bool CanLeaderStartGame()
