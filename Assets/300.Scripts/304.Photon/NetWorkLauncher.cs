@@ -961,40 +961,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         if (_returningToLobby || _quitting) return;
         ForceReturnToLobby();
     }
-
-    public void OnKickedByServer()
-    {
-        if (_returningToLobby) return;
-
-        // 강퇴는 '내가 나가기 누른 것'이 아니니까 _leavingByUser는 건드리지 않는 게 안전
-        ForceReturnToLobby();
-    }
-
-    public void HandleKicked()
-    {
-        if (_returningToLobby) return;
-        _ = HandleKickedAsync();
-    }
-
-    private async Task HandleKickedAsync()
-    {
-        _returningToLobby = true;
-
-        // OnShutdown에서 또 ForceReturnToLobby 타지 않게 막기
-        _leavingByUser = true;
-
-        try
-        {
-            await SafeShutdownRunnerAsync("Kicked");
-        }
-        finally
-        {
-            ClearLocalRoomView();
-            SceneManager.LoadScene(1, LoadSceneMode.Single); // 네 로비 인덱스
-            _leavingByUser = false;
-            _returningToLobby = false;
-        }
-    }
     #endregion
 
     #region 방 재참가 하기 위한 함수
