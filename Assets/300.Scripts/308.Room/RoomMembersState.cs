@@ -83,7 +83,12 @@ public class RoomMembersState : NetworkBehaviour
     [Networked] public int KickSignalNonce { get; set; } // 바뀜 감지용
 
     private int _lastKickNonce = -1;
+    private int _lastKickRpcNonce = -1;
     private bool _kickedHandling;
+
+    // KickSignal 못 받는 경우 대비(내 슬롯이 사라졌는데도 남아있으면 강퇴로 처리)
+    private float _orphanKickTimer = 0f;
+    private const float ORPHAN_KICK_TIMEOUT = 1.0f; // 1초 정도면 충분
 
     public MatchMode Mode => (MatchMode)ModeInt;
     public int Map => MapInt;
@@ -101,6 +106,11 @@ public class RoomMembersState : NetworkBehaviour
     public override void Spawned()
     {
         Instance = this;
+
+        _lastKickNonce = KickSignalNonce;
+        _orphanKickTimer = 0f;
+        _kickedHandling = false;
+        _profileSubmitted = false;
 
         if (_coWaitSubmit != null)
         {
@@ -360,8 +370,6 @@ public class RoomMembersState : NetworkBehaviour
 
         Leader = newLeader;
 
-        Runner.SetMasterClient(newLeader);
-
         BumpRevision();
     }
 
@@ -395,11 +403,35 @@ public class RoomMembersState : NetworkBehaviour
         KickSignalTarget = target;
         KickSignalNonce++;
 
-        // 3) 가능하면 서버에서 강제 Disconnect
-        if (Runner != null && Runner.IsServer)
-            Runner.Disconnect(target);
+        // 3) 킥 알림 RPC (이게 씬 이동을 “확실”하게 만든다)
+        RPC_NotifyKicked(target, KickSignalNonce);
+
 
         BumpRevision();
+    }
+
+    private void HandleKickedOnce()
+    {
+        if (_kickedHandling) return;
+        _kickedHandling = true;
+
+        NetWorkLauncher.instance?.ReturnToLobbyFromKicked();
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_NotifyKicked(PlayerRef target, int nonce, RpcInfo info = default)
+    {
+        // 중복 수신 방지(Shared에서 가끔 같은 프레임에 여러 번 들어오는 케이스 방어)
+        if (nonce == _lastKickRpcNonce) return;
+        _lastKickRpcNonce = nonce;
+
+        if (Runner == null) return;
+
+        if (Runner.LocalPlayer == target)
+        {
+            Debug.Log($"[Kick] I am kicked. target={target} nonce={nonce}");
+            HandleKickedOnce(); // 기존 함수 그대로 사용
+        }
     }
 
     // ===== 나가기 =====
@@ -527,42 +559,64 @@ public class RoomMembersState : NetworkBehaviour
 
     public override void FixedUpdateNetwork()
     {
-        // 0) (권한 상관없이) 킥 신호 감지 → 로컬이 나감
+        // ===== 0) (권한 상관없이) 킥 신호 감지 =====
         if (Runner != null && Runner.LocalPlayer != PlayerRef.None)
         {
-            // KickSignalNonce가 바뀌었고, 대상이 나면 처리
-            if (KickSignalNonce != _lastKickNonce && KickSignalTarget == Runner.LocalPlayer)
+            if (KickSignalNonce != _lastKickNonce)
             {
                 _lastKickNonce = KickSignalNonce;
 
-                if (!_kickedHandling)
+                if (KickSignalTarget == Runner.LocalPlayer)
                 {
-                    _kickedHandling = true;
+                    HandleKickedOnce();
+                    return;
+                }
+            }
 
-                    // 네가 가진 함수 중 하나로 통일해서 호출해
-                    // HandleKicked()든 ReturnToLobbyFromKicked()든 "1개만" 쓰는 게 안전함
-                    NetWorkLauncher.instance?.ReturnToLobbyFromKicked();
+            // 내 슬롯이 사라졌으면(=서버가 나를 제거했는데 신호 누락/타이밍 문제)
+            // 일정 시간 지나면 강퇴 처리
+            if (_profileSubmitted)
+            {
+                bool existsMe = false;
+                for (int i = 0; i < MaxSlots; i++)
+                {
+                    var s = Slots.Get(i);
+                    if (s.occupied == 1 && s.player == Runner.LocalPlayer) { existsMe = true; break; }
                 }
 
-                return; // 강퇴 대상이면 더 진행할 필요 없음
+                if (!existsMe)
+                {
+                    _orphanKickTimer += Runner.DeltaTime;
+                    if (_orphanKickTimer >= ORPHAN_KICK_TIMEOUT)
+                    {
+                        HandleKickedOnce();
+                        return;
+                    }
+                }
+                else
+                {
+                    _orphanKickTimer = 0f;
+                }
+            }
+            else
+            {
+                _orphanKickTimer = 0f;
             }
         }
 
-        // 1) 아래부터는 StateAuthority(Shared에서는 Master)가 정리/선출/청소 수행
+        // ===== 1) 아래부터는 StateAuthority(Shared에서는 Master)만 청소 =====
         if (!Object.HasStateAuthority) return;
         if (Runner == null) return;
 
         _cleanupTimer += Runner.DeltaTime;
-        if (_cleanupTimer < 1.0f) return;   // 1초에 한번만
+        if (_cleanupTimer < 1.0f) return;
         _cleanupTimer = 0f;
 
-        // 현재 살아있는 플레이어 목록
         var actives = new HashSet<PlayerRef>();
         foreach (var p in Runner.ActivePlayers) actives.Add(p);
 
         bool changed = false;
 
-        // 1) Slots에 남아있는 고아 제거
         for (int i = 0; i < MaxSlots; i++)
         {
             var s = Slots.Get(i);
@@ -570,7 +624,6 @@ public class RoomMembersState : NetworkBehaviour
 
             if (s.player == PlayerRef.None || !actives.Contains(s.player))
             {
-                // 연결이 끊긴 플레이어 슬롯 정리
                 s.occupied = 0;
                 s.player = default;
                 s.nickname = default;
@@ -583,8 +636,6 @@ public class RoomMembersState : NetworkBehaviour
             }
         }
 
-        // 2) Leader가 비었거나/나갔으면 "현재 StateAuthority(=새 마스터)"를 리더로 우선 지정
-        //    (이게 '방장 나가면 남은 사람 중 한 명이 방장'을 가장 안정적으로 만들어줌)
         if (Leader == PlayerRef.None || !actives.Contains(Leader))
         {
             var master = Object.StateAuthority;
@@ -599,13 +650,12 @@ public class RoomMembersState : NetworkBehaviour
             }
             else
             {
-                // master가 이상하면(거의 없지만) 슬롯 기준으로 선출
                 if (TryElectLeaderRandom(actives))
                     changed = true;
             }
         }
-        if (changed)
-            BumpRevision();
+
+        if (changed) BumpRevision();
     }
 
     //  서버에서만 Revision을 올리는 함수

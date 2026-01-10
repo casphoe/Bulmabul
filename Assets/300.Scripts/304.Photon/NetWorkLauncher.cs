@@ -161,23 +161,16 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         {
             await SafeShutdownRunnerAsync("ResetRunner");
 
-            if (_runner != null)
-            {
-                // 콜백 정리(있으면)
-                try { _runner.RemoveCallbacks(this); } catch { }
-                Destroy(_runner);
-            }
-
-            _runner = null;
-            _shutdownTask = null;
-
-            if (this == null || _quitting) return;
-
-            CreateRunnerOnce();
-
             _starting = false;
             playerCount = 0;
             _joinedLobby = false;
+
+            // 로컬 표시값/캐시 초기화(원하는 것만)
+            selectindex = -1;
+
+            // 콜백은 1번만 붙어있게 보장(혹시 중복이면 제거 후 다시)
+            try { _runner.RemoveCallbacks(this); } catch { }
+            _runner.AddCallbacks(this);
         }
         finally
         {
@@ -880,6 +873,9 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
             try { await _shutdownTask; } catch { }
             return;
         }
+
+        // 이미 안 돌고 있으면 종료할 것도 없음
+        if (!_runner.IsRunning) return;
 
         try
         {
