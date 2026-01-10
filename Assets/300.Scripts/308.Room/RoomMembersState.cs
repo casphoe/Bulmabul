@@ -471,7 +471,7 @@ public class RoomMembersState : NetworkBehaviour
         // 리더였으면 새 리더 선출
         if (Leader == who)
         {
-            ServerElectLeader(); // 여기서도 BumpRevision() 하게 만들면 중복 괜찮음
+            TryElectLeaderRandom();
             changed = true;
         }
 
@@ -600,8 +600,8 @@ public class RoomMembersState : NetworkBehaviour
             else
             {
                 // master가 이상하면(거의 없지만) 슬롯 기준으로 선출
-                ServerElectLeader(); // 내부에서 Revision 올리니까 changed 처리만 해도 됨
-                changed = true;
+                if (TryElectLeaderRandom(actives))
+                    changed = true;
             }
         }
         if (changed)
@@ -616,4 +616,39 @@ public class RoomMembersState : NetworkBehaviour
         if (!Object.HasStateAuthority) return;
         Revision++;
     }
+
+    #region 랜덤하게 리더 선출 
+
+    private bool TryElectLeaderRandom(HashSet<PlayerRef> actives = null)
+    {
+        if (!Object.HasStateAuthority) return false;
+
+        List<PlayerRef> candidates = new List<PlayerRef>(MaxSlots);
+
+        for (int i = 0; i < MaxSlots; i++)
+        {
+            var s = Slots.Get(i);
+            if (s.occupied == 0) continue;
+            if (s.player == PlayerRef.None) continue;
+
+            if (actives != null && !actives.Contains(s.player)) continue;
+            candidates.Add(s.player);
+        }
+
+        PlayerRef newLeader = (candidates.Count > 0)
+            ? candidates[UnityEngine.Random.Range(0, candidates.Count)]
+            : PlayerRef.None;
+
+        if (Leader == newLeader) return false;
+
+        Leader = newLeader;
+
+        // 리더 = 마스터로도 맞춰주고 싶으면(Shared에서 방장 개념 통일)
+        if (Runner != null && newLeader != PlayerRef.None)
+            Runner.SetMasterClient(newLeader);
+
+        return true;
+    }
+
+    #endregion
 }

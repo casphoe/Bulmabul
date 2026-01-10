@@ -152,22 +152,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     /// </summary>
     /// 
 
-    private async void RequestResetRunner(string from)
-    {
-        if (_quitting) return;
-
-        try
-        {
-            // await 못 하는 콜백에서 ResetRunner를 안전하게 실행시키는 래퍼
-            // ResetRunner 내부에서 SafeShutdownRunnerAsync가 중복을 막아줌
-            await ResetRunner();
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[Fusion] RequestResetRunner({from}) error: {e.Message}");
-        }
-    }
-
     private async Task ResetRunner()
     {
         if (_resetting) return;
@@ -243,7 +227,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     public void OnClickJoinRoom()
     {
         if (_starting) return;
-        StartGame(GameMode.Client, NormalizeRoomName(roomName), currentMode);
+        StartGame(GameMode.Shared, NormalizeRoomName(roomName), currentMode);
     }
 
     /// <summary>
@@ -349,7 +333,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         if (s.Properties != null && s.Properties.TryGetValue("mode", out var pm))
             mode = (MatchMode)(int)pm;
 
-        StartGame(GameMode.Client, sessionName, mode);
+        StartGame(GameMode.Shared, sessionName, mode);
     }
     #endregion
 
@@ -519,7 +503,8 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         for (int attempt = 1; attempt <= MAX_TRY; attempt++)
         {
-            var result = await StartGameInternal(GameMode.Host, tryName, mode, forcedMaxPlayers);
+            // Shared로 생성/참가 통일
+            var result = await StartGameInternal(GameMode.Shared, tryName, mode, forcedMaxPlayers);
 
             if (result.Ok)
             {
@@ -529,8 +514,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
                 _starting = false;
 
                 Debug.Log($"[Fusion] Host created. Room={roomName} Mode={mode} Max={maxPlayers}");
-
-                //SceneManager.LoadScene(2);
                 return;
             }
 
