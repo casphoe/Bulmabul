@@ -10,6 +10,7 @@ using UnityEngine;
 /// </summary>
 public class RoomMembersState : NetworkBehaviour
 {
+    #region 변수
     public static RoomMembersState Instance { get; private set; }
 
     public const int MaxSlots = 4;
@@ -102,6 +103,7 @@ public class RoomMembersState : NetworkBehaviour
     private float _cleanupTimer;
 
     private Coroutine _coWaitSubmit;
+    #endregion
 
     public override void Spawned()
     {
@@ -169,7 +171,7 @@ public class RoomMembersState : NetworkBehaviour
         if (!_profileSubmitted)
             _coWaitSubmit = StartCoroutine(CoWaitFirebaseThenSubmit());
     }
-
+    #region 프로필 이미지 적용
     private IEnumerator CoWaitFirebaseThenSubmit()
     {
         float timeout = 6f; // 너무 길게 기다릴 필요 없음(원하면 늘려)
@@ -214,7 +216,118 @@ public class RoomMembersState : NetworkBehaviour
         _profileSubmitted = true;
     }
 
+    /// <summary>
+    /// [프로필 제출 RPC]
+    /// - 모든 클라이언트(RpcSources.All)가 호출 가능
+    /// - 실제 반영은 StateAuthority(Shared 모드에서는 Master)만 수행(RpcTargets.StateAuthority)
+    ///
+    /// 역할:
+    /// 1) 입력 값(닉/이름/URL/레벨)을 정리/검증(Trim, 길이 제한, Clamp)
+    /// 2) 해당 플레이어(PlayerRef who)의 슬롯을 확보(없으면 생성/배정)
+    /// 3) 슬롯 데이터(Slots)에 프로필 정보를 저장
+    /// 4) 리더가 아직 없으면 리더 선출
+    /// 5) Revision 증가로 UI 갱신 트리거
+    ///
+    /// 왜 이렇게?
+    /// - 네트워크 공유 데이터(Slots)는 권한자만 수정해야 값 경쟁/덮어쓰기 문제를 방지할 수 있음.
+    /// - 문자열은 NetworkString 용량 제한이 있으므로 길이 제한을 걸어 안전하게 저장.
+    /// </summary>
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_SubmitProfile(PlayerRef who, string nick, string name, int level, string photoUrl, RpcInfo info = default)
+    {
+        // 안전장치: 이 RPC는 "StateAuthority(=마스터)"에서만 실제로 반영해야 함
+        // 모든 클라가 동시에 Slots를 만지면 데이터 경합/설정 튐이 발생할 수 있음
+        if (!Object.HasStateAuthority) return;
 
+        // 1) 닉네임 검증
+        nick = (nick ?? "").Trim();
+        if (nick.Length == 0) nick = $"Player_{who.PlayerId}";
+        if (nick.Length > 16) nick = nick.Substring(0, 16);
+
+        // 2) 표시 이름(설명/이름) 검증
+        name = (name ?? "").Trim();
+        if (name.Length == 0) name = "-";
+        if (name.Length > 32) name = name.Substring(0, 32);
+
+        //3) 프로필 이미지 URL 정리
+        photoUrl = (photoUrl ?? "").Trim();
+        // NetworkString<_256> 초과 방지(안전)
+        if (photoUrl.Length > 256) photoUrl = photoUrl.Substring(0, 256);
+        
+        //4) 레벨 검증
+        level = Mathf.Clamp(level, 1, 999);
+
+        // 5) 슬롯 확보/배정
+        // - 해당 플레이어(who)가 들어갈 슬롯 인덱스를 확보(없으면 생성)
+        // - 실패하면(-1 등) 처리 중단
+        int idx = EnsureSlot(who);
+        if (idx < 0) return;
+
+        // 6) 슬롯 데이터에 프로필 저장
+        // - Slots는 네트워크로 동기화되는 참가자 데이터 목록/배열(추정)
+        // - Get/Set으로 구조체(또는 데이터)를 꺼내 수정 후 다시 저장하는 패턴
+        var s = Slots.Get(idx);
+        s.nickname = nick;
+        s.name = name;
+        s.level = level;
+        s.photoUrl = photoUrl;
+        Slots.Set(idx, s);
+
+        // 리더가 아직 없으면 선출
+        if (Leader == PlayerRef.None)
+            ServerElectLeader();
+
+        BumpRevision();
+    }
+
+    #endregion
+
+    #region 초기 리더 선출
+    /// <summary>
+    /// [서버/권한자 전용] 리더 선출(초기 선출용)
+    /// - Leader가 아직 없을 때(Leader == None),
+    /// - 또는 프로필 제출/슬롯 생성 이후 최초 1회 리더를 정해야 할 때 사용.
+    ///
+    /// 방식:
+    /// - Slots를 앞에서부터 훑어서 "occupied==1"인 첫 번째 플레이어를 리더로 지정.
+    /// - (즉, 사실상 '가장 먼저 슬롯을 차지한 플레이어'가 리더가 되는 규칙)
+    ///
+    /// 주의:
+    /// - 이 함수는 '리더 위임'이 아니라 '초기 리더 자동 선출'에 가깝다.
+    /// </summary>
+    private void ServerElectLeader()
+    {
+        if (!Object.HasStateAuthority) return;
+
+        PlayerRef found = PlayerRef.None;
+        for (int i = 0; i < MaxSlots; i++)
+        {
+            var s = Slots.Get(i);
+            if (s.occupied == 1) { found = s.player; break; }
+        }
+
+        if (Leader == found) return;
+
+        Leader = found;
+
+        BumpRevision();
+    }
+    #endregion
+
+    #region 방 생헝 / 참가 직후 룸 설정 초기화
+    /// <summary>
+    /// 세션(SessionInfo) 생성 시 넣어둔 Properties("mode","map","max")를 읽어서
+    /// 룸 설정(Networked 값: ModeInt/MapInt/MaxPlayers)을 "권한자(StateAuthority)"가 초기화/확정하는 함수.
+    ///
+    /// 목적:
+    /// - 방 생성/입장 직후 UI/게임 로직이 참조할 공식 룸 설정값을 하나로 통일
+    /// - 잘못된 값(범위 밖, 쓰레기 값)을 방어(정규화/Clamp)
+    /// - Fusion에서 SessionInfo.MaxPlayers가 0으로 오는 경우를 대비해 "max" 프로퍼티를 우선 신뢰
+    ///
+    /// 주의:
+    /// - 반드시 Object.HasStateAuthority(Shared에서는 Master)인 쪽에서만 호출하는 것이 안전함.
+    ///   (모든 클라이언트가 동시에 Networked 값을 만지면 덮어쓰기 경쟁/설정 튐 발생)
+    /// </summary>
     private void ServerInitSettingsFromSessionProperties()
     {
         // 기본값
@@ -222,6 +335,8 @@ public class RoomMembersState : NetworkBehaviour
         int map = 0;
         int max = 4;
 
+        // 1) 세션 정보가 유효하면, 세션 생성 시 저장해둔 커스텀 프로퍼티를 읽는다
+       // - Runner.SessionInfo.Properties: 로비/세션 생성 시 넣어둔 key-value (mode/map/max 등)
         if (Runner != null && Runner.SessionInfo.IsValid && Runner.SessionInfo.Properties != null)
         {
             var props = Runner.SessionInfo.Properties;
@@ -233,7 +348,7 @@ public class RoomMembersState : NetworkBehaviour
             if (props.TryGetValue("max", out var pmax)) max = (int)pmax;
             else max = (Runner.SessionInfo.MaxPlayers > 0) ? Runner.SessionInfo.MaxPlayers : 4;
         }
-
+        //2) 값 정규화(유효하지 않은 값 방어)
         mode = (mode == (int)MatchMode.Team) ? (int)MatchMode.Team : (int)MatchMode.Solo;
         max = (mode == (int)MatchMode.Team) ? TEAM_FIXED : Mathf.Clamp(max, SOLO_MIN, SOLO_MAX);
 
@@ -241,46 +356,7 @@ public class RoomMembersState : NetworkBehaviour
         MapInt = map;
         MaxPlayers = max;
     }
-
-
-    // ===== 프로필/레디 =====
-    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    public void RPC_SubmitProfile(PlayerRef who, string nick, string name, int level, string photoUrl, RpcInfo info = default)
-    {
-        if (!Object.HasStateAuthority) return;
-
-        nick = (nick ?? "").Trim();
-        if (nick.Length == 0) nick = $"Player_{who.PlayerId}";
-        if (nick.Length > 16) nick = nick.Substring(0, 16);
-
-        name = (name ?? "").Trim();
-        if (name.Length == 0) name = "-";
-        if (name.Length > 32) name = name.Substring(0, 32);
-
-        photoUrl = (photoUrl ?? "").Trim();
-        // NetworkString<_256> 초과 방지(안전)
-        if (photoUrl.Length > 256) photoUrl = photoUrl.Substring(0, 256);
-
-        level = Mathf.Clamp(level, 1, 999);
-
-        int idx = EnsureSlot(who);
-        if (idx < 0) return;
-
-        var s = Slots.Get(idx);
-        s.nickname = nick;
-        s.name = name;
-        s.level = level;
-        s.photoUrl = photoUrl;
-        Slots.Set(idx, s);
-
-        //Debug.Log($"[Slots] who={who.PlayerId} idx={idx} url='{photoUrl}'");
-
-        // 리더가 아직 없으면 선출
-        if (Leader == PlayerRef.None)
-            ServerElectLeader();
-
-        BumpRevision();
-    }
+    #endregion
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_SetReady(PlayerRef who, bool ready, RpcInfo info = default)
@@ -447,7 +523,7 @@ public class RoomMembersState : NetworkBehaviour
 
         BumpRevision();
     }
-
+    #region 서버 슬롯 관리
     // ===== 서버 슬롯 관리 =====
     private int FindSlot(PlayerRef who)
     {
@@ -459,11 +535,27 @@ public class RoomMembersState : NetworkBehaviour
         return -1;
     }
 
+    /// <summary>
+    /// [슬롯 확보/생성]
+    /// - 참가자(PlayerRef who)가 들어갈 슬롯을 확보한다.
+    /// - 이미 슬롯이 있으면 그 인덱스를 반환하고,
+    /// - 없으면 빈 슬롯(occupied==0)을 찾아 새로 할당 후 초기값으로 세팅한다.
+    ///
+    /// 사용처 예:
+    /// - RPC_SubmitProfile에서 프로필을 저장하기 전에 반드시 슬롯이 있어야 함.
+    /// - 방 참가자가 새로 들어오거나, 늦게 프로필을 제출하는 경우에도 안전하게 슬롯을 만들기 위함.
+    ///
+    /// 반환값:
+    /// - 성공: 슬롯 인덱스(0~MaxSlots-1)
+    /// - 실패: -1 (빈 슬롯이 없음 = 방이 꽉 참 / 데이터 꼬임 방어)
+    /// </summary>
     private int EnsureSlot(PlayerRef who)
     {
+        // 1) 이미 슬롯이 할당되어 있으면 재사용(중복 생성 방지)
         int existing = FindSlot(who);
         if (existing >= 0) return existing;
 
+        // 2) 빈 슬롯 탐색(occupied == 0인 자리)
         for (int i = 0; i < MaxSlots; i++)
         {
             var s = Slots.Get(i);
@@ -483,6 +575,16 @@ public class RoomMembersState : NetworkBehaviour
         return -1;
     }
 
+    /// <summary>
+    /// [서버/권한자 전용] 플레이어 제거(슬롯 비우기)
+    /// - 누군가 방에서 나갔거나(Disconnect/Leave),
+    /// - 강퇴(Kick)되었거나,
+    /// - 게임/로비 로직상 제거해야 할 때 호출되어
+    /// 해당 플레이어의 슬롯 데이터를 초기화하고 UI 갱신을 트리거한다.
+    ///
+    /// 중요:
+    /// - Slots(네트워크 동기화 데이터)는 StateAuthority(Shared에서는 Master)만 수정해야 안전함.
+    /// </summary>
     public void Server_RemovePlayer(PlayerRef who)
     {
         if (!Object.HasStateAuthority) return;
@@ -513,24 +615,7 @@ public class RoomMembersState : NetworkBehaviour
 
         if (changed) BumpRevision(); // OnPlayerLeft로 빠져도 UI 갱신 보장
     }
-
-    private void ServerElectLeader()
-    {
-        if (!Object.HasStateAuthority) return;
-
-        PlayerRef found = PlayerRef.None;
-        for (int i = 0; i < MaxSlots; i++)
-        {
-            var s = Slots.Get(i);
-            if (s.occupied == 1) { found = s.player; break; }
-        }
-
-        if (Leader == found) return;
-
-        Leader = found;
-
-        BumpRevision();
-    }
+    #endregion
 
     // ===== 표시용 룸 타이틀(세션 이름과 별개로 "룸 안에서"만 동기화) =====
     [Networked] public NetworkString<_32> RoomTitle { get; set; }

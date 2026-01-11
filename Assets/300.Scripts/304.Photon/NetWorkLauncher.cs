@@ -266,7 +266,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         roomName = NormalizeRoomName(name);
     }
 
-
     /// <summary>
     /// 개인전 방 만들기(Host)
     /// - 방 최대 인원: 최소 2 이상 (1명 방 금지)
@@ -546,9 +545,19 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     #region 방 참가하기 & 등록하기의 대한 내부 함수 기능 구현
 
     /// <summary>
-    /// Host 생성 시:
-    /// - 입력한 roomName을 먼저 사용해 StartGame 시도
-    /// - 이미 존재하면(GameIdAlreadyExists 등) 자동 rename 후 재시도
+    /// Host 생성 시 자동 Rename 포함 버전
+    ///
+    /// [역할]
+    /// - 방 생성(Host)에서 "이름 충돌"이 자주 발생하므로 자동으로 이름을 바꿔서 재시도.
+    /// - 생성도 Shared로 통일하면 Client 참가/Host 생성 흐름이 동일해져 관리가 쉬움.
+    ///
+    /// [동작]
+    /// 1) 이미 방에 들어가 있으면 ResetRunner로 먼저 나감(새로 방 만들기 준비)
+    /// 2) baseName으로 StartGameInternal 시도
+    /// 3) GameIdAlreadyExists / ServerInRoom 등 "이름 충돌"이면
+    ///    → MakeUniqueRoomName(baseName)로 suffix 붙여 재시도(최대 MAX_TRY)
+    /// 4) 그 외 실패면 중단
+    /// 5) 완전 실패하면 ResetRunner로 재시도 가능 상태로 정리
     /// </summary>
     private async void StartHostWithAutoRename(MatchMode mode)
     {
@@ -614,9 +623,17 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     }
 
     /// <summary>
-    /// 공통 StartGame 진입점(Host/Client)
-    /// - Client는 방이 없으면 GameNotFound로 실패 가능
-    /// - Team/Solo에 따라 최대 인원 강제
+    /// 공통 StartGame 진입점 (Host/Client 공통)
+    ///
+    /// [역할]
+    /// - "참가(Client)" 요청을 처리하는 메인 함수.
+    /// - 이미 Runner가 실행 중이면(= 다른 방에 들어가 있는 상태면) 방 변경 불가 → 먼저 나가야 함.
+    /// - Solo/Team 모드에 따라 최대 인원(forcedMaxPlayers)을 강제 보정해서 StartGameInternal로 넘김.
+    ///
+    /// [실패 처리]
+    /// - GameNotFound(방 없음), GameIsFull, Timeout 등 실패 시:
+    ///   → ResetRunner()로 Runner를 완전 폐기/재생성 준비
+    ///   → 다음 재시도에서 "Runner 재사용 금지" 에러를 방지
     /// </summary>
     private async void StartGame(GameMode mode, string sessionName, MatchMode modeValue)
     {
@@ -657,13 +674,23 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
-    /// <summary>
-    /// 실제 Fusion StartGame 호출
-    /// 
-    /// SessionProperties:
-    /// - mode      : 0=Solo, 1=Team
-    /// - max       : 강제 최대 인원(표시/백업용)
-    /// - createdAt : 방 생성 시간(UTC 초) -> 최신정렬에 사용
+    //// <summary>
+    /// 실제 Fusion Runner.StartGame() 호출 래퍼
+    ///
+    /// [역할]
+    /// - StartGameArgs 구성 + SessionProperties 설정까지 담당.
+    /// - Join/Host 어느 쪽이든 결국 이 함수로 들어와서 StartGame을 호출한다.
+    ///
+    /// [SessionProperties 설명]
+    /// - "mode"      : 0=Solo, 1=Team (참가자가 읽어서 룸 UI 동기화에 사용)
+    /// - "max"       : 강제 최대 인원(표시/백업용)  ※ SessionInfo.MaxPlayers가 0일 때 대비
+    /// - "createdAt" : 방 생성 시간(UTC seconds) → 최신 정렬에 사용
+    /// - "map"       : 선택 맵(0/1)
+    ///
+    /// [중요]
+    /// - Fusion2는 StartGame 실패/Shutdown 후 Runner 재사용이 막히는 케이스가 많다.
+    /// - 그래서 호출자(StartGame/StartHostWithAutoRename)가 실패하면 ResetRunner를 호출해
+    ///   Runner를 폐기(Destroy)하고 새로 만들도록 설계해야 안전하다.
     /// </summary>
     private System.Threading.Tasks.Task<StartGameResult> StartGameInternal(
         GameMode mode, string sessionName, MatchMode modeValue, int forcedMaxPlayers)
