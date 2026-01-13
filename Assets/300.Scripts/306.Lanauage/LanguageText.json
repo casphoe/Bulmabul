@@ -223,6 +223,18 @@
     {
       "key": "txt.Start",
       "text": "시작"
+    },
+    {
+      "key": "txt.inputChatt",
+      "text": "채팅을 입력해주세요."
+    },
+    {
+      "key": "txt.teamRead",
+      "text": "레드팀"
+    },
+    {
+      "key": "txt.teamBlue",
+      "text": "블루팀"
     }
   ],
   "eng": [
@@ -449,6 +461,18 @@
     {
       "key": "txt.Start",
       "text": "Start"
+    },
+    {
+      "key": "txt.inputChatt",
+      "text": "Please enter your chat."
+    },
+    {
+      "key": "txt.teamRead",
+      "text": "ReadTeam"
+    },
+    {
+      "key": "txt.teamBlue",
+      "text": "BlueTeam"
     }
   ]
 }

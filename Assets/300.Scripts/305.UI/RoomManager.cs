@@ -63,6 +63,9 @@ public class RoomManager : MonoBehaviour
     [Header("Players List")]
     [SerializeField] InfiniteScroll playerScroll;
 
+    [Header("Team UI")]
+    [SerializeField] GameObject teamUiObject;
+
     [SerializeField] int maxSlots = 4;
 
     private bool _localReady;
@@ -123,11 +126,12 @@ public class RoomManager : MonoBehaviour
             inputRoomTitle.onEndEdit.RemoveListener(OnRoomTitleEndEdit);
             inputRoomTitle.onEndEdit.AddListener(OnRoomTitleEndEdit);
         }
-
+        if (teamUiObject != null)
+            teamUiObject.SetActive(false);
         UpdateReadyButtonText();
 
         // --- 맵 버튼 ---
-        BindMapButtons();    
+        BindMapButtons();
     }
 
     private void Update()
@@ -379,15 +383,25 @@ public class RoomManager : MonoBehaviour
             });
         }
 
-        // 2) UI 정렬: 리더가 항상 0번째, 그 다음은 slotIndex(=들어온/배정 순서)
+        // 2) UI 정렬 규칙
+        // - Team: 자리 고정(슬롯 인덱스 순) => 리더가 바뀌어도 위치 절대 안 바뀜
+        // - Solo: 리더를 항상 0번째로 올림
         list.Sort((a, b) =>
         {
-            // 리더 먼저(true가 앞으로 오게)
-            int leaderCmp = b.isLeader.CompareTo(a.isLeader);
-            if (leaderCmp != 0) return leaderCmp;
+            if (_mode == MatchMode.Team)
+            {
+                //  팀전: 무조건 슬롯 순서 유지 (0,1,2,3)
+                return a.slotIndex.CompareTo(b.slotIndex);
+            }
+            else
+            {
+                //  개인전: 리더가 항상 맨 위(0번째)
+                int leaderCmp = b.isLeader.CompareTo(a.isLeader);
+                if (leaderCmp != 0) return leaderCmp;
 
-            // 그 다음은 슬롯 인덱스 오름차순
-            return a.slotIndex.CompareTo(b.slotIndex);
+                // 그 다음은 슬롯 인덱스
+                return a.slotIndex.CompareTo(b.slotIndex);
+            }
         });
 
 
@@ -410,7 +424,9 @@ public class RoomManager : MonoBehaviour
                 isLeader = mm.isLeader,
                 isReady = mm.isReady,
                 isMe = mm.isMe,
-                photoUrl = s.photoUrl.ToString()
+                photoUrl = s.photoUrl.ToString(),
+
+                team = (_mode == MatchMode.Team) ? GetTeamBySlotIndex(mm.slotIndex) : TeamSide.None
             };
 
             // i번째에 넣기(정렬 순서 유지)
@@ -431,6 +447,9 @@ public class RoomManager : MonoBehaviour
         _mode = members.Mode;
         _map = members.Map;
         _maxPlayers = members.MaxPlayers;
+
+        /*if (teamUiObject != null)
+            teamUiObject.SetActive(_mode == MatchMode.Team);*/
 
         // 맵 미리보기
         if (mapImage != null)
@@ -788,6 +807,14 @@ public class RoomManager : MonoBehaviour
         if (nonLeaderCount == 0) return false;
 
         return true;
+    }
+    #endregion
+
+    #region Team
+    private TeamSide GetTeamBySlotIndex(int slotIndex)
+    {
+        //  0,2 = Red / 1,3 = Blue
+        return (slotIndex % 2 == 0) ? TeamSide.Red : TeamSide.Blue;
     }
     #endregion
 }

@@ -8,6 +8,14 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
+public enum TeamSide
+{
+    None = 0,
+    Red = 1,
+    Blue = 2,
+}
+
+
 [Serializable]
 public class RoomPlayerData : InfiniteScrollData
 {
@@ -27,6 +35,8 @@ public class RoomPlayerData : InfiniteScrollData
 
     //프로필 URL
     public string photoUrl;
+
+    public TeamSide team;
 }
 
 // ===== URL -> Texture 캐시(스크롤/리프레시로 인한 중복다운로드 방지) =====
@@ -136,6 +146,7 @@ public class RoomPlayer : InfiniteScrollItem
     public Text txtLevel;
     public Text txtName;
     public Text txtReady;
+    public Text txtTeam;
 
     [Header("기본 프로필(인스펙터에 넣는 기본값)")]
     [SerializeField] private Texture _defaultSeed;   //  인스펙터용 기본 이미지
@@ -202,6 +213,28 @@ public class RoomPlayer : InfiniteScrollItem
         }
 
         ApplyProfileImage(d.photoUrl);
+
+        //팀전일 경우 무슨 팀인지 표시
+        if (txtTeam != null)
+        {
+            bool showTeam = (RoomMembersState.Instance != null && RoomMembersState.Instance.Mode == MatchMode.Team);
+
+            txtTeam.gameObject.SetActive(showTeam);
+
+            if (showTeam)
+            {
+                if (d.team == TeamSide.Red)
+                    txtTeam.text = (lang == Lauaguage.Kor) ? "레드팀" : "RED";
+                else if (d.team == TeamSide.Blue)
+                    txtTeam.text = (lang == Lauaguage.Kor) ? "블루팀" : "BLUE";
+                else
+                    txtTeam.text = "";
+            }
+            else
+            {
+                txtTeam.text = "";
+            }
+        }
 
 
         bool amLeader = false;

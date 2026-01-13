@@ -1,0 +1,29 @@
+<svg width="90" height="76" viewBox="0 0 90 76" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_ddi_299_369)">
+<path d="M13.785 28.3832L29.6492 12.6463C30.9114 11.3942 33.0577 12.2883 33.0577 14.0662V24.5404C38.0638 24.2371 46.4679 24.5404 56.2537 24.5404C67.6444 24.5404 75.3742 31.8386 77.444 44.789C77.7666 46.8076 74.8889 47.7916 73.4114 46.3787C68.2235 41.4174 61.5378 38.9899 56.2537 38.9899H33.0577V49.2719C33.0577 51.0765 30.8563 51.9578 29.6106 50.6522L13.708 33.9842C12.2039 32.4078 12.2382 29.9176 13.785 28.3832Z" fill="#F4E7D6"/>
+</g>
+<defs>
+<filter id="filter0_ddi_299_369" x="0.601562" y="0.0620117" width="88.8672" height="75.2139" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="12"/>
+<feGaussianBlur stdDeviation="6"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_299_369"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="6"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.813839 0 0 0 0 0.58631 0 0 0 0.7 0"/>
+<feBlend mode="normal" in2="effect1_dropShadow_299_369" result="effect2_dropShadow_299_369"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect2_dropShadow_299_369" result="shape"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="5.7"/>
+<feComposite in2="hardAlpha" operator="arithmetic" k2="-1" k3="1"/>
+<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.719901 0 0 0 0 0.557738 0 0 0 1 0"/>
+<feBlend mode="normal" in2="shape" result="effect3_innerShadow_299_369"/>
+</filter>
+</defs>
+</svg>

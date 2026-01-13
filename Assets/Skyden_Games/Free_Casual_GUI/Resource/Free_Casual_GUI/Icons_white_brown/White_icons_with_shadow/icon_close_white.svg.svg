@@ -1,0 +1,29 @@
+<svg width="69" height="79" viewBox="0 0 69 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_ddi_299_360)">
+<path d="M45.7852 13.9937C48.1651 11.6884 52.0233 11.6884 54.4033 13.9937C56.7834 16.2993 56.7834 20.0376 54.4033 22.3433L42.7119 33.6675L53.3711 43.9937C55.751 46.2993 55.7511 50.0376 53.3711 52.3433C50.9911 54.6488 47.1329 54.6488 44.7529 52.3433L34.0938 42.0171L23.4355 52.3433C21.0555 54.6488 17.1974 54.6488 14.8174 52.3433C12.4374 50.0376 12.4374 46.2993 14.8174 43.9937L25.4756 33.6675L13.7852 22.3433C11.4051 20.0376 11.4051 16.2993 13.7852 13.9937C16.1651 11.6884 20.0233 11.6884 22.4033 13.9937L34.0938 25.3188L45.7852 13.9937Z" fill="#F4E7D6"/>
+</g>
+<defs>
+<filter id="filter0_ddi_299_360" x="0" y="0.264648" width="68.1875" height="77.8076" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="12"/>
+<feGaussianBlur stdDeviation="6"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_299_360"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="6"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.813839 0 0 0 0 0.58631 0 0 0 0.7 0"/>
+<feBlend mode="normal" in2="effect1_dropShadow_299_360" result="effect2_dropShadow_299_360"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect2_dropShadow_299_360" result="shape"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset/>
+<feGaussianBlur stdDeviation="5.7"/>
+<feComposite in2="hardAlpha" operator="arithmetic" k2="-1" k3="1"/>
+<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.719901 0 0 0 0 0.557738 0 0 0 1 0"/>
+<feBlend mode="normal" in2="shape" result="effect3_innerShadow_299_360"/>
+</filter>
+</defs>
+</svg>

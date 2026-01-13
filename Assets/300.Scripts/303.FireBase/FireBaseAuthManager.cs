@@ -65,7 +65,9 @@ public class FireBaseAuthManager : MonoBehaviour
     /// 흐름:
     /// 1) Auth 계정 생성
     /// 2) 닉네임 선점(중복 체크)
-    /// 3) Account 생성 + DB 저장
+    /// 3) 이름 선정 (중복 체크)
+    /// 4) 프로필 이미지 업로드
+    /// 5) Account 생성 + DB 저장
     /// </summary>
     public async Task RegisterAsync(string name,string email, string password, string nickName, byte[] profileImageBytes, 
     string profileContentType, string storageBucketUrl)

@@ -612,6 +612,11 @@ public class RoomMembersState : NetworkBehaviour
             TryElectLeaderRandom();
             changed = true;
         }
+        //  팀전이면 슬롯을 앞에서부터 당겨서 “인덱스=팀” 규칙 유지
+        if (changed && ModeInt == (int)MatchMode.Team)
+        {
+            Server_CompactSlots_TeamMode();
+        }
 
         if (changed) BumpRevision(); // OnPlayerLeft로 빠져도 UI 갱신 보장
     }
@@ -744,6 +749,9 @@ public class RoomMembersState : NetworkBehaviour
             }
         }
 
+        if (changed && ModeInt == (int)MatchMode.Team)
+            Server_CompactSlots_TeamMode();
+
         if (changed) BumpRevision();
     }
 
@@ -789,5 +797,44 @@ public class RoomMembersState : NetworkBehaviour
         return true;
     }
 
+    #endregion
+
+    #region 팀전일 경우 방에 있는 인원이 나갔을 경우 인덱스 번호가 변경시 인덱스에 맞게 팀이 변경이 되어야하는 함수
+    private void Server_CompactSlots_TeamMode()
+    {
+        if (!Object.HasStateAuthority) return;
+        if (ModeInt != (int)MatchMode.Team) return;
+
+        // 현재 occupied인 슬롯을 앞에서부터 모은다 (0->1->2->3 순서 유지)
+        List<MemberSlot> occupied = new List<MemberSlot>(MaxSlots);
+        for (int i = 0; i < MaxSlots; i++)
+        {
+            var s = Slots.Get(i);
+            if (s.occupied == 1)
+                occupied.Add(s);
+        }
+
+        // 전체 슬롯 비우고
+        for (int i = 0; i < MaxSlots; i++)
+        {
+            var empty = Slots.Get(i);
+            empty.occupied = 0;
+            empty.player = default;
+            empty.nickname = default;
+            empty.name = default;
+            empty.level = 1;
+            empty.ready = false;
+            empty.photoUrl = default;
+            Slots.Set(i, empty);
+        }
+
+        // 앞에서부터 다시 채운다 => 인덱스가 당겨짐(팀도 당연히 바뀜)
+        for (int i = 0; i < occupied.Count && i < MaxSlots; i++)
+        {
+            var s = occupied[i];
+            s.occupied = 1;
+            Slots.Set(i, s);
+        }
+    }
     #endregion
 }
