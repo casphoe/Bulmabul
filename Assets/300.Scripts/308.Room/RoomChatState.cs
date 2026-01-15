@@ -87,10 +87,6 @@ public class RoomChatState : NetworkBehaviour
         dst.AddRange(_history);
     }
 
-    // =========================================================
-    // [멤버 검사 / 닉네임 조회] - 기존 로직 재사용
-    // =========================================================
-
     /// <summary>
     /// 해당 PlayerRef가 현재 방 멤버인지 검사
     /// - RoomMembersState 슬롯에 존재하는지로 판단
@@ -171,13 +167,6 @@ public class RoomChatState : NetworkBehaviour
             return;
         }
 
-        //  개인전이면 무조건 Global로 강제
-        var members = RoomMembersState.Instance;
-        bool isTeamMode = (members != null && members.ModeInt == (int)MatchMode.Team);
-        if (!isTeamMode)
-            channel = ChatChannel.Global;
-
-        Debug.Log($"[Chat] SendChatFromUI localPlayer={Runner.LocalPlayer} channel={channel} msg={message}");
         RPC_SendChatToServer(message, (int)channel);
     }
 

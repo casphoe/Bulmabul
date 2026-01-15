@@ -543,15 +543,8 @@ public class RoomChatUIManager : MonoBehaviour
     #region 채널 변경 전체 채팅, 파티 채팅
     private void SwitchChannel(ChatChannel ch)
     {
-        //팀 모드
-        if (ch == ChatChannel.Party)
-        {
-            ch = ChatChannel.Party;
-        }
-        else
-        {
-            ch = ChatChannel.Global;
-        }
+        //채널 변경 시스템
+        _currentChannel = ch;
         RebuildFromLocalHistory();
         TxtChattingSetting(ch);
     }

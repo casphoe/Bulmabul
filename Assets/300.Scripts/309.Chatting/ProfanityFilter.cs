@@ -118,8 +118,6 @@ public static class ProfanityFilter
         return masked;
     }
 
-    // ---------------- 내부 ----------------
-
     /// <summary>
     /// Normalize:
     /// 1) 소문자화
