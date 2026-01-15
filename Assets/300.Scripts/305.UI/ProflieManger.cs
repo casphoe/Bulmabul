@@ -137,7 +137,10 @@ public class ProflieManger : MonoBehaviour
             pendingPhotoFileName = (pendingPhotoContentType == "image/png") ? "profile.png" : "profile.jpg";
             pendingPhotoBytes = bytes;
 
-            FireBaseAuthManager.Instance?.ShowToast("사진이 선택되었습니다. 저장을 누르면 반영됩니다.");
+            ShowToastByLang(
+                "사진이 선택되었습니다. 저장을 누르면 반영됩니다.",
+                "Photo selected. Press Save to apply."
+            );
         });
     }
 
@@ -168,7 +171,7 @@ public class ProflieManger : MonoBehaviour
         }
         catch (Exception e)
         {
-            FireBaseAuthManager.Instance?.ShowToast(e.Message);
+            ToastMessageManager.instance.ShowToast(e.Message);
             Debug.LogWarning(e);
         }
         finally
@@ -249,7 +252,7 @@ public class ProflieManger : MonoBehaviour
     {
         if (!CanSaveNow(out string reason))
         {
-            LobbyUIManager.instance.ShowToast(reason);
+            ToastMessageManager.instance.ShowToast(reason);
             return;
         }
         SaveAllChanges();
@@ -315,7 +318,7 @@ public class ProflieManger : MonoBehaviour
             // 4) 최종 Account 저장(네 방식)
             await AccountCloudStore.SaveFullAsync(fb.CurrentAccount);
 
-            LobbyUIManager.instance.ShowToast("프로필 저장 완료!");          
+            ShowToastByLang("프로필 저장 완료!", "Profile saved!");
             LoadFromCurrentAccountToUI();
             LobbyUIManager.instance.RefreshPlayerUI();
             LobbyUIManager.instance.profilePanel.gameObject.SetActive(false);
@@ -398,7 +401,9 @@ public class ProflieManger : MonoBehaviour
         var fb = FireBaseAuthManager.Instance;
         if (fb == null || fb.CurrentAccount == null)
         {
-            reason = "계정 정보가 없습니다.";
+            SetReason(out reason,
+             kor: "계정 정보가 없습니다.",
+             eng: "Account information is missing.");
             return false;
         }
 
@@ -418,7 +423,9 @@ public class ProflieManger : MonoBehaviour
             }
             catch
             {
-                reason = "닉네임 형식이 올바르지 않습니다.";
+                SetReason(out reason,
+                 kor: "닉네임 형식이 올바르지 않습니다.",
+                 eng: "Invalid nickname format.");
                 return false;
             }
         }
@@ -434,17 +441,24 @@ public class ProflieManger : MonoBehaviour
         {
             if (string.IsNullOrWhiteSpace(curPw) || string.IsNullOrWhiteSpace(newPw))
             {
-                reason = "비밀번호는 현재/새 비밀번호를 모두 입력해야 합니다.";
+                SetReason(out reason,
+                kor: "비밀번호 변경은 현재/새 비밀번호를 모두 입력해야 합니다.",
+                eng: "To change password, enter both current and new passwords.");
                 return false;
             }
             if (newPw.Length < 6)
             {
-                reason = "새 비밀번호는 6자 이상이어야 합니다.";
+                SetReason(out reason,
+                    kor: "새 비밀번호는 6자 이상이어야 합니다.",
+                    eng: "New password must be at least 6 characters.");
                 return false;
             }
+
             if (newPw == curPw)
             {
-                reason = "새 비밀번호가 현재 비밀번호와 같습니다.";
+                SetReason(out reason,
+                    kor: "새 비밀번호가 현재 비밀번호와 같습니다.",
+                    eng: "New password is the same as the current password.");
                 return false;
             }
 
@@ -458,7 +472,9 @@ public class ProflieManger : MonoBehaviour
         bool anyChange = nickChanged || pwChanged || photoChanged;
         if (!anyChange)
         {
-            reason = "변경된 내용이 없습니다.";
+            SetReason(out reason,
+                kor: "변경된 내용이 없습니다.",
+                eng: "No changes to save.");
             return false;
         }
 
@@ -471,4 +487,30 @@ public class ProflieManger : MonoBehaviour
     {
         btnProfile[0].interactable = isActive;
     }
+
+    #region Toast Helper (한/영)
+    private void ShowToastByLang(string kor, string eng)
+    {
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        string msg = (lang == Lauaguage.Eng) ? eng : kor;
+
+        if (ToastMessageManager.instance != null)
+            ToastMessageManager.instance.ShowToast(msg);
+        else
+            Debug.LogWarning($"[Toast missing] {msg}");
+    }
+
+    private static bool IsEnglish()
+    {
+        return (LaguageManager.Instance != null && LaguageManager.Instance.currentLang == Lauaguage.Eng);
+    }
+
+    private static void SetReason(out string reason, string kor, string eng)
+    {
+        reason = IsEnglish() ? eng : kor;
+    }
+    #endregion
 }

@@ -10193,6 +10193,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1951908744}
   - component: {fileID: 1951908745}
+  - component: {fileID: 1951908746}
   m_Layer: 0
   m_Name: LobbyUIManager
   m_TagString: Untagged
@@ -10261,6 +10262,21 @@ MonoBehaviour:
   - {fileID: 1270676966}
   profilePanel: {fileID: 231591306}
   profileImage: {fileID: 1883635859}
+--- !u!114 &1951908746
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1951908743}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0ce024480833968469f92ab83dfdfac0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  toasstMessage: {fileID: 8064159952172860105}
+  toastShowSeconds: 1.2
+  toastFadeSeconds: 0.8
 --- !u!1 &1968746836
 GameObject:
   m_ObjectHideFlags: 0

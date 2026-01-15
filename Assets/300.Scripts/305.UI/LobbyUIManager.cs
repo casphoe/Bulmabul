@@ -75,17 +75,6 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] Button btnRoomSearch;
     #endregion
 
-    #region 토스 메시지 설정 변수
-    [Header("토스 메시지")]
-    public TextMeshProUGUI toasstMessage;
-
-    [Header("토스트 설정")]
-    public float toastShowSeconds = 1.2f; // 완전히 보이는 유지 시간
-    public float toastFadeSeconds = 0.8f; // 페이드 아웃 시간
-
-    public Coroutine toastRoutine;
-    #endregion
-
     #region 레벨 및 플레이어 데이터 UI
     [Header("레벨 및 플레이어 데이터 UI")]
     [SerializeField] Text[] txtPlayerData;
@@ -139,14 +128,6 @@ public class LobbyUIManager : MonoBehaviour
             inputTeamCount.onEndEdit.AddListener(_ => ClampPlayerCountFinal());
         }
 
-        if (toasstMessage != null)
-        {
-            var c = toasstMessage.color;
-            c.a = 0f;
-            toasstMessage.color = c;
-            toasstMessage.text = "";
-        }
-
 
         if (btnRoomSearch != null)
         {
@@ -188,7 +169,7 @@ public class LobbyUIManager : MonoBehaviour
             case 1:
                 try
                 {
-                    ShowToast("로그아웃 성공");
+                    ShowToastByLang("로그아웃 성공", "Logout success");
                     await FireBaseAuthManager.Instance.LogoutToScene0Async();
                 }
                 catch (Exception e)
@@ -208,12 +189,12 @@ public class LobbyUIManager : MonoBehaviour
                     string pass2 = confirmPassword.text;
                     if(pass1 == pass2)
                     {
-                        ShowToast("회원 탈퇴 성공");
+                        ShowToastByLang("회원 탈퇴 성공", "Account deleted successfully");
                         await FireBaseAuthManager.Instance.DeleteCurrentAccountAsync(password.text);
                     }
                     else
                     {
-                        ShowToast("비밀번호가 틀렸습니다. 확인 부탁드립니다.");
+                        ShowToastByLang("비밀번호가 틀렸습니다. 확인 부탁드립니다.", "Password mismatch. Please check again.");
                     }
                 }
                 catch (Exception e)
@@ -469,7 +450,6 @@ public class LobbyUIManager : MonoBehaviour
     {
         NetWorkLauncher.instance.OnRoomsUpdated += OnRoomsUpdated;
         RoomLoad();
-        toasstMessage.transform.parent.GetComponent<CanvasGroup>().blocksRaycasts = false;
         RefreshPlayerUI();
     }
 
@@ -606,51 +586,14 @@ public class LobbyUIManager : MonoBehaviour
         // 결과 없으면 토스트(원하면 문구 다국어 처리)
         if (launcher.roomPrefabList.Count == 0)
         {
-            ShowToast(string.IsNullOrWhiteSpace(keyword) ? "방이 없습니다." : "해당 이름의 방이 없습니다.");
+            if (string.IsNullOrWhiteSpace(keyword))
+                ShowToastByLang("방이 없습니다.", "No rooms found.");
+            else
+                ShowToastByLang("해당 이름의 방이 없습니다.", "No rooms match that name.");
         }
 
         RoomLoad();
     }
-    #endregion
-
-    #region 토스트 메세지
-
-    public void ShowToast(string msg)
-    {
-        if (toasstMessage == null) return;
-
-        if (toastRoutine != null) StopCoroutine(toastRoutine);
-        toastRoutine = StartCoroutine(CoToastFadeOut(msg, toastShowSeconds, toastFadeSeconds));
-    }
-
-    IEnumerator CoToastFadeOut(string msg, float showSec, float fadeSec)
-    {
-        toasstMessage.text = msg;
-
-        Color c = toasstMessage.color;
-        c.a = 1f;
-        toasstMessage.color = c;
-
-        if (showSec > 0f)
-            yield return new WaitForSeconds(showSec);
-
-        float t = 0f;
-        float dur = Mathf.Max(0.01f, fadeSec);
-
-        while (t < dur)
-        {
-            t += Time.unscaledDeltaTime;
-            c.a = Mathf.Lerp(1f, 0f, t / dur);
-            toasstMessage.color = c;
-            yield return null;
-        }
-
-        c.a = 0f;
-        toasstMessage.color = c;
-        toasstMessage.text = "";
-        toastRoutine = null;
-    }
-
     #endregion
 
     #region 비밀번호 보기 Toggle
@@ -755,5 +698,24 @@ public class LobbyUIManager : MonoBehaviour
         OnPlayerDataUI();
         _ = RefreshProfileImageAsync();
     }
+    #endregion
+
+    #region 언어에 따른 토스트 메시지
+
+    private void ShowToastByLang(string kor, string eng)
+    {
+        // 언어 매니저 없으면 한국어 우선
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        string msg = (lang == Lauaguage.Eng) ? eng : kor;
+
+        if (ToastMessageManager.instance != null)
+            ToastMessageManager.instance.ShowToast(msg);
+        else
+            Debug.LogWarning($"[Toast missing] {msg}");
+    }
+
     #endregion
 }

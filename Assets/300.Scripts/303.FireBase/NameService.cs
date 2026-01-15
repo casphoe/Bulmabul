@@ -83,7 +83,7 @@ public static class NameService
         if (snap.Exists && snap.Value != null && snap.Value.ToString() == uid)
             return;
 
-        AuthUIController.instance.ShowToast("이미 사용 중인 이름입니다.");
+        ToastMessageManager.instance.ShowToast("이미 사용 중인 이름입니다.", "The name is already in use.");
 
         throw new Exception("이미 사용 중인 이름입니다.");
     }

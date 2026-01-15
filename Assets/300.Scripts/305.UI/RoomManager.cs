@@ -92,12 +92,14 @@ public class RoomManager : MonoBehaviour
     private float _readyClickCooldownUntil = 0f;
     private const float READY_CLICK_COOLDOWN = 0.12f; // 연타만 방지(취소는 가능)
 
+    private RoomChatUIManager chatUiManager;
+
     private void Start()
     {
         if (btnReady != null) btnReady.onClick.AddListener(OnClickReady);
         if (btnGameStart != null) btnGameStart.onClick.AddListener(OnClickStartGame);
         if (btnLeave != null) btnLeave.onClick.AddListener(OnClickLeave);
-
+        chatUiManager = GetComponent<RoomChatUIManager>();
         // --- 모드 토글 ---
         if (toggleSolo != null)
         {
@@ -450,6 +452,8 @@ public class RoomManager : MonoBehaviour
 
         /*if (teamUiObject != null)
             teamUiObject.SetActive(_mode == MatchMode.Team);*/
+
+        chatUiManager.OnUiTeamChatting(_mode == MatchMode.Team);
 
         // 맵 미리보기
         if (mapImage != null)

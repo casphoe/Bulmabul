@@ -11,9 +11,6 @@ public class ChatMessageItem : InfiniteScrollItem
     public Text txtMsg;
     public Text txtTime;
 
-    // 선택: 내 메시지 강조용(배경 오브젝트 등)
-    public GameObject myBubble;
-
     [Header("Bubble Flip (말풍선 이미지만 반전)")]
     [SerializeField] private RectTransform bubbleBg;      // 꼬리 포함 말풍선 배경(Image)
     [SerializeField] private bool flipBubbleForOther = true; // 남(상대)일 때 말풍선 반대로?
@@ -21,6 +18,17 @@ public class ChatMessageItem : InfiniteScrollItem
     [Header("Typewriter")]
     [SerializeField] private float charsPerSecond = 40f; // 타이핑 속도
     [SerializeField] private bool typeOnlyWhenAnimateFlag = true;
+
+    [Header("Bubble Style")]
+    [SerializeField] private Image bubbleBgImage; // 말풍선 배경(Image). 없으면 bubbleBg에서 자동 탐색
+
+    // 팀전 색 / 개인전 색
+    [SerializeField] private Color soloBgColor = Color.white;
+    [SerializeField] private Color soloTextColor = Color.black;
+
+    [SerializeField] private Color redTeamBgColor = Color.red;
+    [SerializeField] private Color blueTeamBgColor = Color.blue;
+    [SerializeField] private Color teamTextColor = Color.white;
 
     private Coroutine _co;
     private string _currentId;
@@ -40,6 +48,11 @@ public class ChatMessageItem : InfiniteScrollItem
     private Vector3 _timeBaseScale = Vector3.one;
     private bool _baseScaleCached;
 
+    private void Awake()
+    {
+        bubbleBg = bubbleBgImage.GetComponent<RectTransform>();
+    }
+
     public override void UpdateData(InfiniteScrollData scrollData)
     {
         base.UpdateData(scrollData);
@@ -48,7 +61,9 @@ public class ChatMessageItem : InfiniteScrollItem
 
         if (txtNick != null) txtNick.text = d.nickname ?? "";
         if (txtTime != null) txtTime.text = d.timeText ?? "";
-        if (myBubble != null) myBubble.SetActive(d.isMine);
+
+        // 0) 팀/개인전 스킨 적용
+        ApplyBubbleStyle(d);
 
         // 1) 말풍선 이미지 반전 처리
         ApplyBubbleFlip(d.isMine);
@@ -89,6 +104,38 @@ public class ChatMessageItem : InfiniteScrollItem
         // 지금 활성 상태면 바로 시작
         TryStartPendingTyping();
     }
+
+    #region 팀전 / 개인전 색 적용
+
+    private void ApplyBubbleStyle(ChatMessageData d)
+    {
+        // 개인전(혹은 팀 정보 없음) → 흰 배경 + 검은 글씨
+        if (!d.isTeamMode || d.team == TeamSide.None)
+        {
+            if (bubbleBgImage != null) bubbleBgImage.color = soloBgColor;
+            SetAllTextColor(soloTextColor);
+            return;
+        }
+
+        // 팀전 → 팀별 배경 + 흰 글씨
+        if (bubbleBgImage != null)
+        {
+            if (d.team == TeamSide.Red) bubbleBgImage.color = redTeamBgColor;
+            else if (d.team == TeamSide.Blue) bubbleBgImage.color = blueTeamBgColor;
+            else bubbleBgImage.color = soloBgColor;
+        }
+
+        SetAllTextColor(teamTextColor);
+    }
+
+    private void SetAllTextColor(Color c)
+    {
+        if (txtNick != null) txtNick.color = c;
+        if (txtMsg != null) txtMsg.color = c;
+        if (txtTime != null) txtTime.color = c;
+    }
+
+    #endregion
 
     #region 말풍선 배경 뒤집는 기능
     /// <summary>

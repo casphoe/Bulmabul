@@ -8,14 +8,6 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
-public enum TeamSide
-{
-    None = 0,
-    Red = 1,
-    Blue = 2,
-}
-
-
 [Serializable]
 public class RoomPlayerData : InfiniteScrollData
 {

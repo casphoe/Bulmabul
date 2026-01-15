@@ -39,17 +39,6 @@ public class AuthUIController : MonoBehaviour
 
     const string LAST_EMAIL_KEY = "last_email";
 
-    #region 토스 메시지 설정 변수
-    [Header("토스 메시지")]
-    public TextMeshProUGUI toasstMessage;
-
-    [Header("토스트 설정")]
-    public float toastShowSeconds = 1.2f; // 완전히 보이는 유지 시간
-    public float toastFadeSeconds = 0.8f; // 페이드 아웃 시간
-
-    public Coroutine toastRoutine;
-    #endregion
-
     [Header("Profile Photo")]
     [SerializeField] Button btnPickPhoto;
     [SerializeField] RawImage previewRawImage; //  미리보기
@@ -81,15 +70,6 @@ public class AuthUIController : MonoBehaviour
         {
             inEmail.text = PlayerPrefs.GetString(LAST_EMAIL_KEY);
             inRememberEmail.isOn = true;
-        }
-
-
-        if (toasstMessage != null)
-        {
-            var c = toasstMessage.color;
-            c.a = 0f;
-            toasstMessage.color = c;
-            toasstMessage.text = "";
         }
         // 초기 패널
         ShowSignIn();
@@ -154,47 +134,7 @@ public class AuthUIController : MonoBehaviour
         fgEmail.text = "";
     }
 
-    public void ClearMessage() => toasstMessage.text = "";
-    #endregion
-
-    #region Toast
-
-    public void ShowToast(string msg)
-    {
-        if (toasstMessage == null) return;
-
-        if (toastRoutine != null) StopCoroutine(toastRoutine);
-        toastRoutine = StartCoroutine(CoToastFadeOut(msg, toastShowSeconds, toastFadeSeconds));
-    }
-
-    IEnumerator CoToastFadeOut(string msg, float showSec, float fadeSec)
-    {
-        toasstMessage.text = msg;
-
-        Color c = toasstMessage.color;
-        c.a = 1f;
-        toasstMessage.color = c;
-
-        if (showSec > 0f)
-            yield return new WaitForSeconds(showSec);
-
-        float t = 0f;
-        float dur = Mathf.Max(0.01f, fadeSec);
-
-        while (t < dur)
-        {
-            t += Time.unscaledDeltaTime;
-            c.a = Mathf.Lerp(1f, 0f, t / dur);
-            toasstMessage.color = c;
-            yield return null;
-        }
-
-        c.a = 0f;
-        toasstMessage.color = c;
-        toasstMessage.text = "";
-        toastRoutine = null;
-    }
-
+    public void ClearMessage() => ToastMessageManager.instance.toasstMessage.text = "";
     #endregion
 
     #region Toggle & UI Helpers
@@ -230,6 +170,16 @@ public class AuthUIController : MonoBehaviour
 
     #endregion
 
+    #region  언어 
+
+    private string T(string kor, string eng)
+    {
+        if (LaguageManager.Instance == null) return kor;
+        return (LaguageManager.Instance.currentLang == Lauaguage.Eng) ? eng : kor;
+    }
+
+    #endregion
+
 
     #region 버튼
     // 1) 로그인 버튼
@@ -240,12 +190,13 @@ public class AuthUIController : MonoBehaviour
             string email = inEmail.text.Trim();
             string pw = inPassword.text;
 
-            if (!IsValidEmail(email)) throw new Exception("이메일 형식이 올바르지 않습니다.");
-            if (string.IsNullOrWhiteSpace(pw)) throw new Exception("비밀번호를 입력하세요.");
+            if (!IsValidEmail(email))
+                throw new Exception(T("이메일 형식이 올바르지 않습니다.", "Invalid email format."));
+            if (string.IsNullOrWhiteSpace(pw))
+                throw new Exception(T("비밀번호를 입력하세요.", "Please enter your password."));
 
             await FireBaseAuthManager.Instance.LoginAsync(email, pw);
 
-            // 이메일 기억
             if (inRememberEmail != null && inRememberEmail.isOn)
             {
                 PlayerPrefs.SetString(LAST_EMAIL_KEY, email);
@@ -258,10 +209,11 @@ public class AuthUIController : MonoBehaviour
             }
         }
         catch (Exception e)
-        {
-            ShowToast(e.Message);
+        {        
+            ToastMessageManager.instance.ShowToast(e.Message, e.Message);
         }
     }
+
 
     // 2) 회원가입 버튼(이름 + 닉 필수)
     public async void OnClickRegister()
@@ -274,11 +226,11 @@ public class AuthUIController : MonoBehaviour
             string pw2 = upPasswordConfirm.text;
             string nick = upNickname.text.Trim();
 
-            if (string.IsNullOrWhiteSpace(name)) throw new Exception("이름은 필수입니다.");
-            if (!IsValidEmail(email)) throw new Exception("이메일 형식이 올바르지 않습니다.");
-            if (!IsStrongPassword(pw)) throw new Exception("비밀번호는 6자 이상이어야 합니다.");
-            if (pw != pw2) throw new Exception("비밀번호 확인이 일치하지 않습니다.");
-            if (string.IsNullOrWhiteSpace(nick)) throw new Exception("닉네임은 필수입니다.");
+            if (string.IsNullOrWhiteSpace(name)) throw new Exception(T("이름은 필수입니다.", "Name is required."));
+            if (!IsValidEmail(email)) throw new Exception(T("이메일 형식이 올바르지 않습니다.", "Invalid email format."));
+            if (!IsStrongPassword(pw)) throw new Exception(T("비밀번호는 6자 이상이어야 합니다.", "Password must be at least 6 characters."));
+            if (pw != pw2) throw new Exception(T("비밀번호 확인이 일치하지 않습니다.", "Password confirmation does not match."));
+            if (string.IsNullOrWhiteSpace(nick)) throw new Exception(T("닉네임은 필수입니다.", "Nickname is required."));
 
             await FireBaseAuthManager.Instance.RegisterAsync(name, email, pw, nick, _pickedImageBytes, _pickedContentType, storageBucketUrl);
 
@@ -286,7 +238,7 @@ public class AuthUIController : MonoBehaviour
         }
         catch (Exception e)
         {
-            ShowToast(e.Message);
+            ToastMessageManager.instance.ShowToast(e.Message, e.Message);
         }
     }
 
@@ -296,13 +248,13 @@ public class AuthUIController : MonoBehaviour
         try
         {
             string email = fgEmail.text.Trim();
-            if (!IsValidEmail(email)) throw new Exception("이메일 형식이 올바르지 않습니다.");
+            if (!IsValidEmail(email)) throw new Exception(T("이메일 형식이 올바르지 않습니다.", "Invalid email format."));
 
             await FireBaseAuthManager.Instance.SendPasswordResetEmailAsync(email);
         }
         catch (Exception e)
         {
-            ShowToast(e.Message);
+            ToastMessageManager.instance.ShowToast(e.Message, e.Message);
         }
     }
     #endregion
@@ -326,11 +278,14 @@ public class AuthUIController : MonoBehaviour
             if (paths == null || paths.Length == 0) return;
 
             string path = paths[0];
-            if (!File.Exists(path)) throw new Exception("파일이 존재하지 않습니다.");
+            if (!File.Exists(path))
+                throw new Exception(T("파일이 존재하지 않습니다.", "File does not exist."));
 
             long bytesLen = new FileInfo(path).Length;
             long maxBytes = (long)maxUploadMB * 1024L * 1024L;
-            if (bytesLen > maxBytes) throw new Exception($"이미지 용량이 너무 큽니다. ({maxUploadMB}MB 이하)");
+            if (bytesLen > maxBytes)
+                throw new Exception(T($"이미지 용량이 너무 큽니다. ({maxUploadMB}MB 이하)",
+                                      $"Image file is too large. (Max {maxUploadMB}MB)"));
 
             _pickedImageBytes = File.ReadAllBytes(path);
 
@@ -341,7 +296,7 @@ public class AuthUIController : MonoBehaviour
         }
         catch (Exception e)
         {
-            ShowToast(e.Message);
+            ToastMessageManager.instance.ShowToast(e.Message, e.Message);
         }
     }
 
@@ -351,7 +306,8 @@ public class AuthUIController : MonoBehaviour
             _previewTex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
 
         if (!_previewTex.LoadImage(imageBytes))
-            throw new Exception("이미지 로드 실패(지원되지 않는 파일일 수 있음).");
+            throw new Exception(T("이미지 로드 실패(지원되지 않는 파일일 수 있음).",
+                            "Failed to load image (unsupported file maybe)."));
 
         if (previewRawImage != null)
             previewRawImage.texture = _previewTex;

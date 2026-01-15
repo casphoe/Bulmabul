@@ -235,6 +235,14 @@
     {
       "key": "txt.teamBlue",
       "text": "블루팀"
+    },
+    {
+      "key": "txt.All",
+      "text": "전체 채팅"
+    },
+    {
+      "key": "txt.Team",
+      "text": "파티 채팅"
     }
   ],
   "eng": [
@@ -473,6 +481,14 @@
     {
       "key": "txt.teamBlue",
       "text": "BlueTeam"
+    },
+    {
+      "key": "txt.All",
+      "text": "Full Chat"
+    },
+    {
+      "key": "txt.Team",
+      "text": "Team Chat"
     }
   ]
 }

@@ -3,6 +3,13 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum TeamSide
+{
+    None = 0,
+    Red = 1,
+    Blue = 2
+}
+
 /// <summary>
 /// 방 참가자들의 닉네임/레벨/레디 상태를 네트워크로 공유하는 상태 오브젝트(씬에 1개).
 /// - 각 클라는 Spawned 때 자기 프로필(Firebase)을 서버에 제출
@@ -835,6 +842,50 @@ public class RoomMembersState : NetworkBehaviour
             s.occupied = 1;
             Slots.Set(i, s);
         }
+    }
+    #endregion
+
+    #region 팀 찾기
+    /// <summary>
+    /// 현재 플레이어(PlayerRef who)가 "몇 번 슬롯(0~MaxSlots-1)"에 들어있는지 찾는다.
+    /// - Slots 배열을 앞에서부터 훑어서:
+    ///   occupied == 1(사용중) 이고 player == who 인 슬롯을 찾으면 그 인덱스를 반환
+    /// - 못 찾으면 -1 반환(방 멤버가 아니거나 아직 슬롯 배정 전, 또는 나간 상태)
+    /// </summary>
+    public int FindSlotIndex(PlayerRef who)
+    {
+        for (int i = 0; i < MaxSlots; i++)
+        {
+            var s = Slots.Get(i);
+            if (s.occupied == 1 && s.player == who) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// 슬롯 인덱스(0~3)를 팀으로 변환한다.
+    /// - 팀 규칙(고정):
+    ///   0, 2번 슬롯 = Red 팀
+    ///   1, 3번 슬롯 = Blue 팀
+    /// - slotIndex가 음수(=없음)면 TeamSide.None 반환
+    /// </summary>
+    public TeamSide GetTeamBySlotIndex(int slotIndex)
+    {
+        if (slotIndex < 0) return TeamSide.None;
+        // 0,2 = Red / 1,3 = Blue
+        return (slotIndex % 2 == 0) ? TeamSide.Red : TeamSide.Blue;
+    }
+
+    /// <summary>
+    /// 특정 플레이어(PlayerRef who)의 "현재 팀"을 구한다.
+    /// - 1) FindSlotIndex로 who의 슬롯 번호를 찾고
+    /// - 2) 그 슬롯 번호를 GetTeamBySlotIndex 규칙으로 팀으로 변환한다.
+    /// - who가 방에 없으면 FindSlotIndex가 -1 → TeamSide.None 반환
+    /// </summary>
+    public TeamSide GetTeamByPlayer(PlayerRef who)
+    {
+        int idx = FindSlotIndex(who);
+        return GetTeamBySlotIndex(idx);
     }
     #endregion
 }

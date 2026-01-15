@@ -25,10 +25,16 @@ using UnityEngine.UI;
 /// </summary>
 public class RoomChatUIManager : MonoBehaviour
 {
+    #region 변수
     [Header("UI")]
     [SerializeField] private InfiniteScroll chatScroll;
     [SerializeField] private TMP_InputField inputChat;
     [SerializeField] private Button btnSend;
+    [SerializeField] Text txtChattSetting;
+
+    [Header("팀 모드일 때 전체 채팅, 파티 채팅인지 알 수 있는 버튼")]
+    [SerializeField] private Button btnAllChat;
+    [SerializeField] private Button btnTeamChat;
 
     [Header("Optional ScrollRect (자동 맨 아래)")]
     [SerializeField] private ScrollRect scrollRect;
@@ -45,6 +51,9 @@ public class RoomChatUIManager : MonoBehaviour
     [SerializeField] private TMP_Text txtWarn;
 
     [SerializeField] private float warnShowSec = 1.2f;
+
+    [Header("현재 채팅 채널 - 전체 채팅인지 팀 채팅인지 알수 있게 해주는 변수")]
+    [SerializeField] private ChatChannel _currentChannel = ChatChannel.Global;
 
     private float _warnUntil = 0f;
 
@@ -81,6 +90,8 @@ public class RoomChatUIManager : MonoBehaviour
     // 같은 메시지 “연속 중복” 방지 시간(원하면 0으로 꺼도 됨)
     [SerializeField] private float duplicateBlockWindow = 0.15f;
 
+    #endregion
+
     private void Start()
     {
         // 버튼/입력 이벤트 연결
@@ -95,6 +106,29 @@ public class RoomChatUIManager : MonoBehaviour
             inputChat.onSubmit.RemoveListener(OnEndEdit);
             inputChat.onSubmit.AddListener(OnEndEdit);
         }
+
+        if (btnAllChat != null)
+        {
+            btnAllChat.onClick.RemoveAllListeners();
+            btnAllChat.onClick.AddListener(() => SwitchChannel(ChatChannel.Global));
+        }
+        if (btnTeamChat != null)
+        {
+            btnTeamChat.onClick.RemoveAllListeners();
+            btnTeamChat.onClick.AddListener(() => SwitchChannel(ChatChannel.Party));
+        }
+
+        bool team = (Members != null && Members.ModeInt == (int)MatchMode.Team);
+        if (team)
+        {
+            _currentChannel = ChatChannel.Party;
+        }
+        else
+        {
+            _currentChannel = ChatChannel.Global;
+        }
+        OnUiTeamChatting(team);
+        TxtChattingSetting(_currentChannel);
     }
 
     public void OnPanelShown()
@@ -252,7 +286,34 @@ public class RoomChatUIManager : MonoBehaviour
         if (!AmIValidMember(out _, out _))
             return;
 
-        //  4) 로컬 금지어 필터
+        // party 채널 전송 조건 검사
+
+        if (_currentChannel == ChatChannel.Party)
+        {
+            // (1) 팀전인지 확인
+            bool isTeamMode = (Members != null && Members.ModeInt == (int)MatchMode.Team);
+            if (!isTeamMode)
+            {
+                ShowWarn("파티 채팅은 팀전에서만 사용할 수 있습니다.");
+                _currentChannel = ChatChannel.Global; // 안전: 채널을 Global로 되돌림
+                return;
+            }
+
+            // (2) 내 팀 확인
+            TeamSide myTeam = GetMyTeamSide();
+            if (myTeam == TeamSide.None)
+            {
+                // 팀 정보가 아직 안 들어온 상태(입장 직후)일 가능성
+                ShowWarn("팀 정보 동기화 중입니다. 잠시 후 다시 시도해주세요.");
+                return;
+            }
+
+            // 여기서 "같은 팀만 볼 수 있게"는 UI 필터로 이미 처리했고,
+            // 실제 네트워크 수신 필터/서버 필터는 RoomChatState에서 처리해야 완벽함.
+            // UI 레벨에서는 전송 가능한 상태만 확인하면 됨.
+        }
+
+        //  5) 로컬 금지어 필터
         if (useLocalProfanityCheck)
         {
             ProfanityFilter.BlockMode = blockOnProfanity;
@@ -262,7 +323,8 @@ public class RoomChatUIManager : MonoBehaviour
 
             if (filtered == null)
             {
-                ShowWarn("금지어가 포함되어 전송할 수 없습니다.");
+                ShowProfanityToast();
+
                 inputChat.ActivateInputField();
                 return;
             }
@@ -270,8 +332,8 @@ public class RoomChatUIManager : MonoBehaviour
             msg = filtered;
         }
 
-        //  5) 전송
-        Chat.SendChatFromUI(msg);
+        //  6) 전송
+        Chat.SendChatFromUI(msg, _currentChannel);
 
         // 입력창 정리
         inputChat.SetTextWithoutNotify("");
@@ -308,10 +370,26 @@ public class RoomChatUIManager : MonoBehaviour
 
         AmIValidMember(out var runner, out var me);
 
+        TeamSide myTeam = GetMyTeamSide();
+        bool isTeamMode = (Members != null && Members.ModeInt == (int)MatchMode.Team);
+
         for (int i = 0; i < _historySnapshot.Count; i++)
         {
             var m = _historySnapshot[i];
-            _dataList.Add(ConvertToData(m, runner, me, viewIndex: i, animate: false));
+            //전체 탭에 맞게 필터
+            if (_currentChannel == ChatChannel.Global)
+            {
+                if (m.channel != ChatChannel.Global) continue;
+            }
+            else // Party 탭
+            {
+                if (!isTeamMode) continue;
+                if (m.channel != ChatChannel.Party) continue;
+                if (m.team != myTeam) continue;   // 같은 팀만
+            }
+            var data = ConvertToData(m, runner, me, viewIndex: _dataList.Count, animate: false);
+            data.channel = m.channel; // ChatMessageData에도 channel 있으니 세팅
+            _dataList.Add(data);
         }
 
         RebuildScroll();
@@ -328,13 +406,28 @@ public class RoomChatUIManager : MonoBehaviour
     private void HandleChatReceived(RoomChatState.LocalChatMessage m)
     {
 
-        Debug.Log($"[ChatUI] HandleChatReceived seq={m.seq} nick={m.nickname} msg={m.text}");
+        Debug.Log($"[ChatUI] recv channel={m.channel} team={m.team} / currentTab={_currentChannel}");
 
         // 새 메시지 추가 전에 “현재 바닥 근처인지” 저장
         bool wasNearBottom = (!onlyAutoScrollWhenNearBottom) || IsNearBottom();
 
         // 내가 아직 채팅 가능한 멤버인지 여부(내 말풍선 강조에만 사용)
         AmIValidMember(out var runner, out var me);
+
+        bool isTeamMode = (Members != null && Members.ModeInt == (int)MatchMode.Team);
+        TeamSide myTeam = GetMyTeamSide();
+
+        // 현재 보고 있는 채널이 아니면 UI에 추가하지 않음
+        if (_currentChannel == ChatChannel.Global)
+        {
+            if (m.channel != ChatChannel.Global) return;
+        }
+        else
+        {
+            if (!isTeamMode) return;
+            if (m.channel != ChatChannel.Party) return;
+            if (m.team != myTeam) return;
+        }
 
         // UI 히스토리 제한 처리:
         // RoomChatState 쪽에서 앞을 잘라내면, UI도 맨 앞 제거가 필요함.
@@ -377,6 +470,8 @@ public class RoomChatUIManager : MonoBehaviour
     private ChatMessageData ConvertToData(RoomChatState.LocalChatMessage m, NetworkRunner runner, PlayerRef me, int viewIndex, bool animate)
     {
         string timeText = "";
+        bool isTeamMode = (Members != null && Members.ModeInt == (int)MatchMode.Team);
+
         try
         {
             var dt = DateTimeOffset.FromUnixTimeSeconds(m.unixTime).ToLocalTime();
@@ -394,7 +489,10 @@ public class RoomChatUIManager : MonoBehaviour
             isMine = (runner != null && me != PlayerRef.None && m.sender == me),
             // seq를 쓰면 유니크 보장 쉬움
             messageId = $"{m.sender}_{m.seq}",
-            animate = animate
+            animate = animate,
+            channel = m.channel,
+            isTeamMode = isTeamMode,
+            team = m.team
         };
     }
 
@@ -440,5 +538,90 @@ public class RoomChatUIManager : MonoBehaviour
         // Unity ScrollRect: bottom = 0, top = 1
         return scrollRect.verticalNormalizedPosition <= bottomThreshold;
     }
+    #endregion
+
+    #region 채널 변경 전체 채팅, 파티 채팅
+    private void SwitchChannel(ChatChannel ch)
+    {
+        //팀 모드
+        if (ch == ChatChannel.Party)
+        {
+            ch = ChatChannel.Party;
+        }
+        else
+        {
+            ch = ChatChannel.Global;
+        }
+        RebuildFromLocalHistory();
+        TxtChattingSetting(ch);
+    }
+
+    private void TxtChattingSetting(ChatChannel ch)
+    {
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        if (ch == ChatChannel.Party)
+        {
+            if (lang == Lauaguage.Kor) txtChattSetting.text = "팀 채팅";
+            else txtChattSetting.text = "Team Chatt";
+        }
+        else
+        {
+            if (lang == Lauaguage.Kor) txtChattSetting.text = "전체 채팅";
+            else txtChattSetting.text = "All Chatt";
+        }
+    }
+    #endregion
+
+    #region 내 팀 구하는 함수
+
+    private TeamSide GetMyTeamSide()
+    {
+        if (Members == null || Members.Runner == null) return TeamSide.None;
+        var me = Members.Runner.LocalPlayer;
+        if (me == PlayerRef.None) return TeamSide.None;
+
+        return Members.GetTeamByPlayer(me);
+    }
+
+    #endregion
+
+    #region 전체 채팅 파티 채팅 버튼의 대한 함수
+
+    public void OnUiTeamChatting(bool isTeamMode)
+    {        
+        btnAllChat.gameObject.SetActive(isTeamMode);
+        btnTeamChat.gameObject.SetActive(isTeamMode);
+    }
+
+    #endregion
+
+    #region 금지어 출력시 토스트 메시지 뿌려주는 함수
+
+    private void ShowProfanityToast()
+    {
+        string text = GetProfanityText();
+
+        if (ToastMessageManager.instance != null)
+            ToastMessageManager.instance.ShowToast(text);
+        else
+            Debug.LogWarning($"[Toast missing] {text}");
+    }
+
+    private string GetProfanityText()
+    {
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        // 문구는 원하는대로 바꿔도 됨
+        if (lang == Lauaguage.Kor)
+            return "금지어가 포함되어 전송할 수 없습니다.";
+        else
+            return "Your message contains prohibited words and cannot be sent.";
+    }
+
     #endregion
 }

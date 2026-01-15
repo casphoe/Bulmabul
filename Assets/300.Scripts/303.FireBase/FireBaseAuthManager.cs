@@ -76,61 +76,60 @@ public class FireBaseAuthManager : MonoBehaviour
 
         // 0) 필수 처리(빈 값 방지)
         if (string.IsNullOrWhiteSpace(name))
-            Fail("이름은 필수입니다.");
+            Fail("이름은 필수입니다.", "Name is required.");
 
         if (string.IsNullOrWhiteSpace(nickName))
-            Fail("닉네임은 필수입니다.");
+            Fail("닉네임은 필수입니다.", "Nickname is required.");
 
         if (string.IsNullOrWhiteSpace(email))
-            Fail("이메일은 필수입니다.");
+            Fail("이메일은 필수입니다.", "Email is required.");
 
         if (string.IsNullOrWhiteSpace(password))
-            Fail("비밀번호는 필수입니다.");
+            Fail("비밀번호는 필수입니다.", "Password is required.");
 
-        //  프로필 이미지 필수
         if (profileImageBytes == null || profileImageBytes.Length == 0)
-            Fail("프로필 이미지는 필수입니다.");
+            Fail("프로필 이미지는 필수입니다.", "Profile image is required.");
 
         if (string.IsNullOrWhiteSpace(profileContentType))
-            Fail("프로필 이미지 타입이 없습니다.");
+            Fail("프로필 이미지 타입이 없습니다.", "Profile image content type is missing.");
 
         if (profileContentType != "image/png" && profileContentType != "image/jpeg")
-            Fail("프로필 이미지는 PNG 또는 JPG만 가능합니다.");
+            Fail("프로필 이미지는 PNG 또는 JPG만 가능합니다.", "Profile image must be PNG or JPG.");
 
 
         FirebaseUser createdUser = null;
         bool nickClaimed = false;
         bool nameClaimed = false;
 
-        string stage = "시작";
-        string uploadedObjectPath = null; // users/{uid}/profile.png
+        string stageKor = "시작";
+        string stageEng = "Start";
 
         try
         {
             // 1) Auth 회원가입
-            stage = "Auth 계정 생성";
+            stageKor = "Auth 계정 생성";
+            stageEng = "Creating Auth account";
             AuthResult res = await Auth.CreateUserWithEmailAndPasswordAsync(email, password);
             createdUser = res.User;
 
             // 2) 닉네임 선점
-            stage = "닉네임 중복 선점";
+            stageKor = "닉네임 중복 선점";
+            stageEng = "Claiming nickname";
             await NicknameService.ClaimAsync(createdUser.UserId, nickName);
             nickClaimed = true;
 
             // 3) 이름 선점
-            stage = "이름 중복 선점";
+            stageKor = "이름 중복 선점";
+            stageEng = "Claiming name";
             await NameService.ClaimAsync(createdUser.UserId, name);
             nameClaimed = true;
 
             // 4) 프로필 이미지 업로드
-            stage = "프로필 이미지 업로드";
+            stageKor = "프로필 이미지 업로드";
+            stageEng = "Uploading profile image";
 
-            var storage = FirebaseStorage.DefaultInstance;
-
-            // 디버그로 현재 프로젝트 기본 버킷 확인
-            Debug.Log($"[Storage] Default bucket = {storage.App.Options.StorageBucket}");
-
-            
+            var storage = FirebaseStorage.DefaultInstance;           
+           
             var rootRef = storage.RootReference;
 
             string fileName = (profileContentType == "image/png") ? "profile.png" : "profile.jpg";
@@ -143,7 +142,8 @@ public class FireBaseAuthManager : MonoBehaviour
             string photoUrl = url.ToString();
 
             // 5) Account 저장
-            stage = "계정 데이터 저장";
+            stageKor = "계정 데이터 저장";
+            stageEng = "Saving account data";
             var acc = CreateDefaultAccount(createdUser, name, nickName, photoUrl);
             await AccountCloudStore.SaveFullAsync(acc);
 
@@ -152,16 +152,19 @@ public class FireBaseAuthManager : MonoBehaviour
 
             CurrentAccount = acc;
             AuthUIController.instance.ShowSignIn();
-            ShowToast("회원가입 성공!");
+            ToastMessageManager.instance.ShowToast("회원가입 성공!", "Sign up successful!");
             Debug.Log($"Register OK: {email} / uid={createdUser.UserId} / nick={nickName}");
         }
         catch (Exception e)
         {
-            string reason = Friendly(e);
-            string userMsg = $"회원가입 실패({stage}): {reason}";
+            string reasonKor, reasonEng;
+            Friendly(e, out reasonKor, out reasonEng);
 
-            Debug.LogWarning($"[RegisterFail] stage={stage}\n{e}");
-            ShowToast(userMsg);
+            string userMsgKor = $"회원가입 실패({stageKor}): {reasonKor}";
+            string userMsgEng = $"Sign up failed ({stageEng}): {reasonEng}";
+
+            Debug.LogWarning($"[RegisterFail] stage={stageKor}/{stageEng}\n{e}");
+            ToastMessageManager.instance.ShowToast(userMsgKor, userMsgEng);
 
             //  선점한 것들 반환
             try { if (nameClaimed && createdUser != null) await NameService.ReleaseAsync(createdUser.UserId, name); } catch { }
@@ -179,7 +182,7 @@ public class FireBaseAuthManager : MonoBehaviour
             }
 
             //  UI(OnClickRegister)에서 e.Message로도 보이게
-            throw new Exception(userMsg, e);
+            throw new Exception(T(userMsgKor, userMsgEng), e);
         }
     }
 
@@ -199,7 +202,7 @@ public class FireBaseAuthManager : MonoBehaviour
             // 여기서 계정 없으면 예외 발생
             await LoadAccountAfterLoginAsync();
 
-            ShowToast("로그인 성공!");
+            ToastMessageManager.instance.ShowToast("로그인 성공!", "Login successful!");
             Debug.Log($"Login OK: {email} / uid={res.User.UserId} / nick={CurrentAccount?.NickName}");
             StartCoroutine(SceneMove(1,1));
         }
@@ -209,8 +212,9 @@ public class FireBaseAuthManager : MonoBehaviour
             try { Auth?.SignOut(); } catch { }
 
             CurrentAccount = null;
-
-            ShowToast($"로그인 실패: {ExtractFriendlyError(e)}");
+            string k, en;
+            ExtractFriendlyError(e, out k, out en);
+            ToastMessageManager.instance.ShowToast($"로그인 실패: {k}", $"Login failed: {en}");
             //Debug.LogError($"Login Fail: {e}");
             throw;
         }
@@ -290,74 +294,111 @@ public class FireBaseAuthManager : MonoBehaviour
         EnsureReady();
 
         if (string.IsNullOrWhiteSpace(email))
-            throw new Exception("이메일을 입력하세요.");
+            throw new Exception(T("이메일을 입력하세요.", "Please enter your email."));
 
         await Auth.SendPasswordResetEmailAsync(email.Trim());
-        ShowToast("비밀번호 재설정 메일을 전송했습니다.");
+        ToastMessageManager.instance.ShowToast("비밀번호 재설정 메일을 전송했습니다.", "Password reset email has been sent.");
     }
 
     public void EnsureReady()
     {
         if (!IsReady || Auth == null)
-            throw new Exception("Firebase is not ready yet. (Wait for Start initialization)");
+            throw new Exception(T(
+                "Firebase가 아직 준비되지 않았습니다. (Start 초기화 대기)",
+                "Firebase is not ready yet. (Wait for Start initialization)"
+            ));
     }
 
     #region 토스 메시지 표시
-    public void ShowToast(string msg)
+    private string T(string kor, string eng)
     {
-        if (AuthUIController.instance == null || AuthUIController.instance.toasstMessage == null)
+        if (LaguageManager.Instance == null) return kor;
+        return (LaguageManager.Instance.currentLang == Lauaguage.Eng) ? eng : kor;
+    }
+
+    private void Fail(string kor, string eng)
+    {
+        ToastMessageManager.instance.ShowToast(kor, eng);
+        throw new Exception(T(kor, eng));
+    }
+
+
+    private void ExtractFriendlyError(Exception e, out string kor, out string eng)
+    {
+        e = Unwrap(e);
+
+        // 닉네임 관련은 그대로 노출(너가 던진 메시지)
+        if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("닉네임"))
         {
-            Debug.LogWarning($"Toast(UI 없음): {msg}");
+            kor = e.Message;
+            eng = e.Message; // 이미 영어로 던질 수도 있으니 그대로
             return;
         }
 
-        AuthUIController.instance.ShowToast(msg);
-    }
-
-    void Fail(string msg)
-    {
-        ShowToast(msg);               //  여기서 토스트
-        throw new Exception(msg);     // 흐름 중단
-    }
-
-
-    private string ExtractFriendlyError(Exception e)
-    {
-        // 닉네임 관련은 그대로 보여주기
-        if (e.Message.Contains("닉네임")) return e.Message;
-
-        // Firebase 공통 예외
         if (e is FirebaseException fe)
         {
-            // Auth쪽 에러코드로 해석(가능한 경우)
-            // ErrorCode는 int로 들어옴
             try
             {
                 var authErr = (AuthError)fe.ErrorCode;
-                return $"{AuthErrorToKorean(authErr)} ({authErr})";
+                AuthErrorToText(authErr, out kor, out eng);
+                return;
             }
             catch
             {
-                return $"Firebase 오류 코드: {fe.ErrorCode} / {fe.Message}";
+                kor = $"Firebase 오류 코드: {fe.ErrorCode}";
+                eng = $"Firebase error code: {fe.ErrorCode}";
+                return;
             }
         }
 
-        return e.Message;
+        kor = string.IsNullOrWhiteSpace(e.Message) ? e.GetType().Name : e.Message;
+        eng = kor;
     }
 
-    private string AuthErrorToKorean(AuthError err)
+    private void AuthErrorToText(AuthError err, out string kor, out string eng)
     {
         switch (err)
         {
-            case AuthError.InvalidEmail: return "이메일 형식이 올바르지 않습니다.";
-            case AuthError.WrongPassword: return "비밀번호가 틀렸습니다.";
-            case AuthError.UserNotFound: return "존재하지 않는 계정입니다.";
-            case AuthError.EmailAlreadyInUse: return "이미 사용 중인 이메일입니다.";
-            case AuthError.WeakPassword: return "비밀번호가 너무 약합니다.";
-            case AuthError.MissingEmail: return "이메일을 입력하세요.";
-            case AuthError.MissingPassword: return "비밀번호를 입력하세요.";
-            case AuthError.NetworkRequestFailed: return "네트워크 연결을 확인하세요.";
-            default: return "인증 처리 중 오류가 발생했습니다.";
+            case AuthError.InvalidEmail:
+                kor = "이메일 형식이 올바르지 않습니다.";
+                eng = "Invalid email format.";
+                break;
+            case AuthError.WrongPassword:
+                kor = "비밀번호가 틀렸습니다.";
+                eng = "Incorrect password.";
+                break;
+            case AuthError.UserNotFound:
+                kor = "존재하지 않는 계정입니다.";
+                eng = "Account not found.";
+                break;
+            case AuthError.EmailAlreadyInUse:
+                kor = "이미 사용 중인 이메일입니다.";
+                eng = "Email is already in use.";
+                break;
+            case AuthError.WeakPassword:
+                kor = "비밀번호가 너무 약합니다.";
+                eng = "Password is too weak.";
+                break;
+            case AuthError.MissingEmail:
+                kor = "이메일을 입력하세요.";
+                eng = "Please enter your email.";
+                break;
+            case AuthError.MissingPassword:
+                kor = "비밀번호를 입력하세요.";
+                eng = "Please enter your password.";
+                break;
+            case AuthError.NetworkRequestFailed:
+                kor = "네트워크 연결을 확인하세요.";
+                eng = "Please check your network connection.";
+                break;
+            case AuthError.RequiresRecentLogin:
+                kor = "보안을 위해 다시 로그인 후 진행해 주세요.";
+                eng = "For security, please re-login and try again.";
+                break;
+            default:
+                kor = "인증 처리 중 오류가 발생했습니다.";
+                eng = "An authentication error occurred.";
+                break;
         }
     }
 
@@ -371,34 +412,51 @@ public class FireBaseAuthManager : MonoBehaviour
         return e;
     }
 
-    private string Friendly(Exception e)
+    private void Friendly(Exception e, out string kor, out string eng)
     {
         e = Unwrap(e);
 
-        // 닉네임/이름 중복은 우리가 던진 메시지 그대로 쓰는 게 제일 명확
-        if (e.Message.Contains("닉네임")) return e.Message;
-        if (e.Message.Contains("이름")) return e.Message;
+        // 닉네임/이름 중복은 그대로 쓰는 게 제일 명확
+        if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("닉네임"))
+        {
+            kor = e.Message;
+            eng = e.Message;
+            return;
+        }
+        if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("이름"))
+        {
+            kor = e.Message;
+            eng = e.Message;
+            return;
+        }
 
-        // RTDB Rules 권한 문제 흔함
         string msg = e.Message ?? "";
+
         if (msg.Contains("Permission denied") || msg.Contains("permission_denied"))
-            return "DB 권한 거부입니다. Realtime Database Rules에 /names, /nicknames 쓰기 허용이 있는지 확인하세요.";
+        {
+            kor = "DB 권한 거부입니다. Realtime Database Rules에 /names, /nicknames 쓰기 허용이 있는지 확인하세요.";
+            eng = "Database permission denied. Check RTDB rules for /names and /nicknames write access.";
+            return;
+        }
 
         if (e is FirebaseException fe)
         {
-            // Auth 에러면 AuthError로 해석 가능
             try
             {
                 var authErr = (AuthError)fe.ErrorCode;
-                return AuthErrorToKorean(authErr);
+                AuthErrorToText(authErr, out kor, out eng);
+                return;
             }
             catch
             {
-                return $"Firebase 오류: {fe.Message}";
+                kor = $"Firebase 오류: {fe.Message}";
+                eng = $"Firebase error: {fe.Message}";
+                return;
             }
         }
 
-        return string.IsNullOrWhiteSpace(msg) ? e.GetType().Name : msg;
+        kor = string.IsNullOrWhiteSpace(msg) ? e.GetType().Name : msg;
+        eng = kor;
     }
     #endregion
 
@@ -409,30 +467,71 @@ public class FireBaseAuthManager : MonoBehaviour
 
         var user = Auth.CurrentUser;
         if (user == null)
-            throw new Exception("로그인 상태가 아닙니다.");
+            throw new Exception(T("로그인 상태가 아닙니다.", "Not logged in."));
 
         try
         {
-            // 1) 먼저 입력 없이 바로 시도 (방금 로그인했으면 통과하는 경우 많음)
             await DeleteAllUserDataAndAuthAsync(user);
         }
         catch (FirebaseException fe)
         {
             // RequiresRecentLogin이면 그때만 비번 요구
             if ((AuthError)fe.ErrorCode != AuthError.RequiresRecentLogin)
+            {
+                string k, en;
+                ExtractFriendlyError(fe, out k, out en);
+                ToastMessageManager.instance.ShowToast(
+                    $"회원 탈퇴 실패: {k}",
+                    $"Account deletion failed: {en}"
+                );
                 throw;
+            }
 
             if (string.IsNullOrWhiteSpace(password))
-                throw new Exception("보안을 위해 비밀번호를 한 번 더 입력해 주세요.");
+            {
+                // 여기서 토스트도 같이
+                ToastMessageManager.instance.ShowToast(
+                    "보안을 위해 비밀번호를 한 번 더 입력해 주세요.",
+                    "For security, please enter your password again."
+                );
+                throw new Exception(T(
+                    "보안을 위해 비밀번호를 한 번 더 입력해 주세요.",
+                    "For security, please enter your password again."
+                ));
+            }
 
-            // 2) 재인증(이메일은 CurrentUser에서 가져오면 됨)
-            var cred = EmailAuthProvider.GetCredential(user.Email, password);
-            await user.ReauthenticateAsync(cred);
+            try
+            {
+                // 재인증
+                var cred = EmailAuthProvider.GetCredential(user.Email, password);
+                await user.ReauthenticateAsync(cred);
 
-            // 3) 재시도
-            await DeleteAllUserDataAndAuthAsync(user);
+                // 재시도
+                await DeleteAllUserDataAndAuthAsync(user);
+            }
+            catch (Exception e2)
+            {
+                string k2, en2;
+                ExtractFriendlyError(e2, out k2, out en2);
+                ToastMessageManager.instance.ShowToast(
+                    $"회원 탈퇴 실패: {k2}",
+                    $"Account deletion failed: {en2}"
+                );
+                throw;
+            }
+        }
+        catch (Exception e)
+        {
+            string k, en;
+            ExtractFriendlyError(e, out k, out en);
+            ToastMessageManager.instance.ShowToast(
+                $"회원 탈퇴 실패: {k}",
+                $"Account deletion failed: {en}"
+            );
+            throw;
         }
     }
+
 
     private async Task DeleteAllUserDataAndAuthAsync(FirebaseUser user)
     {
@@ -486,9 +585,19 @@ public class FireBaseAuthManager : MonoBehaviour
         CurrentAccount = null;
         try { Auth.SignOut(); } catch { }
 
-        ShowToast("회원 탈퇴가 완료되었습니다.");
-        SceneManager.LoadScene(0);
+        ToastMessageManager.instance.ShowToast("회원 탈퇴가 완료되었습니다.", "Account deletion completed.");
+        StartCoroutine(CoMoveSceneAfterToast(0));
     }
+
+    private IEnumerator CoMoveSceneAfterToast(int sceneIndex)
+    {
+        // 토스트가 1프레임은 그려지도록
+        yield return null;
+        // 살짝 보여주고 이동 (원하면 0.3~0.5로)
+        yield return new WaitForSeconds(0.35f);
+        SceneManager.LoadScene(sceneIndex);
+    }
+
     #endregion
 
     #region 로그아웃
@@ -505,22 +614,55 @@ public class FireBaseAuthManager : MonoBehaviour
 
         var user = Auth.CurrentUser;
         if (user == null)
-            throw new Exception("로그인 상태가 아닙니다. (로그아웃 불가)");
+        {
+            ToastMessageManager.instance.ShowToast(
+                "로그인 상태가 아닙니다. (로그아웃 불가)",
+                "Not logged in. (Cannot logout)"
+            );
+            throw new Exception(T("로그인 상태가 아닙니다. (로그아웃 불가)", "Not logged in. (Cannot logout)"));
+        }
 
         if (CurrentAccount == null)
-            throw new Exception("CurrentAccount가 없습니다. 저장 후 로그아웃할 수 없습니다.");
+        {
+            ToastMessageManager.instance.ShowToast(
+                "계정 데이터가 없습니다. 저장 후 로그아웃할 수 없습니다.",
+                "Account data is missing. Cannot logout without saving."
+            );
+            throw new Exception(T("계정 데이터가 없습니다. 저장 후 로그아웃할 수 없습니다.",
+                                  "Account data is missing. Cannot logout without saving."));
+        }
 
-        // 1) 로그아웃 날짜 갱신
-        CurrentAccount.LogoutDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        try
+        {
+            // 1) 로그아웃 날짜 갱신
+            CurrentAccount.LogoutDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
-        // 2) 저장이 반드시 성공해야 함 (실패하면 여기서 예외 -> 아래 진행 안 됨)
-        await AccountCloudStore.SaveFullAsync(CurrentAccount);
+            // 2) 저장
+            await AccountCloudStore.SaveFullAsync(CurrentAccount);
 
-        // 3) 저장 성공 후에만 SignOut + 씬 이동
-        Auth.SignOut();
-        CurrentAccount = null;
+            // 3) signout
+            Auth.SignOut();
+            CurrentAccount = null;
 
-        SceneManager.LoadScene(0);
+            // 성공 토스트 + 씬 이동(딜레이)
+            ToastMessageManager.instance.ShowToast(
+                "로그아웃 완료!",
+                "Logged out successfully!"
+            );
+
+            StartCoroutine(CoMoveSceneAfterToast(0));
+        }
+        catch (Exception e)
+        {
+            string k, en;
+            ExtractFriendlyError(e, out k, out en);
+
+            ToastMessageManager.instance.ShowToast(
+                $"로그아웃 실패: {k}",
+                $"Logout failed: {en}"
+            );
+            throw;
+        }
 
     }
     #endregion

@@ -44,6 +44,9 @@ public class RoomChatState : NetworkBehaviour
         public string text;
         public int unixTime;
         public int seq;
+
+        public ChatChannel channel;
+        public TeamSide team;
     }
 
     // 로컬 히스토리(각 클라 개별 보관)
@@ -159,7 +162,7 @@ public class RoomChatState : NetworkBehaviour
     /// - 내부에서 RPC_SendChatToServer("안녕") 실행
     /// - 서버(=StateAuthority)가 검사/정리 후 브로드캐스트 RPC 호출
     /// </summary>
-    public void SendChatFromUI(string message)
+    public void SendChatFromUI(string message, ChatChannel channel = ChatChannel.Global)
     {
         // Runner/오브젝트 준비 안 됐으면 무시
         if (Runner == null)
@@ -168,9 +171,14 @@ public class RoomChatState : NetworkBehaviour
             return;
         }
 
-        // 네트워크로 보내기
-        Debug.Log($"[Chat] SendChatFromUI localPlayer={Runner.LocalPlayer} msg={message}");
-        RPC_SendChatToServer(message);
+        //  개인전이면 무조건 Global로 강제
+        var members = RoomMembersState.Instance;
+        bool isTeamMode = (members != null && members.ModeInt == (int)MatchMode.Team);
+        if (!isTeamMode)
+            channel = ChatChannel.Global;
+
+        Debug.Log($"[Chat] SendChatFromUI localPlayer={Runner.LocalPlayer} channel={channel} msg={message}");
+        RPC_SendChatToServer(message, (int)channel);
     }
 
     /// <summary>
@@ -180,7 +188,7 @@ public class RoomChatState : NetworkBehaviour
     /// - 서버가 브로드캐스트를 수행
     /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    private void RPC_SendChatToServer(string message, RpcInfo info = default)
+    private void RPC_SendChatToServer(string message, int channelInt, RpcInfo info = default)
     {
         // 서버(=StateAuthority)에서만 처리
         if (!Object.HasStateAuthority) return;
@@ -218,10 +226,37 @@ public class RoomChatState : NetworkBehaviour
         // 시간(UTC seconds)
         int unix = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
+        // 채널 정규화
+        ChatChannel channel = (channelInt == (int)ChatChannel.Party) ? ChatChannel.Party : ChatChannel.Global;
+
+        // Party는 "팀 모드"에서만 허용 + sender의 팀을 구해둠
+        var members = RoomMembersState.Instance;
+        TeamSide senderTeam = TeamSide.None;
+
+        bool isTeamMode = (members != null && members.ModeInt == (int)MatchMode.Team);
+        if (isTeamMode)
+            senderTeam = members.GetTeamByPlayer(sender);
+
+        if (channel == ChatChannel.Party)
+        {
+            if (!isTeamMode)
+            {
+                Debug.LogWarning($"[Chat] Drop Party msg in SOLO. sender={sender} msg={msg}");
+                return;
+            }
+            if (senderTeam == TeamSide.None)
+            {
+                Debug.LogWarning($"[Chat] Drop Party msg no team. sender={sender} msg={msg}");
+                return;
+            }
+        }
+
+        int teamInt = isTeamMode ? (int)senderTeam : (int)TeamSide.None;
+
         Debug.Log($"[Chat] (Server) Broadcast sender={sender} nick={nick} seq={seq}");
 
-        // 서버 -> 모두 브로드캐스트
-        RPC_BroadcastChat(sender, nick, msg, unix, seq);
+        // 서버 -> 모두(수신 후 클라에서 같은 팀만 저장하도록 필터링)
+        RPC_BroadcastChat(sender, nick, msg, unix, seq, (int)channel, teamInt);
     }
     #endregion
 
@@ -235,18 +270,60 @@ public class RoomChatState : NetworkBehaviour
     /// 2) UI 갱신 이벤트(OnChatReceived) 호출
     /// </summary>
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_BroadcastChat(PlayerRef sender, string nick, string msg, int unixTime, int seq, RpcInfo info = default)
+    private void RPC_BroadcastChat(PlayerRef sender, string nick, string msg, int unixTime, int seq,int channelInt,int teamInt, RpcInfo info = default)
     {
-        Debug.Log($"[Chat] (Client) RPC_BroadcastChat recv sender={sender} seq={seq} msg={msg}");
+        Debug.Log($"[Chat] recv channelInt={channelInt} resolved={(channelInt == (int)ChatChannel.Party ? "Party" : "Global")} teamInt={teamInt} mode={(RoomMembersState.Instance != null ? RoomMembersState.Instance.ModeInt : -999)}");
 
-        // 로컬 히스토리에 추가
+
+        // 1) 채널 복원 (일단 Party/Global만)
+        ChatChannel channel = (channelInt == (int)ChatChannel.Party) ? ChatChannel.Party : ChatChannel.Global;
+        TeamSide senderTeam = (TeamSide)teamInt;
+
+        var members = RoomMembersState.Instance;
+
+        // 방어 1: 팀모드가 아닌데 Party로 왔으면 -> Global로 강등
+        if (channel == ChatChannel.Party)
+        {
+            if (members == null || members.ModeInt != (int)MatchMode.Team)
+            {
+                channel = ChatChannel.Global;
+                senderTeam = TeamSide.None;
+            }
+            else
+            {
+                //  방어 2: 팀모드인데 senderTeam이 None이면 -> Global로 강등
+                if (senderTeam == TeamSide.None)
+                {
+                    channel = ChatChannel.Global;
+                }
+            }
+        }
+
+        // 2) Party(팀채팅)일 때만 같은 팀 필터링
+        if (channel == ChatChannel.Party)
+        {
+            if (members == null) return; // (위에서 강등되었어야 하지만 안전빵)
+            var me = members.Runner != null ? members.Runner.LocalPlayer : PlayerRef.None;
+            if (me == PlayerRef.None) return;
+
+            TeamSide myTeam = members.GetTeamByPlayer(me);
+            if (myTeam == TeamSide.None) return;
+
+            if (senderTeam != myTeam)
+                return; //  다른 팀이면 팀채팅에서만 차단
+        }
+
+
+        // 3) 최종 저장(글로벌이면 team=None)
         var item = new LocalChatMessage
         {
             sender = sender,
             nickname = nick,
             text = msg,
             unixTime = unixTime,
-            seq = seq
+            seq = seq,
+            channel = channel,
+            team = (channel == ChatChannel.Party) ? senderTeam : TeamSide.None
         };
 
         AppendToLocalHistory(item);

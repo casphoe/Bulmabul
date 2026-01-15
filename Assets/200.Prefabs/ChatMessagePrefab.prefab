@@ -1,5 +1,80 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &618140530741196789
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4945614878020193982}
+  - component: {fileID: 8712098462359368082}
+  - component: {fileID: 5118401804674278195}
+  m_Layer: 5
+  m_Name: ChatMeessageImage
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &4945614878020193982
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 618140530741196789}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 9105977225501186530}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 1, y: 1}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!222 &8712098462359368082
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 618140530741196789}
+  m_CullTransparentMesh: 1
+--- !u!114 &5118401804674278195
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 618140530741196789}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Material: {fileID: 0}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 21300000, guid: 394ffc52f2a47404e812599ee2d74f99, type: 3}
+  m_Type: 0
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
 --- !u!1 &3940076904029683525
 GameObject:
   m_ObjectHideFlags: 0
@@ -68,7 +143,7 @@ MonoBehaviour:
   m_FontData:
     m_Font: {fileID: 12800000, guid: 29b8967d341c85945a07ca3b958d0680, type: 3}
     m_FontSize: 16
-    m_FontStyle: 0
+    m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 1
     m_MaxSize: 167
@@ -89,7 +164,6 @@ GameObject:
   m_Component:
   - component: {fileID: 9105977225501186530}
   - component: {fileID: 7559376456516463883}
-  - component: {fileID: 8627457061227094496}
   - component: {fileID: 271375952051982011}
   m_Layer: 5
   m_Name: ChatMessagePrefab
@@ -110,6 +184,7 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 4945614878020193982}
   - {fileID: 4609480138451413265}
   - {fileID: 8627253897027638228}
   - {fileID: 5925361650777397810}
@@ -128,36 +203,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4191193612318355340}
   m_CullTransparentMesh: 1
---- !u!114 &8627457061227094496
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4191193612318355340}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_RaycastTarget: 1
-  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
-  m_Maskable: 1
-  m_OnCullStateChanged:
-    m_PersistentCalls:
-      m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: 394ffc52f2a47404e812599ee2d74f99, type: 3}
-  m_Type: 0
-  m_PreserveAspect: 0
-  m_FillCenter: 1
-  m_FillMethod: 4
-  m_FillAmount: 1
-  m_FillClockwise: 1
-  m_FillOrigin: 0
-  m_UseSpriteMesh: 0
-  m_PixelsPerUnitMultiplier: 1
 --- !u!114 &271375952051982011
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -174,11 +219,16 @@ MonoBehaviour:
   txtNick: {fileID: 8633623710544552207}
   txtMsg: {fileID: 5635164428563688273}
   txtTime: {fileID: 4115712771955618158}
-  myBubble: {fileID: 0}
   bubbleBg: {fileID: 9105977225501186530}
   flipBubbleForOther: 1
   charsPerSecond: 40
   typeOnlyWhenAnimateFlag: 1
+  bubbleBgImage: {fileID: 5118401804674278195}
+  soloBgColor: {r: 1, g: 1, b: 1, a: 1}
+  soloTextColor: {r: 0, g: 0, b: 0, a: 1}
+  redTeamBgColor: {r: 1, g: 0, b: 0, a: 1}
+  blueTeamBgColor: {r: 0, g: 0, b: 1, a: 1}
+  teamTextColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!1 &5584112368633463451
 GameObject:
   m_ObjectHideFlags: 0
@@ -247,7 +297,7 @@ MonoBehaviour:
   m_FontData:
     m_Font: {fileID: 12800000, guid: 29b8967d341c85945a07ca3b958d0680, type: 3}
     m_FontSize: 18
-    m_FontStyle: 0
+    m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 1
     m_MaxSize: 167
@@ -326,7 +376,7 @@ MonoBehaviour:
   m_FontData:
     m_Font: {fileID: 12800000, guid: 29b8967d341c85945a07ca3b958d0680, type: 3}
     m_FontSize: 16
-    m_FontStyle: 0
+    m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 1
     m_MaxSize: 167

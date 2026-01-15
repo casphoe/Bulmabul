@@ -73,7 +73,7 @@ public static class NicknameService
         if (snap.Exists && snap.Value != null && snap.Value.ToString() == uid)
             return;
 
-        AuthUIController.instance.ShowToast("닉네임이 중복입니다.");
+        ToastMessageManager.instance.ShowToast("닉네임이 중복입니다." , "The nickname is duplicated.");
         // 여기까지 왔다면 반영/확인이 애매한 상태(거의 규칙/네트워크)
         throw new Exception("이미 사용 중인 닉네임입니다.");
     }
