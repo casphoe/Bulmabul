@@ -243,6 +243,26 @@
     {
       "key": "txt.Team",
       "text": "파티 채팅"
+    },
+    {
+      "key": "input.friend",
+      "text": "친구 추가할 닉네임을 입력해주세요..."
+    },
+    {
+      "key": "current.friend",
+      "text": "친구 목록을 검색해주세요..."
+    },
+    {
+      "key": "txt.Invite",
+      "text": "초대"
+    },
+    {
+      "key": "txt.Delete",
+      "text": "삭제"
+    },
+    {
+      "key": "txt.FriendRequest",
+      "text": "친구 요청"
     }
   ],
   "eng": [
@@ -489,6 +509,26 @@
     {
       "key": "txt.Team",
       "text": "Team Chat"
+    },
+    {
+      "key": "input.friend",
+      "text": "Please enter the nickname you wish to add as a friend..."
+    },
+    {
+      "key": "current.friend",
+      "text": "Please search your friends list..."
+    },
+    {
+      "key": "txt.Invite",
+      "text": "Invite"
+    },
+    {
+      "key": "txt.Delete",
+      "text": "Delete"
+    },
+    {
+      "key": "txt.FriendRequest",
+      "text": "Friend Request"
     }
   ]
 }

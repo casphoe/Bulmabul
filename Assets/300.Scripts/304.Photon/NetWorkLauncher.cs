@@ -113,7 +113,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     #region Runner Lifecycle (생성/콜백등록/리셋/재생성)
 
     /*
-──────────────────────────────────────────────────────────────────────────────
 [Runner Lifecycle 설계 의도]
 - Fusion 2에서는 StartGame에 사용된 NetworkRunner를 Shutdown 후 재사용하면
   "[Fusion] Failed: NetworkRunner should not be reused."가 발생할 수 있다.
@@ -135,7 +134,6 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 - EnsureRunner():
   ResetRunner로 Runner가 사라진 상태에서 "다음 JoinLobby / StartGame"을 할 수 있게
   Runner를 다시 붙이고(없으면 생성), 콜백/SceneManager까지 보장하는 함수.
-──────────────────────────────────────────────────────────────────────────────
 */
 
     /// <summary>

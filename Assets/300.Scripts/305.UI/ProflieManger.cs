@@ -215,8 +215,17 @@ public class ProflieManger : MonoBehaviour
 
         try
         {
+            var updates = new Dictionary<string, object>
+            {
+                [$"users/{uid}/nick"] = newNickKey,
+
+                // 공개 프로필은 "표시용"이니까 원문 닉네임 저장 추천
+                // 검색은 nicknames 인덱스로 하고, UI 표시는 userPublic.nick을 씀
+                [$"userPublic/{uid}/nick"] = newNickRaw.Trim()
+            };
+
             // 2) users/{uid}/nick 저장은 key로
-            await Root.Child("users").Child(uid).Child("nick").SetValueAsync(newNickKey);
+            await Root.UpdateChildrenAsync(updates);
 
             //  3) 로컬도 key로 저장
             fb.CurrentAccount.NickName = newNickKey;
@@ -303,8 +312,13 @@ public class ProflieManger : MonoBehaviour
             {
                 string photoUrl = await UploadProfilePhotoAsync(user.UserId, pendingPhotoBytes, pendingPhotoContentType, pendingPhotoFileName);
 
-                // RTDB 저장
-                await Root.Child("users").Child(user.UserId).Child("photoUrl").SetValueAsync(photoUrl);
+                // users + userPublic 동시 저장
+                var updates = new Dictionary<string, object>
+                {
+                    [$"users/{user.UserId}/photoUrl"] = photoUrl,
+                    [$"userPublic/{user.UserId}/photoUrl"] = photoUrl
+                };
+                await Root.UpdateChildrenAsync(updates);
 
                 // 로컬 Account 반영
                 fb.CurrentAccount.PhotoUrl = photoUrl;

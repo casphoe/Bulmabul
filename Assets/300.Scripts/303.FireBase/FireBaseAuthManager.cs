@@ -141,6 +141,22 @@ public class FireBaseAuthManager : MonoBehaviour
             var url = await fileRef.GetDownloadUrlAsync();
             string photoUrl = url.ToString();
 
+            var dbRoot = FirebaseDatabase.DefaultInstance.RootReference;
+
+            // nick은 네가 users에는 "원문"으로 저장하는지 "key"로 저장하는지 정책이 중요함.
+            // 지금 Register에서는 CreateDefaultAccount에 nickName(원문)을 넣고 있으니 그대로 저장하는 버전으로 작성.
+            var updates = new Dictionary<string, object>
+            {
+                [$"users/{createdUser.UserId}/photoUrl"] = photoUrl,
+                [$"users/{createdUser.UserId}/nick"] = nickName.Trim(),
+
+                // 공개 프로필(친구/초대에서 읽을 데이터)
+                [$"userPublic/{createdUser.UserId}/photoUrl"] = photoUrl,
+                [$"userPublic/{createdUser.UserId}/nick"] = nickName.Trim(),
+            };
+
+            await dbRoot.UpdateChildrenAsync(updates);
+
             // 5) Account 저장
             stageKor = "계정 데이터 저장";
             stageEng = "Saving account data";
@@ -558,7 +574,8 @@ public class FireBaseAuthManager : MonoBehaviour
         // 한 번에 원자적으로 지우기 (users + nicknames + names)
         var updates = new Dictionary<string, object>
         {
-            [$"users/{uid}"] = null
+            [$"users/{uid}"] = null,
+            [$"userPublic/{uid}"] = null,
         };
 
 
