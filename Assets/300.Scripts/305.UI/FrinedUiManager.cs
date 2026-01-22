@@ -1,6 +1,7 @@
 ﻿using Firebase.Auth;
 using Firebase.Database;
 using Gpm.Ui;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,8 +33,20 @@ public class FrinedUiManager : MonoBehaviour
 
     DatabaseReference _reqInRef;
 
+    bool isAccept = false;
+    bool isDecine = false;
+
+    private float _nextAcceptLightTick = 0f;
+    private float _nextDecineLightTick = 0f;
+
+    struct IncomingReq
+    {
+        public string fromUid;
+        public string fromNick;
+    }
+
     // 들어온 요청 큐
-    readonly Queue<string> _incomingQueue = new();
+    readonly Queue<IncomingReq> _incomingQueue = new();
     readonly HashSet<string> _queuedSet = new(); // 중복 방지
     bool _toastShowing = false;
 
@@ -42,8 +55,16 @@ public class FrinedUiManager : MonoBehaviour
 
     bool isFriendOpen = false;
 
-    enum TabMode { Invite, Friends }
-    TabMode _mode = TabMode.Friends;
+    #region  알림 리스너 
+
+    DatabaseReference _notiRef;
+    readonly HashSet<string> _notiHandled = new(); // 중복 방지(옵션)
+
+    readonly Queue<System.Action> _mainThreadQueue = new();
+    #endregion
+    [SerializeField] enum TabMode { Invite, Friends }
+    [Header("친구 탭")]
+    [SerializeField] TabMode _mode = TabMode.Friends;
 
     CancellationTokenSource _cts;
 
@@ -63,19 +84,19 @@ public class FrinedUiManager : MonoBehaviour
 
         if (btnFriendCancel) btnFriendCancel.onClick.AddListener(() => FriendPanelOff());
 
+        isAccept = false;
+        isDecine = false;
+
         ApplyTabUI();
     }
 
     private void Update()
     {
-        if(Input.GetKeyDown(KeyCode.F))
+        if (Input.GetKeyDown(KeyCode.F))
         {
             isFriendOpen = !isFriendOpen;
 
-            friendPanel.SetActive(isFriendOpen);
-
-            if (isFriendOpen)
-                _ = ReloadAsync(); // 열리면 현재 탭 기준으로 전체/검색 로드
+            BtnFriendPanelOnOff(isFriendOpen);
         }
     }
 
@@ -86,13 +107,25 @@ public class FrinedUiManager : MonoBehaviour
 
         _myUid = user.UserId;
 
-        HookIncomingListener();   // 먼저
+        HookIncomingListener();      // 친구요청 토스트
+        HookNotificationListener();  // 수락/거절 토스트
         await ReloadAsync();      // 그 다음 (user 있을 때만)
     }
 
     void OnDisable()
     {
         UnhookIncomingListener();
+        UnhookNotificationListener();
+    }
+
+    public void BtnFriendPanelOnOff(bool isActive)
+    {
+        isFriendOpen = isActive;
+
+        friendPanel.SetActive(isFriendOpen);
+
+        if (isFriendOpen)
+            _ = ReloadAsync(); // 열리면 현재 탭 기준으로 전체/검색 로드
     }
 
     void FriendPanelOff()
@@ -155,7 +188,7 @@ public class FrinedUiManager : MonoBehaviour
         if (d.inviteState == FriendListItemData.InviteState.None)
         {
             await FriendService.SendFriendRequestAsync(d.uid, d.nick);
-            ToastMessageManager.instance.ShowToast("친구 요청을 보냈습니다.", "Friend request sent.");
+            ToastMessageManager.instance.ShowToast($"{d.nick} 님에게 친구 요청을 보냈습니다.", $"Friend request sent to {d.nick}.");
             await ReloadAsync();
             return;
         }
@@ -175,13 +208,14 @@ public class FrinedUiManager : MonoBehaviour
         string keyword = inputInviteSearch ? inputInviteSearch.text : "";
         keyword = (keyword ?? "").Trim();
 
-        // 비어있으면 전체(일부) / 입력 있으면 prefix 검색
+        // 1) nicknames에서 후보 가져오기
         var rows = string.IsNullOrEmpty(keyword)
            ? await FriendService.GetInviteCandidatesDefaultAsync(100)
            : await FriendService.SearchInviteCandidatesByPrefixAsync(keyword, 50);
 
+
         // 2) 상태용: friends / out / in 을 한 번씩 읽어서 HashSet 만들기
-        var myUid = Firebase.Auth.FirebaseAuth.DefaultInstance.CurrentUser.UserId;
+        var myUid = FirebaseAuth.DefaultInstance.CurrentUser.UserId;
 
         var friendsSnapTask = FirebaseDatabase.DefaultInstance.GetReference($"friends/{myUid}").GetValueAsync();
         var outSnapTask = FirebaseDatabase.DefaultInstance.GetReference($"friendRequestsOut/{myUid}").GetValueAsync();
@@ -205,6 +239,7 @@ public class FrinedUiManager : MonoBehaviour
         if (inSnap != null && inSnap.Exists)
             foreach (var c in inSnap.Children) inSet.Add(c.Key); // key = fromUid
 
+        // 3) 리스트 만들기 + 프로필 채우기
         var dataList = new List<FriendListItemData>();
         var tasks = new List<Task>();
         foreach (var r in rows)
@@ -230,7 +265,25 @@ public class FrinedUiManager : MonoBehaviour
         }
 
         await Task.WhenAll(tasks);
-        ApplyToScroll(dataList);
+
+        FriendInfiniteScrollUtil.ClearAll(friendScroll);
+
+        for (int i = 0; i < dataList.Count; i++)
+        {
+            var mF = dataList[i];
+            var data = new FriendListItemData
+            {
+                mode = FriendListItemData.RowMode.InviteCandidate,
+                uid = mF.uid,
+                nick = mF.nick,
+                photoUrl = mF.photoUrl,
+                inviteState = mF.inviteState,
+                isOnline = false
+            };
+            FriendInfiniteScrollUtil.Insert(friendScroll, data, i);
+        }
+
+        FriendInfiniteScrollUtil.UpdateAll(friendScroll);
     }
 
     static async Task LoadProfileIntoItemAsync(FriendListItemData item)
@@ -275,30 +328,26 @@ public class FrinedUiManager : MonoBehaviour
             });
         }
 
-        ApplyToScroll(dataList);
-    }
-    #endregion
-
-    void ApplyToScroll(List<FriendListItemData> dataList)
-    {
-        // 기존 데이터 제거 후 재세팅
-        friendScroll.ClearData();
-
-        // 아이템 클릭 행동 연결:
-        // 방법1) 프리팹의 FriendListItem이 onClickAction을 가지고 있으니,
-        // scroll의 item 생성 시점에 꽂아야 하는데,
-        // GPM InfiniteScroll은 생성된 Item을 가져오기가 구조마다 달라.
-        //
-        // 가장 쉬운 방법은:
-        // FriendListItem.UpdateData 안에서 static event를 호출하거나,
-        // 혹은 itemPrefabRef.onClickAction 같은 전역 참조를 쓰는 방식.
-        //
-        // 여기서는 간단하게 "프리팹이 공용 static 이벤트"를 쓰는 방식 대신,
-        // 너 프로젝트 스타일에 맞게 item 쪽에서 FriendPanelController.Instance를 호출하는 식으로 처리해도 됨.
+        FriendInfiniteScrollUtil.ClearAll(friendScroll);
 
         for (int i = 0; i < dataList.Count; i++)
-            friendScroll.InsertData(dataList[i]);
+        {
+            var mF = dataList[i];
+
+            var data = new FriendListItemData
+            {
+                mode = FriendListItemData.RowMode.Friend,
+                uid = mF.uid,
+                nick = mF.nick,
+                photoUrl = mF.photoUrl,
+                isOnline = mF.isOnline
+            };
+            FriendInfiniteScrollUtil.Insert(friendScroll, data, i);
+        }
+
+        FriendInfiniteScrollUtil.UpdateAll(friendScroll);
     }
+    #endregion
 
     // ===== UI 버튼 액션(초대/삭제) =====
     public async Task OnClickRowAction(FriendListItemData d)
@@ -353,7 +402,8 @@ public class FrinedUiManager : MonoBehaviour
             foreach (var c in snap.Children)
             {
                 string fromUid = c.Key;
-                EnqueueIncoming(fromUid);
+                string fromNick = c.Child("fromNick").Value?.ToString() ?? "";
+                EnqueueIncoming(fromUid, fromNick);
             }
             await TryShowNextToastAsync();
         }
@@ -370,8 +420,12 @@ public class FrinedUiManager : MonoBehaviour
         {
             foreach (var c in e.Snapshot.Children)
             {
-                string fromUid = c.Key;
-                EnqueueIncoming(fromUid);
+                string fromUid = c.Child("fromUid").Value?.ToString();
+                if (string.IsNullOrEmpty(fromUid))
+                    fromUid = c.Key; // 키=fromUid 구조면 fallback
+
+                string fromNick = c.Child("fromNick").Value?.ToString() ?? "";
+                EnqueueIncoming(fromUid, fromNick);
             }
         }
 
@@ -379,7 +433,7 @@ public class FrinedUiManager : MonoBehaviour
         _ = TryShowNextToastAsync();
     }
 
-    void EnqueueIncoming(string fromUid)
+    void EnqueueIncoming(string fromUid, string fromNick)
     {
         if (string.IsNullOrEmpty(fromUid)) return;
 
@@ -389,9 +443,85 @@ public class FrinedUiManager : MonoBehaviour
         if (_queuedSet.Contains(fromUid)) return;
 
         // 이미 친구인 경우는 토스트 안 띄우고 싶으면 여기서 친구 여부 체크 가능(옵션)
-        _incomingQueue.Enqueue(fromUid);
+        _incomingQueue.Enqueue(new IncomingReq
+        {
+            fromUid = fromUid,
+            fromNick = fromNick
+        });
         _queuedSet.Add(fromUid);
     }
+
+    #endregion
+
+    #region 알림 훅 / 언훅
+
+    void HookNotificationListener()
+    {
+        if (string.IsNullOrEmpty(_myUid)) return;
+        if (_notiRef != null) return;
+
+        _notiRef = FirebaseDatabase.DefaultInstance.GetReference($"notifications/{_myUid}");
+        _notiRef.ChildAdded += OnNotiChildAdded;
+    }
+
+    void UnhookNotificationListener()
+    {
+        if (_notiRef != null)
+            _notiRef.ChildAdded -= OnNotiChildAdded;
+        _notiRef = null;
+        _notiHandled.Clear();
+    }
+
+    #region 알림 도착시 토스트 + 즉시 삭제
+
+    void OnNotiChildAdded(object sender, ChildChangedEventArgs e)
+    {
+        if (e.DatabaseError != null) return;
+        if (e.Snapshot == null || !e.Snapshot.Exists) return;
+
+        string id = e.Snapshot.Key;
+        if (string.IsNullOrEmpty(id)) return;
+
+        // 중복 방지(옵션)
+        if (_notiHandled.Contains(id)) return;
+        _notiHandled.Add(id);
+
+        string type = e.Snapshot.Child("type").Value?.ToString() ?? "";
+        string byNick = e.Snapshot.Child("byNick").Value?.ToString() ?? "";
+
+        // 메시지 만들기
+        switch (type)
+        {
+            case "friend_accepted":
+                ToastMessageManager.instance.ShowToast(
+                    $"{byNick} 님이 친구 요청을 수락했습니다.",
+                    $"{byNick} accepted your friend request."
+                );
+                break;
+
+            case "friend_declined":
+                ToastMessageManager.instance.ShowToast(
+                    $"{byNick} 님이 친구 요청을 거절했습니다.",
+                    $"{byNick} declined your friend request."
+                );
+                break;
+
+            case "friend_canceled":
+                ToastMessageManager.instance.ShowToast(
+                    $"{byNick} 님이 친구 요청을 취소했습니다.",
+                    $"{byNick} canceled the friend request."
+                );
+                break;
+        }
+
+        // "확인 처리" = DB에서 삭제 (다음 접속 때 안 뜸)
+        _ = FirebaseDatabase.DefaultInstance
+            .GetReference($"notifications/{_myUid}/{id}")
+            .RemoveValueAsync();
+
+        StartCoroutine(FriendUiCorotue(0.5f));
+    }
+    #endregion
 
     #endregion
 
@@ -405,27 +535,32 @@ public class FrinedUiManager : MonoBehaviour
 
         _toastShowing = true;
 
-        string fromUid = _incomingQueue.Dequeue();
-        _queuedSet.Remove(fromUid);
+        var req = _incomingQueue.Dequeue();
+        _queuedSet.Remove(req.fromUid);
 
-        _showingFromUid = fromUid;
+        _showingFromUid = req.fromUid;
 
-     // 공개 프로필(userPublic)에서 닉/사진 읽기 (너가 만든 userPublic rules 전제)
-     var (nick, photoUrl) = await FriendService.GetUserProfileBasicAsync(fromUid);
+        // 1) fromNick 우선 사용
+        string nick = req.fromNick;
 
-        // 사진 텍스처 (옵션)
-        Texture tex = null;
-        if (!string.IsNullOrWhiteSpace(photoUrl))
+        // 2) 비어있으면 userPublic로 보완(옵션)
+        string photoUrl = "";
+        if (string.IsNullOrWhiteSpace(nick))
         {
-            tex = await FriendProfileImageCache.GetAsync(photoUrl);
+            var p = await FriendService.GetUserProfileBasicAsync(req.fromUid);
+            nick = p.nick;
+            photoUrl = p.photoUrl;
         }
 
-        // 토스트 표시
+        Texture tex = null;
+        if (!string.IsNullOrWhiteSpace(photoUrl))
+            tex = await FriendProfileImageCache.GetAsync(photoUrl);
+
         requestToast.Show(
             nick: string.IsNullOrWhiteSpace(nick) ? "알 수 없음" : nick,
             photo: tex,
-            onAccept: () => _ = OnAcceptAsync(fromUid),
-            onDecline: () => _ = OnDeclineAsync(fromUid)
+            onAccept: () => _ = OnAcceptAsync(req.fromUid),
+            onDecline: () => _ = OnDeclineAsync(req.fromUid)
         );
     }
 
@@ -433,19 +568,10 @@ public class FrinedUiManager : MonoBehaviour
     {
         requestToast.Hide();
 
-        try
-        {
-            await FriendService.AcceptFriendRequestAsync(fromUid);
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning($"Accept failed: {e.Message}");
-        }
+        await FriendService.AcceptFriendRequestAsync(fromUid);
+
         _showingFromUid = null;
         _toastShowing = false;
-
-        // 친구/초대 탭 갱신도 원하면
-        if (isFriendOpen) await ReloadAsync();
 
         await TryShowNextToastAsync();
     }
@@ -454,21 +580,24 @@ public class FrinedUiManager : MonoBehaviour
     {
         requestToast.Hide();
 
-        try
-        {
-            await FriendService.DeclineFriendRequestAsync(fromUid);
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning($"Decline failed: {e.Message}");
-        }
+        await FriendService.DeclineFriendRequestAsync(fromUid);
 
+        _showingFromUid = null;
         _toastShowing = false;
-
-        if (isFriendOpen) await ReloadAsync();
 
         await TryShowNextToastAsync();
     }
 
+    IEnumerator FriendUiCorotue(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+
+        if (_mode == TabMode.Invite)
+        {
+            SwitchTab(TabMode.Invite);
+        }
+        else
+            SwitchTab(TabMode.Friends);
+    }
     #endregion
 }

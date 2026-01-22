@@ -458,7 +458,7 @@ public static class FriendService
         try
         {
             var meSnap = await FirebaseDatabase.DefaultInstance
-     .GetReference($"userPublic/{myUid}")
+     .GetReference($"users/{myUid}")
      .GetValueAsync();
             myNick = meSnap.Child("nick").Value?.ToString() ?? "";
         }
@@ -491,7 +491,7 @@ public static class FriendService
 
         // 내 닉
         var meSnap = await FirebaseDatabase.DefaultInstance
-            .GetReference($"userPublic/{myUid}")
+            .GetReference($"users/{myUid}")
             .GetValueAsync();
         string myNick = meSnap.Child("nick").Value?.ToString() ?? "";
 
