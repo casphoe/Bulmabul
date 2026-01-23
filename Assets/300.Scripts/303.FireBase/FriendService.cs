@@ -482,7 +482,7 @@ public static class FriendService
 
         // 내 닉네임(거절한 사람 닉)
         string myNick = await GetMyNickPublicAsync();
-       
+
         var updates = new Dictionary<string, object>();
         // 요청 제거
         updates[$"friendRequestsIn/{myUid}/{fromUid}"] = null;
@@ -574,29 +574,18 @@ public static class FriendService
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(uid))
-                return ("", "");
-
-            // 로그인 확인 (권한 문제/타이밍 문제 방지)
-            if (FirebaseAuth.DefaultInstance.CurrentUser == null)
-                return ("", "");
-
             var snap = await FirebaseDatabase.DefaultInstance
                 .GetReference($"userPublic/{uid}")
                 .GetValueAsync();
 
-            if (snap == null || !snap.Exists)
-                return ("", "");
+            if (snap == null || !snap.Exists) return ("", "");
 
             string nick = snap.Child("nick").Value?.ToString() ?? "";
             string photoUrl = snap.Child("photoUrl").Value?.ToString() ?? "";
-
             return (nick, photoUrl);
         }
-        catch (Exception e)
+        catch
         {
-            // 🔥 여기서도 InnerException까지 찍어라 (딱 1번만이라도)
-            Debug.LogWarning($"[GetUserProfileBasicAsync] fail uid={uid}\n{e}\n--- INNER ---\n{e.InnerException}");
             return ("", "");
         }
     }

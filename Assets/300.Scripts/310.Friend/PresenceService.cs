@@ -79,7 +79,7 @@ public class PresenceService : MonoBehaviour
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         try
-        {        
+        {
             var onlineRef = _myPresenceRef.Child("online");
             var lastSeenRef = _myPresenceRef.Child("lastSeen");
 

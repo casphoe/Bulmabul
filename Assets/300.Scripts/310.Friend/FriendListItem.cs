@@ -175,7 +175,6 @@ public class FriendListItem : InfiniteScrollItem
         else
         {
             ApplyInviteStateUI(d, lang);
-            btnChatting.gameObject.SetActive(false);
         }
 
         ApplyProfileImage(d.photoUrl, d.nick);

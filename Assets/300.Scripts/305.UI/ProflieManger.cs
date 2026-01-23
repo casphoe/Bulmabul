@@ -1,16 +1,15 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using Firebase.Auth;
+using Firebase.Database;
+using Firebase.Storage;
+using SFB;  // StandaloneFileBrowser 네임스페이스
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
-using System.Threading.Tasks;
-using Firebase.Auth;
-using Firebase.Storage;
-using Firebase.Database;
-
-using SFB;  // StandaloneFileBrowser 네임스페이스
 
 public class ProflieManger : MonoBehaviour
 {
@@ -79,7 +78,7 @@ public class ProflieManger : MonoBehaviour
     }
 
     private void Start()
-    {      
+    {
         // btnProfile[0] = 수정/저장
         if (btnProfile != null && btnProfile.Length > 0 && btnProfile[0] != null)
             btnProfile[0].onClick.AddListener(OnClickEditOrSave);
@@ -101,7 +100,7 @@ public class ProflieManger : MonoBehaviour
     // 버튼: 사진 선택
     // =========================
     public async void OnClickPickProfilePhoto()
-    {     
+    {
         await SafeRun(async () =>
         {
             // 1) 파일 선택창
@@ -329,6 +328,8 @@ public class ProflieManger : MonoBehaviour
                 pendingPhotoFileName = null;
             }
 
+            await EnsureUserPublicNickAsync(user.UserId, fb.CurrentAccount.NickName);
+
             // 4) 최종 Account 저장(네 방식)
             await AccountCloudStore.SaveFullAsync(fb.CurrentAccount);
 
@@ -339,12 +340,56 @@ public class ProflieManger : MonoBehaviour
         });
     }
 
-    void LoadFromCurrentAccountToUI()
+
+    async Task EnsureUserPublicNickAsync(string uid, string fallbackNickKeyOrRaw)
+    {
+        var pubRef = FirebaseDatabase.DefaultInstance.GetReference($"userPublic/{uid}/nick");
+        var snap = await pubRef.GetValueAsync();
+
+        // 이미 값 있으면 끝
+        if (snap != null && snap.Exists)
+        {
+            var v = snap.Value?.ToString() ?? "";
+            if (!string.IsNullOrWhiteSpace(v)) return;
+        }
+
+        // 1) UI에 입력된 닉 우선
+        string raw = (nickName != null ? nickName.text : "")?.Trim() ?? "";
+
+        // 2) 비었으면 fallback 사용(키라도 넣어서 빈값 방지)
+        if (string.IsNullOrWhiteSpace(raw))
+            raw = fallbackNickKeyOrRaw?.Trim() ?? "";
+
+        if (string.IsNullOrWhiteSpace(raw)) return;
+
+        await Root.UpdateChildrenAsync(new Dictionary<string, object>
+        {
+            [$"userPublic/{uid}/nick"] = raw
+        });
+    }
+
+    async void LoadFromCurrentAccountToUI()
     {
         var fb = FireBaseAuthManager.Instance;
         if (fb == null || fb.CurrentAccount == null) return;
 
         nickName.text = fb.CurrentAccount.NickName ?? "";
+
+        try
+        {
+            var uid = fb.CurrentUser?.UserId;
+            if (!string.IsNullOrEmpty(uid))
+            {
+                var snap = await FirebaseDatabase.DefaultInstance
+                    .GetReference($"userPublic/{uid}/nick")
+                    .GetValueAsync();
+
+                string raw = snap?.Value?.ToString() ?? "";
+                if (!string.IsNullOrWhiteSpace(raw))
+                    nickName.text = raw;
+            }
+        }
+        catch { }
 
         currentPassword.text = "";
         changePassword.text = "";
