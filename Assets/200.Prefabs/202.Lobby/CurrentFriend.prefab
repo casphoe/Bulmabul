@@ -36,7 +36,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0.8, y: -58.5}
-  m_SizeDelta: {x: 80, y: 40}
+  m_SizeDelta: {x: 160, y: 40}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &8706777517846844513
 CanvasRenderer:
@@ -819,5 +819,6 @@ MonoBehaviour:
   btnInvite: {fileID: 6301978299523119847}
   deleteRoot: {fileID: 6773936360188417402}
   btnDelete: {fileID: 1914483691215985461}
+  btnChatting: {fileID: 0}
   txtStatus: {fileID: 8822778298216187625}
   txtInviteState: {fileID: 3168332973370914936}

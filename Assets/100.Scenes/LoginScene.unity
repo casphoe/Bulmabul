@@ -371,9 +371,6 @@ MonoBehaviour:
   fgEmail: {fileID: 4846831057454337063}
   inKor: {fileID: 8812029808593243198}
   inEng: {fileID: 1845858238}
-  toasstMessage: {fileID: 7912405099255022521}
-  toastShowSeconds: 1.2
-  toastFadeSeconds: 0.8
   btnPickPhoto: {fileID: 1215501370}
   previewRawImage: {fileID: 1215501368}
   defaultOpenFolder: 
@@ -883,6 +880,7 @@ GameObject:
   - component: {fileID: 1207770329}
   - component: {fileID: 1207770330}
   - component: {fileID: 1207770331}
+  - component: {fileID: 1207770332}
   m_Layer: 0
   m_Name: LoginManager
   m_TagString: Untagged
@@ -938,6 +936,7 @@ MonoBehaviour:
     accountLevel: 1
     accountExp: 0
     photoUrl: 
+  presence: {fileID: 1207770332}
 --- !u!114 &1207770329
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -982,6 +981,18 @@ MonoBehaviour:
   mapSprite:
   - {fileID: 21300000, guid: 2841627178ae5d44eb00aec961f28b27, type: 3}
   - {fileID: 21300000, guid: dbe1a5dab6af52c4b8daff6493bd67f8, type: 3}
+--- !u!114 &1207770332
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1207770326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5dd86fd435f350b44adb34262fcad1d7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1215501366
 GameObject:
   m_ObjectHideFlags: 0

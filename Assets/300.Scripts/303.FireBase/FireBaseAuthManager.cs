@@ -30,6 +30,8 @@ public class FireBaseAuthManager : MonoBehaviour
     // 로그인 후 메모리에 들고 있을 현재 계정 데이터
     public Account CurrentAccount;
 
+    [SerializeField] private PresenceService presence;
+
     // 초기화 완료 여부
     public bool IsReady { get; set; }
 
@@ -69,7 +71,7 @@ public class FireBaseAuthManager : MonoBehaviour
     /// 4) 프로필 이미지 업로드
     /// 5) Account 생성 + DB 저장
     /// </summary>
-    public async Task RegisterAsync(string name,string email, string password, string nickName, byte[] profileImageBytes, 
+    public async Task RegisterAsync(string name, string email, string password, string nickName, byte[] profileImageBytes,
     string profileContentType, string storageBucketUrl)
     {
         EnsureReady();
@@ -128,8 +130,8 @@ public class FireBaseAuthManager : MonoBehaviour
             stageKor = "프로필 이미지 업로드";
             stageEng = "Uploading profile image";
 
-            var storage = FirebaseStorage.DefaultInstance;           
-           
+            var storage = FirebaseStorage.DefaultInstance;
+
             var rootRef = storage.RootReference;
 
             string fileName = (profileContentType == "image/png") ? "profile.png" : "profile.jpg";
@@ -140,6 +142,9 @@ public class FireBaseAuthManager : MonoBehaviour
 
             var url = await fileRef.GetDownloadUrlAsync();
             string photoUrl = url.ToString();
+
+            stageKor = "DB 저장";
+            stageEng = "Saving DB data";
 
             var dbRoot = FirebaseDatabase.DefaultInstance.RootReference;
 
@@ -160,6 +165,7 @@ public class FireBaseAuthManager : MonoBehaviour
             // 5) Account 저장
             stageKor = "계정 데이터 저장";
             stageEng = "Saving account data";
+
             var acc = CreateDefaultAccount(createdUser, name, nickName, photoUrl);
             await AccountCloudStore.SaveFullAsync(acc);
 
@@ -220,7 +226,7 @@ public class FireBaseAuthManager : MonoBehaviour
 
             ToastMessageManager.instance.ShowToast("로그인 성공!", "Login successful!");
             Debug.Log($"Login OK: {email} / uid={res.User.UserId} / nick={CurrentAccount?.NickName}");
-            StartCoroutine(SceneMove(1,1));
+            StartCoroutine(SceneMove(1, 1));
         }
         catch (Exception e)
         {
@@ -256,6 +262,9 @@ public class FireBaseAuthManager : MonoBehaviour
         // 로그인 날짜 갱신(원하면)
         CurrentAccount.LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         await AccountCloudStore.SaveFullAsync(CurrentAccount);
+
+        if (presence != null)
+            await presence.StartPresenceAsync();
     }
 
 
@@ -285,7 +294,7 @@ public class FireBaseAuthManager : MonoBehaviour
             LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             LogoutDate = "",
 
-            Cash = 3000f,      
+            Cash = 3000f,
 
             AccountLevel = 1,
             AccountExp = 0,

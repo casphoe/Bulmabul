@@ -139,6 +139,7 @@ public class FriendListItem : InfiniteScrollItem
     [Header("Delete UI (Friend)")]
     public GameObject deleteRoot;
     public Button btnDelete;
+    public Button btnChatting;
 
     [Header("Presence UI (Friend only)")]
     public Text txtStatus;       // "온라인" / "오프라인"
@@ -174,6 +175,7 @@ public class FriendListItem : InfiniteScrollItem
         else
         {
             ApplyInviteStateUI(d, lang);
+            btnChatting.gameObject.SetActive(false);
         }
 
         ApplyProfileImage(d.photoUrl, d.nick);
@@ -194,26 +196,30 @@ public class FriendListItem : InfiniteScrollItem
 
     void ApplyLanaugeeOnLineOffLine(FriendListItemData d, Lauaguage lang)
     {
-        switch(lang)
+        switch (lang)
         {
             case Lauaguage.Kor:
-                if(d.isOnline)
+                if (d.isOnline)
                 {
                     txtStatus.text = "온라인";
+                    //btnChatting.gameObject.SetActive(true);
                 }
                 else
                 {
                     txtStatus.text = "오프라인";
+                    //btnChatting.gameObject.SetActive(false);
                 }
                 break;
             case Lauaguage.Eng:
                 if (d.isOnline)
                 {
                     txtStatus.text = "OnLine";
+                    //btnChatting.gameObject.SetActive(true);
                 }
                 else
                 {
                     txtStatus.text = "OffLine";
+                    //btnChatting.gameObject.SetActive(false);
                 }
                 break;
         }
@@ -285,9 +291,6 @@ public class FriendListItem : InfiniteScrollItem
                 break;
             case FriendListItemData.InviteState.Incoming:
                 txtInviteState.text = (lang == Lauaguage.Kor) ? "요청 옴" : "Request received";
-                break;
-            case FriendListItemData.InviteState.AlreadyFriend:
-                txtInviteState.text = (lang == Lauaguage.Kor) ? "이미 친구" : "Already friends";
                 break;
             default:
                 txtInviteState.text = (lang == Lauaguage.Kor) ? "초대" : "Invite";

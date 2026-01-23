@@ -250,6 +250,10 @@ public class FrinedUiManager : MonoBehaviour
             else if (outSet.Contains(r.uid)) state = FriendListItemData.InviteState.Outgoing;
             else if (inSet.Contains(r.uid)) state = FriendListItemData.InviteState.Incoming;
 
+            if (friendSet.Contains(r.uid))
+                continue;
+
+
             var item = new FriendListItemData
             {
                 mode = FriendListItemData.RowMode.InviteCandidate,
@@ -510,6 +514,12 @@ public class FrinedUiManager : MonoBehaviour
                 ToastMessageManager.instance.ShowToast(
                     $"{byNick} 님이 친구 요청을 취소했습니다.",
                     $"{byNick} canceled the friend request."
+                );
+                break;
+            case "friend_removed":
+                ToastMessageManager.instance.ShowToast(
+                    $"{byNick} 님이 친구를 삭제했습니다.",
+                    $"{byNick} removed you from friends."
                 );
                 break;
         }

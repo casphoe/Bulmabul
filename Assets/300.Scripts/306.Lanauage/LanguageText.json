@@ -258,7 +258,7 @@
     },
     {
       "key": "txt.Delete",
-      "text": "삭제"
+      "text": "친추 삭제"
     },
     {
       "key": "txt.FriendRequest",
@@ -524,7 +524,7 @@
     },
     {
       "key": "txt.Delete",
-      "text": "Delete"
+      "text": "Friend Delete"
     },
     {
       "key": "txt.FriendRequest",

@@ -89,15 +89,14 @@ public static class FriendService
         var list = new List<(string uid, string nickKey)>();
         if (snap == null || !snap.Exists) return list;
 
+        string myUid = MyUid;
+
         foreach (var child in snap.Children)
         {
             string nickKey = child.Key;
             string uid = child.Value?.ToString() ?? "";
             if (string.IsNullOrEmpty(uid)) continue;
-
-            // 내 계정은 초대 리스트에서 제외하고 싶으면 여기서 제외
-            if (uid == MyUid) continue;
-
+            if (uid == myUid) continue; // 나 제외
             list.Add((uid, nickKey));
         }
 
@@ -115,6 +114,7 @@ public static class FriendService
     public static async Task<List<FriendRow>> GetMyFriendsAsync()
     {
         string myUid = MyUid;
+
         // 1) friends/{myUid} 읽기
         var snap = await FirebaseDatabase.DefaultInstance
             .GetReference($"friends/{myUid}")
@@ -127,6 +127,7 @@ public static class FriendService
         {
             // key = friendUid
             string friendUid = c.Key;
+            if (string.IsNullOrEmpty(friendUid)) continue;
 
             var row = new FriendRow
             {
@@ -142,10 +143,11 @@ public static class FriendService
 
         // 2) presence를 가져와서 채우기 (친구 수가 많으면 요청이 많아짐)
         //    - 일단 가장 단순/확실한 방식: uid별로 읽기
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(list.Count * 2);
 
         foreach (var f in list)
         {
+            tasks.Add(FillPublicProfileAsync(f));
             tasks.Add(FillPresenceAsync(f));
         }
 
@@ -171,43 +173,56 @@ public static class FriendService
         return list;
     }
 
+    static async Task FillPublicProfileAsync(FriendRow row)
+    {
+        var (nick, photoUrl) = await GetUserProfileBasicAsync(row.uid);
+
+        // userPublic이 비어있으면 friends에 남아있는 값이라도 사용(최후 fallback)
+        if (!string.IsNullOrWhiteSpace(nick))
+            row.nick = nick;
+
+        if (!string.IsNullOrWhiteSpace(photoUrl))
+            row.photoUrl = photoUrl;
+
+        // 그래도 닉이 비면 uid 앞부분이라도 보여주기(완전 빈 UI 방지)
+        if (string.IsNullOrWhiteSpace(row.nick))
+            row.nick = row.uid.Length >= 6 ? row.uid.Substring(0, 6) : row.uid;
+    }
+
     static async Task FillPresenceAsync(FriendRow row)
     {
+
+        var path = $"presence/{row.uid}";
+        Debug.Log($"[Presence] START uid={row.uid} path={path}");
+
+
         try
         {
-            var pSnap = await FirebaseDatabase.DefaultInstance
-                .GetReference($"presence/{row.uid}")
-                .GetValueAsync();
+            var refp = FirebaseDatabase.DefaultInstance.GetReference(path);
+            var t = refp.GetValueAsync();
+
+            await t; // 여기서 PermissionDenied면 아래 로그 못 감
+
+            var pSnap = t.Result;
+            Debug.Log($"[Presence] OK uid={row.uid} exists={(pSnap != null && pSnap.Exists)} json={pSnap?.GetRawJsonValue()}");
 
             if (pSnap != null && pSnap.Exists)
             {
                 row.isOnline = TryBool(pSnap.Child("online").Value);
                 row.lastSeenUnix = TryLong(pSnap.Child("lastSeen").Value);
             }
+            else
+            {
+                row.isOnline = false;
+                row.lastSeenUnix = 0;
+            }
         }
-        catch
+        catch (Exception e)
         {
-            // presence 읽기 실패하면 그냥 오프라인/0 유지
+            Debug.LogWarning($"[Presence] FAIL uid={row.uid} path={path} err={e}");
             row.isOnline = false;
             row.lastSeenUnix = 0;
         }
-    }
-
-    static bool TryBool(object v)
-    {
-        if (v == null) return false;
-        if (v is bool b) return b;
-        if (bool.TryParse(v.ToString(), out var bb)) return bb;
-        // 0/1 형태 처리
-        if (int.TryParse(v.ToString(), out var n)) return n != 0;
-        return false;
-    }
-
-    static long TryLong(object v)
-    {
-        if (v == null) return 0;
-        if (long.TryParse(v.ToString(), out var n)) return n;
-        return 0;
     }
 
     #endregion
@@ -273,15 +288,18 @@ public static class FriendService
 
         await Task.WhenAll(tasks);
 
-        // 표시 정렬(원하면 nickKey 기준)
-        rows.Sort((a, b) => string.CompareOrdinal(a.nickKey, b.nickKey));
+        // 표시 정렬
+        rows.Sort((a, b) => string.CompareOrdinal(a.nick ?? "", b.nick ?? ""));
         return rows;
     }
 
     private static async Task FillInviteRowPublicProfileAsync(InviteCandidateRow row)
     {
         var (nick, photoUrl) = await GetUserProfileBasicAsync(row.uid);
-        row.nick = string.IsNullOrWhiteSpace(nick) ? row.nickKey : nick;
+        row.nick = !string.IsNullOrWhiteSpace(nick)
+             ? nick
+             : (row.uid.Length >= 6 ? row.uid.Substring(0, 6) : row.uid);
+
         row.photoUrl = photoUrl ?? "";
     }
 
@@ -306,6 +324,17 @@ public static class FriendService
     #endregion
 
     #region 친구 요청 보내기(수락 / 거절)
+
+    static async Task<string> GetMyNickPublicAsync()
+    {
+        try
+        {
+            var snap = await FirebaseDatabase.DefaultInstance.GetReference($"userPublic/{MyUid}/nick").GetValueAsync();
+            return snap?.Value?.ToString() ?? "";
+        }
+        catch { return ""; }
+    }
+
 
     /// <summary>
     /// 친구 요청 보내기:
@@ -334,14 +363,14 @@ public static class FriendService
 
         // 내 닉네임(보내는 사람 닉)도 같이 적어주면 받은쪽 UI 만들기 쉬움
         // (너 프로젝트의 CurrentAccount.NickName을 쓰면 더 정확)
-        string myNick = "";
-        try
+        string myNick = await GetMyNickPublicAsync();
+
+        // targetNick이 비었으면 userPublic에서 한 번 읽어서 채워도 됨(선택)
+        if (string.IsNullOrWhiteSpace(targetNick))
         {
-            // users/{myUid}/nick 읽기(룰 느슨하게 했다는 전제)
-            var meSnap = await FirebaseDatabase.DefaultInstance.GetReference($"users/{myUid}/nick").GetValueAsync();
-            myNick = meSnap?.Value?.ToString() ?? "";
+            var (tn, _) = await GetUserProfileBasicAsync(targetUid);
+            targetNick = tn;
         }
-        catch { }
 
         var updates = new Dictionary<string, object>();
 
@@ -431,9 +460,7 @@ public static class FriendService
 
         // 3) 상대에게 "수락됨" 알림 생성 (pushId 자동 생성)
         // notifications/{toUid}/{pushId}
-        var pushId = FirebaseDatabase.DefaultInstance
-            .GetReference($"notifications/{fromUid}")
-            .Push().Key;
+        string pushId = Root.Child($"notifications/{fromUid}").Push().Key;
 
         updates[$"notifications/{fromUid}/{pushId}"] = new Dictionary<string, object>
         {
@@ -454,17 +481,8 @@ public static class FriendService
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         // 내 닉네임(거절한 사람 닉)
-        string myNick = "";
-        try
-        {
-            var meSnap = await FirebaseDatabase.DefaultInstance
-     .GetReference($"users/{myUid}")
-     .GetValueAsync();
-            myNick = meSnap.Child("nick").Value?.ToString() ?? "";
-        }
-        catch { }
-
-
+        string myNick = await GetMyNickPublicAsync();
+       
         var updates = new Dictionary<string, object>();
         // 요청 제거
         updates[$"friendRequestsIn/{myUid}/{fromUid}"] = null;
@@ -490,17 +508,15 @@ public static class FriendService
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         // 내 닉
-        var meSnap = await FirebaseDatabase.DefaultInstance
-            .GetReference($"users/{myUid}")
-            .GetValueAsync();
-        string myNick = meSnap.Child("nick").Value?.ToString() ?? "";
+        string myNick = await GetMyNickPublicAsync();
 
         var updates = new Dictionary<string, object>();
         updates[$"friendRequestsOut/{myUid}/{targetUid}"] = null;
         updates[$"friendRequestsIn/{targetUid}/{myUid}"] = null;
 
         // 상대에게 "취소" 알림
-        var pushId = FirebaseDatabase.DefaultInstance.GetReference($"notifications/{targetUid}").Push().Key;
+        string pushId = Root.Child($"notifications/{targetUid}").Push().Key;
+
         updates[$"notifications/{targetUid}/{pushId}"] = new Dictionary<string, object>
         {
             ["type"] = "friend_canceled",
@@ -530,9 +546,22 @@ public static class FriendService
     {
         string myUid = MyUid;
 
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        string myNick = await GetMyNickPublicAsync();
+
         var updates = new Dictionary<string, object>();
         updates[$"friends/{myUid}/{friendUid}"] = null;
         updates[$"friends/{friendUid}/{myUid}"] = null;
+
+        string pushId = Root.Child($"notifications/{friendUid}").Push().Key;
+        updates[$"notifications/{friendUid}/{pushId}"] = new Dictionary<string, object>
+        {
+            ["type"] = "friend_removed",   // 🔥 rules에 추가 필요
+            ["byUid"] = myUid,
+            ["byNick"] = myNick,
+            ["createdAt"] = now
+        };
 
         await Root.UpdateChildrenAsync(updates);
     }
@@ -545,20 +574,53 @@ public static class FriendService
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(uid))
+                return ("", "");
+
+            // 로그인 확인 (권한 문제/타이밍 문제 방지)
+            if (FirebaseAuth.DefaultInstance.CurrentUser == null)
+                return ("", "");
+
             var snap = await FirebaseDatabase.DefaultInstance
                 .GetReference($"userPublic/{uid}")
                 .GetValueAsync();
 
-            if (snap == null || !snap.Exists) return ("", "");
+            if (snap == null || !snap.Exists)
+                return ("", "");
 
             string nick = snap.Child("nick").Value?.ToString() ?? "";
             string photoUrl = snap.Child("photoUrl").Value?.ToString() ?? "";
+
             return (nick, photoUrl);
         }
-        catch
+        catch (Exception e)
         {
+            // 🔥 여기서도 InnerException까지 찍어라 (딱 1번만이라도)
+            Debug.LogWarning($"[GetUserProfileBasicAsync] fail uid={uid}\n{e}\n--- INNER ---\n{e.InnerException}");
             return ("", "");
         }
+    }
+
+    #endregion
+
+
+    #region 유틸
+
+    static bool TryBool(object v)
+    {
+        if (v == null) return false;
+        if (v is bool b) return b;
+        if (bool.TryParse(v.ToString(), out var bb)) return bb;
+        // 0/1 형태 처리
+        if (int.TryParse(v.ToString(), out var n)) return n != 0;
+        return false;
+    }
+
+    static long TryLong(object v)
+    {
+        if (v == null) return 0;
+        if (long.TryParse(v.ToString(), out var n)) return n;
+        return 0;
     }
 
     #endregion
