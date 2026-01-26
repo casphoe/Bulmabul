@@ -81,14 +81,14 @@ public static class FriendProfileImageCache
 
             if (req.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogWarning($"[RoomProfileImageCache] download fail: {req.error} / url={url}");
+                Debug.LogWarning($"[FriendProfileImageCache] download fail: {req.error} / url={url}");
                 return null;
             }
 
             var src = DownloadHandlerTexture.GetContent(req);
             if (src == null)
             {
-                Debug.LogWarning($"[RoomProfileImageCache] GetContent null / url={url}");
+                Debug.LogWarning($"[FriendProfileImageCache] GetContent null / url={url}");
                 return null;
             }
 
@@ -100,7 +100,7 @@ public static class FriendProfileImageCache
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[RoomProfileImageCache] clone fail: {e.Message} / url={url}");
+                Debug.LogWarning($"[FriendProfileImageCache] clone fail: {e.Message} / url={url}");
                 UnityEngine.Object.Destroy(dst);
                 return null;
             }

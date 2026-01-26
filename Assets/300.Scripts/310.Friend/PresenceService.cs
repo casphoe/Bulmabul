@@ -2,7 +2,6 @@
 using Firebase.Database;
 using UnityEngine;
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 
 public class PresenceService : MonoBehaviour
@@ -13,6 +12,7 @@ public class PresenceService : MonoBehaviour
 
     // 연결 이벤트 핸들러를 필드로 잡아두면 OnDisable에서 해제 가능
     private EventHandler<ValueChangedEventArgs> _onConnectedHandler;
+
 
     /// <summary>
     /// Presence(온라인/오프라인) 시스템 시작
@@ -103,10 +103,9 @@ public class PresenceService : MonoBehaviour
             _connectedRef.ValueChanged -= _onConnectedHandler;
     }
 
-    private void OnApplicationPause(bool pause)
+    private async void OnApplicationQuit()
     {
-        // 백그라운드/복귀 처리(선택)
-        _ = SetOnlineAsync(!pause);
+        await SetOnlineAsync(false);
     }
 
     private async Task SetOnlineAsync(bool online)

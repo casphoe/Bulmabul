@@ -881,6 +881,7 @@ GameObject:
   - component: {fileID: 1207770330}
   - component: {fileID: 1207770331}
   - component: {fileID: 1207770332}
+  - component: {fileID: 1207770333}
   m_Layer: 0
   m_Name: LoginManager
   m_TagString: Untagged
@@ -991,6 +992,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5dd86fd435f350b44adb34262fcad1d7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &1207770333
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1207770326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cf45953193d7d7845abae581a0e644d1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
 --- !u!1 &1215501366

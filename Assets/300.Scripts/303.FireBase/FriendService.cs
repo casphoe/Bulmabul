@@ -557,7 +557,7 @@ public static class FriendService
         string pushId = Root.Child($"notifications/{friendUid}").Push().Key;
         updates[$"notifications/{friendUid}/{pushId}"] = new Dictionary<string, object>
         {
-            ["type"] = "friend_removed",   // 🔥 rules에 추가 필요
+            ["type"] = "friend_removed",   // rules에 추가 필요
             ["byUid"] = myUid,
             ["byNick"] = myNick,
             ["createdAt"] = now
