@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+using TMPro;
 
 
 [Serializable]
@@ -139,7 +140,6 @@ public class FriendListItem : InfiniteScrollItem
     [Header("Delete UI (Friend)")]
     public GameObject deleteRoot;
     public Button btnDelete;
-    public Button btnChatting;
 
     [Header("Presence UI (Friend only)")]
     public Text txtStatus;       // "온라인" / "오프라인"
@@ -147,8 +147,20 @@ public class FriendListItem : InfiniteScrollItem
     [Header("Invite Freind Status")]
     public Text txtInviteState;
 
+    [Header("Friend Actions (Dropdown)")]
+    public TMP_Dropdown actionDropdown;          //  row 오른쪽 Dropdown 연결
+
     private string _boundUrl = "";
     private Texture _fallback; // 성공 다운로드 캐시를 셀 단위 fallback으로도 사용
+
+    private enum FriendAction
+    {
+        None = 0,
+        Chat = 1,
+        Invite = 2,
+        Profile = 3
+    }
+
 
     public override void UpdateData(InfiniteScrollData scrollData)
     {
@@ -191,6 +203,85 @@ public class FriendListItem : InfiniteScrollItem
             btnDelete.onClick.RemoveAllListeners();
             btnDelete.onClick.AddListener(() => FrinedUiManager.instance?.OnClickDeleteButton(d));
         }
+
+        ApplyActionDropdown(d, lang, isFriend);
+    }
+
+
+    private void ApplyActionDropdown(FriendListItemData d, Lauaguage lang, bool isFriendRow)
+    {
+        if (actionDropdown == null) return;
+
+        // 초대 후보(InviteCandidate)에서는 액션 드롭다운 숨기고 싶으면:
+        actionDropdown.gameObject.SetActive(isFriendRow);
+        if (!isFriendRow) return;
+
+        // 1) 옵션 텍스트(언어) 세팅
+        BuildDropdownOptions(lang);
+
+        // 2) 오프라인 정책
+        // - 기본: 오프라인이면 드롭다운 클릭 자체 막기
+        // - allowProfileWhenOffline=true면: 프로필만 허용 (선택 후 검사로 막음)
+        actionDropdown.interactable = d.isOnline;
+
+        // 3) 이벤트 바인딩(셀 재사용 때문에 항상 리셋)
+        actionDropdown.onValueChanged.RemoveAllListeners();
+
+        // 드롭다운은 “이전 선택값”이 남아있기 쉬워서 항상 0으로 초기화
+        actionDropdown.SetValueWithoutNotify(0);
+
+        actionDropdown.onValueChanged.AddListener((idx) =>
+        {
+            // idx: 0=선택, 1=채팅, 2=초대, 3=프로필
+            if (idx == 0) return;
+
+            var action = (FriendAction)idx;
+
+            // 오프라인이면 채팅/초대는 금지 (프로필만 allowProfileWhenOffline이면 허용)
+            if (!d.isOnline)
+            {
+                if (action == FriendAction.Chat || action == FriendAction.Invite)
+                {
+                    // 오프라인에서 눌렀으면 무시 + 토스트
+                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
+                    actionDropdown.SetValueWithoutNotify(0);
+                    return;
+                }
+            }
+
+            // 매니저에게 액션 넘기기
+            FrinedUiManager.instance?.OnFriendActionSelected(d, (int)action);
+
+            // 선택 후 다시 기본값으로
+            actionDropdown.SetValueWithoutNotify(0);
+        });
+    }
+
+    private void BuildDropdownOptions(Lauaguage lang)
+    {
+        if (actionDropdown == null) return;
+
+        // 매 프레임/매 UpdateData마다 중복으로 AddOption하면 옵션이 계속 늘어나니까
+        // 항상 ClearOptions 후 AddOptions
+        actionDropdown.ClearOptions();
+
+        var opts = new List<string>();
+        if (lang == Lauaguage.Kor)
+        {
+            opts.Add("선택");
+            opts.Add("채팅하기");
+            opts.Add("친구초대");
+            opts.Add("프로필 보기");
+        }
+        else
+        {
+            opts.Add("Select");
+            opts.Add("Chat");
+            opts.Add("Invite");
+            opts.Add("View Profile");
+        }
+
+        actionDropdown.AddOptions(opts);
     }
 
     void ApplyLanaugeeOnLineOffLine(FriendListItemData d, Lauaguage lang)

@@ -90,6 +90,20 @@ public class FrinedUiManager : MonoBehaviour
     [SerializeField ]private float _nextPresenceUiRefresh = 0f;
     #endregion
 
+    #region 친구 채팅
+
+    [Header("Friend Chat Windows")]
+    public Transform chatWindowParent;          // 채팅창들이 생성될 부모(캔버스 안)
+    public FriendChatWindow chatWindowPrefab;   // 채팅창 프리팹
+
+    // chatId -> window instance
+    private readonly Dictionary<string, FriendChatWindow> _chatWindows = new();
+
+    // chatId -> history (로그아웃/강제종료 전까지 메모리 유지)
+    private readonly Dictionary<string, List<FriendChatMessageData>> _chatHistories = new();
+
+    #endregion
+
     #endregion
 
 
@@ -847,6 +861,108 @@ public class FrinedUiManager : MonoBehaviour
         if (v == null) return 0;
         if (long.TryParse(v.ToString(), out var n)) return n;
         return 0;
+    }
+
+    #endregion
+
+    #region 친구 상태 온라인일 때 채팅 칠수 있는 UI 켜주기 기능
+    public void OnFriendActionSelected(FriendListItemData d, int actionInt)
+    {
+        if (d == null) return;
+
+        // 0=None, 1=Chat, 2=Invite, 3=Profile (FriendListItem의 enum과 동일)
+        switch (actionInt)
+        {
+            case 1: // Chat
+                if (!d.isOnline)
+                {
+                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
+                    return;
+                }
+
+                OpenFriendChatWindow(d);
+                break;
+
+            case 2: // Invite
+                if (!d.isOnline)
+                {
+                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
+                    return;
+                }
+                // TODO: 파티/룸 초대 보내기 (d.uid 기반)
+                Debug.Log($"[FriendAction] Invite party to {d.nick} ({d.uid})");
+                break;
+
+            case 3: // Profile
+                    // TODO: 프로필 보기 (오프라인이어도 보이게 할지 정책 선택)
+                Debug.Log($"[FriendAction] View profile {d.nick} ({d.uid})");
+                break;
+        }
+    }
+    #endregion
+
+    #region 친구 채팅
+
+    public static string MakeChatId(string a, string b)
+    {
+        if (string.CompareOrdinal(a, b) < 0) return $"{a}_{b}";
+        return $"{b}_{a}";
+    }
+
+    public List<FriendChatMessageData> GetOrCreateChatHistory(string chatId)
+    {
+        if (!_chatHistories.TryGetValue(chatId, out var list))
+        {
+            list = new List<FriendChatMessageData>(128);
+            _chatHistories[chatId] = list;
+        }
+        return list;
+    }
+
+    public void OpenFriendChatWindow(FriendListItemData d)
+    {
+        if (d == null) return;
+
+        if (!d.isOnline)
+        {
+            ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
+            return;
+        }
+
+        var user = FirebaseAuth.DefaultInstance.CurrentUser;
+        if (user == null) return;
+
+        _myUid = user.UserId;
+
+        string chatId = MakeChatId(_myUid, d.uid);
+
+        // 이미 창 있으면 -> 재오픈 & 맨 앞으로
+        if (_chatWindows.TryGetValue(chatId, out var win) && win != null)
+        {
+            win.ApplyHeaderLanguage(); // 언어 바뀌었을 수 있음
+            win.Open();
+            return;
+        }
+
+        // 없으면 생성
+        if (chatWindowPrefab == null || chatWindowParent == null)
+        {
+            Debug.LogWarning("ChatWindow Prefab/Parent not set.");
+            return;
+        }
+
+        var newWin = Instantiate(chatWindowPrefab, chatWindowParent);
+        newWin.name = $"ChatWindow_{chatId}";
+        newWin.Setup(this, _myUid, d.uid, d.nick, chatId);
+        _chatWindows[chatId] = newWin;
+
+        newWin.Open();
+    }
+
+    public string GetMyNick()
+    {
+        // 예시: 네 프로젝트에 맞게 바꿔
+        return FireBaseAuthManager.Instance.CurrentAccount.NickName;
     }
 
     #endregion

@@ -263,6 +263,22 @@
     {
       "key": "txt.FriendRequest",
       "text": "친구 요청"
+    },
+    {
+      "key": "txt.FriendDelete",
+      "text": "친구 삭제"
+    },
+    {
+      "key": "txt.Chatting",
+      "text": "채팅 하기"
+    },
+    {
+      "key": "txt.InviteParty",
+      "text": "파티 초대"
+    },
+    {
+      "key": "txt.ShowProfile",
+      "text": "프로필 보기"
     }
   ],
   "eng": [
@@ -529,6 +545,22 @@
     {
       "key": "txt.FriendRequest",
       "text": "Friend Request"
+    },
+    {
+      "key": "txt.FriendDelete",
+      "text": "Delete Friend"
+    },
+    {
+      "key": "txt.Chatting",
+      "text": "Chat now"
+    },
+    {
+      "key": "txt.InviteParty",
+      "text": "Party Invite"
+    },
+    {
+      "key": "txt.ShowProfile",
+      "text": "View Profile"
     }
   ]
 }

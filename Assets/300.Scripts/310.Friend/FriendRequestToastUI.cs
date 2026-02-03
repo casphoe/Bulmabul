@@ -8,6 +8,8 @@ public class FriendRequestToastUI : MonoBehaviour
 {
     public GameObject root;
     public TextMeshProUGUI txtNick;
+    public GameObject txtRequestTitle;
+    public GameObject txtDeteleTitle;
 
     public Button btnAccept;
     public Button btnDecline;
@@ -23,6 +25,9 @@ public class FriendRequestToastUI : MonoBehaviour
     {   
         if (root) root.SetActive(true);
 
+        txtRequestTitle.SetActive(true);
+        txtDeteleTitle.SetActive(false);
+
         var lang = (LaguageManager.Instance != null)
             ? LaguageManager.Instance.currentLang
             : Lauaguage.Kor;
@@ -37,6 +42,8 @@ public class FriendRequestToastUI : MonoBehaviour
     {
         if (root) root.SetActive(true);
 
+        txtRequestTitle.SetActive(false);
+        txtDeteleTitle.SetActive(true);
 
         var lang = (LaguageManager.Instance != null)
         ? LaguageManager.Instance.currentLang
