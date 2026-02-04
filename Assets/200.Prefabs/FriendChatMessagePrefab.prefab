@@ -217,9 +217,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   autoApplySize: 1
   bubbleRoot: {fileID: 4945614878020193982}
-  txtMeesage: {fileID: 5635164428563688273}
+  txtMessage: {fileID: 5635164428563688273}
   txtClock: {fileID: 4115712771955618158}
-  txtck: {fileID: 8633623710544552207}
+  txtNick: {fileID: 8633623710544552207}
   typingEnabled: 1
   secPerChar: 0.02
 --- !u!1 &5584112368633463451

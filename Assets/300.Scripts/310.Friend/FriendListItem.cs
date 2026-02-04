@@ -1,11 +1,12 @@
 ﻿using Gpm.Ui;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
-using TMPro;
 
 
 [Serializable]
@@ -243,17 +244,13 @@ public class FriendListItem : InfiniteScrollItem
                 if (action == FriendAction.Chat || action == FriendAction.Invite)
                 {
                     // 오프라인에서 눌렀으면 무시 + 토스트
-                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
-                    actionDropdown.SetValueWithoutNotify(0);
+                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");          
                     return;
                 }
             }
 
             // 매니저에게 액션 넘기기
-            FrinedUiManager.instance?.OnFriendActionSelected(d, (int)action);
-
-            // 선택 후 다시 기본값으로
-            actionDropdown.SetValueWithoutNotify(0);
+            FrinedUiManager.instance?.OnFriendActionSelected(d, (int)action);         
         });
     }
 

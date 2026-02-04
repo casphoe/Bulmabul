@@ -82,6 +82,8 @@ public class FriendChatWindow : MonoBehaviour
         transform.SetAsLastSibling(); // 맨 앞으로
         _opened = true;
 
+        _mgr?.NotifyChatWindowOpened();
+
         ApplyHeaderLanguage();
 
         // UI 초기화 후, 메모리 기록 뿌리기
@@ -112,6 +114,8 @@ public class FriendChatWindow : MonoBehaviour
         _opened = false;
         Unsubscribe();
         if (root) root.SetActive(false);
+
+        _mgr?.NotifyChatWindowClosed();
     }
 
     public void ApplyHeaderLanguage()
@@ -211,6 +215,7 @@ public class FriendChatWindow : MonoBehaviour
         inputMsg.text = "";
 
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string myNick = SafeNick(_mgr?.GetMyNick(), "나");
 
         var push = FirebaseDatabase.DefaultInstance
             .GetReference($"chats/{_chatId}/messages")
@@ -218,16 +223,16 @@ public class FriendChatWindow : MonoBehaviour
 
         string msgId = push.Key;
 
-        string myNick = SafeNick(_mgr?.GetMyNick(), "나");
-
         // 2) 로컬(메모리) + UI에 즉시 추가
         var data = new FriendChatMessageData
         {
             msgId = msgId,
             fromUid = _myUid,
+            fromNick = myNick,
             text = text,
             ts = now,
-            isMine = true
+            isMine = true,
+            useTyping = true
         };
 
         var history = _mgr.GetOrCreateChatHistory(_chatId);
@@ -240,11 +245,46 @@ public class FriendChatWindow : MonoBehaviour
         var payload = new Dictionary<string, object>
         {
             ["fromUid"] = _myUid,
+            ["fromNick"] = myNick,
             ["text"] = text,
             ["ts"] = now
         };
 
         await push.SetValueAsync(payload);
+
+        await UpdateChatIndexAsync(
+            chatId: _chatId,
+            myUid: _myUid,
+            myNick: myNick,
+            friendUid: _friendUid,
+            friendNick: _friendNick,
+            lastText: text,
+            ts: now
+                    );
+    }
+
+    async Task UpdateChatIndexAsync(string chatId, string myUid, string myNick, string friendUid, string friendNick, string lastText, long ts)
+    {
+        var root = FirebaseDatabase.DefaultInstance.RootReference;
+
+        // chatIndex/{uid}/{chatId} 형태로 양쪽 다 기록
+        var updates = new Dictionary<string, object>();
+
+        // 내 인덱스
+        updates[$"chatIndex/{myUid}/{chatId}/withUid"] = friendUid;
+        updates[$"chatIndex/{myUid}/{chatId}/withNick"] = friendNick;
+        updates[$"chatIndex/{myUid}/{chatId}/lastText"] = lastText;
+        updates[$"chatIndex/{myUid}/{chatId}/lastFromUid"] = myUid;
+        updates[$"chatIndex/{myUid}/{chatId}/lastTs"] = ts;
+
+        // 상대 인덱스
+        updates[$"chatIndex/{friendUid}/{chatId}/withUid"] = myUid;
+        updates[$"chatIndex/{friendUid}/{chatId}/withNick"] = myNick;
+        updates[$"chatIndex/{friendUid}/{chatId}/lastText"] = lastText;
+        updates[$"chatIndex/{friendUid}/{chatId}/lastFromUid"] = myUid;
+        updates[$"chatIndex/{friendUid}/{chatId}/lastTs"] = ts;
+
+        await root.UpdateChildrenAsync(updates);
     }
 
     static long TryLong(object v)

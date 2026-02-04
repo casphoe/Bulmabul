@@ -102,6 +102,17 @@ public class FrinedUiManager : MonoBehaviour
     // chatId -> history (로그아웃/강제종료 전까지 메모리 유지)
     private readonly Dictionary<string, List<FriendChatMessageData>> _chatHistories = new();
 
+
+    private int _openedChatWindowCount = 0;
+    public bool IsAnyChatWindowOpen => _openedChatWindowCount > 0;
+
+    DatabaseReference _chatIndexRef;
+    EventHandler<ChildChangedEventArgs> _onChatIndexChanged;
+
+    // friendUid -> (query, handler)
+private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs> h)> _chatMsgSubs
+    = new();
+
     #endregion
 
     #endregion
@@ -144,6 +155,9 @@ public class FrinedUiManager : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.F))
         {
+            if (IsAnyChatWindowOpen)
+                return;
+
             isFriendOpen = !isFriendOpen;
 
             BtnFriendPanelOnOff(isFriendOpen);
@@ -160,6 +174,8 @@ public class FrinedUiManager : MonoBehaviour
         HookIncomingListener();      // 친구요청 토스트
         HookNotificationListener();  // 수락/거절 토스트
 
+        HookChatIndexListener();
+
         if (isFriendOpen)
             await ReloadAsync();
     }
@@ -169,6 +185,8 @@ public class FrinedUiManager : MonoBehaviour
         UnhookIncomingListener();
         UnhookNotificationListener();
         UnhookPresenceListeners();
+
+        UnhookChatIndexListener();
     }
 
     public void BtnFriendPanelOnOff(bool isActive)
@@ -880,7 +898,7 @@ public class FrinedUiManager : MonoBehaviour
                     return;
                 }
 
-                OpenFriendChatWindow(d);
+                OpenFriendChatWindow(d);             
                 break;
 
             case 2: // Invite
@@ -961,8 +979,103 @@ public class FrinedUiManager : MonoBehaviour
 
     public string GetMyNick()
     {
-        // 예시: 네 프로젝트에 맞게 바꿔
         return FireBaseAuthManager.Instance.CurrentAccount.NickName;
+    }
+
+    internal void NotifyChatWindowOpened()
+    {
+        _openedChatWindowCount++;
+        if (_openedChatWindowCount < 0) _openedChatWindowCount = 0;
+    }
+
+    internal void NotifyChatWindowClosed()
+    {
+        _openedChatWindowCount--;
+        if (_openedChatWindowCount < 0) _openedChatWindowCount = 0;
+    }
+
+
+    void HookChatIndexListener()
+    {
+        if (string.IsNullOrEmpty(_myUid)) return;
+        if (_chatIndexRef != null) return;
+
+        _chatIndexRef = FirebaseDatabase.DefaultInstance.GetReference($"chatIndex/{_myUid}");
+
+        _onChatIndexChanged = (s, e) =>
+        {
+            if (e.DatabaseError != null) return;
+            if (e.Snapshot == null || !e.Snapshot.Exists) return;
+
+            string chatId = e.Snapshot.Key;
+            string withUid = e.Snapshot.Child("withUid").Value?.ToString() ?? "";
+            string withNick = e.Snapshot.Child("withNick").Value?.ToString() ?? "";
+            string lastText = e.Snapshot.Child("lastText").Value?.ToString() ?? "";
+            string lastFromUid = e.Snapshot.Child("lastFromUid").Value?.ToString() ?? "";
+
+            //내가 보낸 업데이트면(내 기기에서 보낸 메시지) 알림/오픈 안 함
+            if (lastFromUid == _myUid) return;
+
+            // 메인스레드에서 UI 처리
+            _mainThreadQueue.Enqueue(() =>
+            {
+                // 1) 토스트
+                ToastMessageManager.instance?.ShowToast(
+                    $"{withNick} : {lastText}",
+                    $"{withNick}: {lastText}"
+                );
+
+                // 2) 채팅창이 안 열려 있으면 자동 오픈
+                if (!_chatWindows.TryGetValue(chatId, out var win) || win == null || !win.gameObject.activeInHierarchy)
+                {
+                    OpenFriendChatWindowByUid(withUid, withNick);  // 아래 구현
+                }
+            });
+        };
+
+        _chatIndexRef.ChildAdded += _onChatIndexChanged;
+        _chatIndexRef.ChildChanged += _onChatIndexChanged;
+    }
+
+    void UnhookChatIndexListener()
+    {
+        if (_chatIndexRef != null && _onChatIndexChanged != null)
+        {
+            _chatIndexRef.ChildAdded -= _onChatIndexChanged;
+            _chatIndexRef.ChildChanged -= _onChatIndexChanged;
+        }
+        _chatIndexRef = null;
+        _onChatIndexChanged = null;
+    }
+
+    void OpenFriendChatWindowByUid(string friendUid, string friendNick)
+    {
+        if (string.IsNullOrEmpty(friendUid)) return;
+
+        var user = FirebaseAuth.DefaultInstance.CurrentUser;
+        if (user == null) return;
+
+        _myUid = user.UserId;
+
+        string chatId = MakeChatId(_myUid, friendUid);
+
+        // 이미 있으면 앞으로 + Open
+        if (_chatWindows.TryGetValue(chatId, out var win) && win != null)
+        {
+            win.Open();
+            return;
+        }
+
+        if (chatWindowPrefab == null || chatWindowParent == null)
+            return;
+
+        // FriendListItemData 없이도 열 수 있게 임시로 구성
+        var newWin = Instantiate(chatWindowPrefab, chatWindowParent);
+        newWin.name = $"ChatWindow_{chatId}";
+        newWin.Setup(this, _myUid, friendUid, friendNick, chatId);
+        _chatWindows[chatId] = newWin;
+
+        newWin.Open();
     }
 
     #endregion

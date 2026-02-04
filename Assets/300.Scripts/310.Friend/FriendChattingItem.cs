@@ -6,9 +6,9 @@ using System.Collections;
 public class FriendChattingItem : InfiniteScrollItem
 {
     public RectTransform bubbleRoot;  // 버블 이미지 루트만!
-    public Text txtMeesage;
+    public Text txtMessage;
     public Text txtClock;
-    public Text txtck;
+    public Text txtNick;
 
     [Header("Typing")]
     public bool typingEnabled = true;
@@ -16,6 +16,10 @@ public class FriendChattingItem : InfiniteScrollItem
 
     Coroutine _typingCo;
     string _boundMsgId;
+
+    bool _pendingTyping;
+    string _pendingFullText;
+    string _pendingMsgId;
 
     public override void UpdateData(InfiniteScrollData scrollData)
     {
@@ -38,20 +42,60 @@ public class FriendChattingItem : InfiniteScrollItem
             bubbleRoot.localScale = s;
         }
 
-        if (txtMeesage == null) return;
+        if (txtNick) txtNick.text = d.fromNick ?? "";
+
+        if (txtClock)
+        {
+            // ts가 Unix seconds 기준이라면 보기 좋게 HH:mm로
+            // (UTC로 저장했으면 ToLocalTime()이 한국시간으로 바꿔줌)
+            if (d.ts > 0)
+            {
+                var dt = System.DateTimeOffset.FromUnixTimeSeconds(d.ts).ToLocalTime();
+                txtClock.text = dt.ToString("yyyy-MM-dd HH:mm");
+            }
+            else
+            {
+                txtClock.text = "";
+            }
+        }
+
+        if (txtMessage == null) return;
 
         string full = d.text ?? "";
 
-        // 타이핑 안 쓰는 경우(히스토리/옵션 OFF) 즉시 표시
+        // 타이핑 없이 즉시 표시
         if (!typingEnabled || !d.useTyping)
         {
-            txtMeesage.text = full;
+            _pendingTyping = false;
+            txtMessage.text = full;
             return;
         }
 
         // 타이핑 시작
-        txtMeesage.text = "";
-        _typingCo = StartCoroutine(CoType(txtMeesage, full, _boundMsgId));
+        txtMessage.text = "";
+        if (isActiveAndEnabled && gameObject.activeInHierarchy)
+        {
+            _typingCo = StartCoroutine(CoType(txtMessage, full, _boundMsgId));
+            _pendingTyping = false;
+        }
+        else
+        {
+            // 비활성 상태면 예약만 해두고, OnEnable에서 시작
+            _pendingTyping = true;
+            _pendingFullText = full;
+            _pendingMsgId = _boundMsgId;
+        }
+    }
+
+    private void OnEnable()
+    {
+        if (_pendingTyping && typingEnabled && isActiveAndEnabled && gameObject.activeInHierarchy)
+        {
+            StopTyping();
+            txtMessage.text = "";
+            _typingCo = StartCoroutine(CoType(txtMessage, _pendingFullText, _pendingMsgId));
+            _pendingTyping = false;
+        }
     }
 
     void StopTyping()
@@ -70,6 +114,8 @@ public class FriendChattingItem : InfiniteScrollItem
         {
             // 셀 재사용되어 다른 msg로 바뀌었으면 중단
             if (_boundMsgId != msgIdAtStart) yield break;
+
+            if (!isActiveAndEnabled || !gameObject.activeInHierarchy) yield break;
 
             target.text += full[i];
             yield return new WaitForSecondsRealtime(secPerChar);
