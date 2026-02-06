@@ -206,6 +206,19 @@ public class FriendChatWindow : MonoBehaviour
         string text = (inputMsg.text ?? "").Trim();
         if (string.IsNullOrEmpty(text)) return;
 
+        bool friendOnline = await IsFriendOnlineAsync(_friendUid);
+
+        if (!friendOnline)
+        {
+            // 언어에 맞게 토스트
+            ShowFriendOfflineToast(_friendNick);
+
+            // 입력 유지/삭제는 취향인데, 보통은 유지가 좋아서 유지 추천
+            // inputMsg.text = text; // 유지하고 싶으면 이렇게 (이미 text에 담아둠)
+            return;
+        }
+
+
         inputMsg.text = "";
 
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -244,10 +257,19 @@ public class FriendChatWindow : MonoBehaviour
             ["ts"] = now
         };
 
-        await push.SetValueAsync(payload);
+        try
+        {
+            await push.SetValueAsync(payload);
 
-        // chatIndex는 "내 것만" 갱신하도록 변경(상대꺼 쓰지 마)
-        await _mgr.UpdateMyChatIndexAsync(_friendUid, _friendNick, text, _myUid, now);
+            // chatIndex는 "내 것만" 갱신
+            await _mgr.UpdateMyChatIndexAsync(_friendUid, _friendNick, text, _myUid, now);
+        }
+        catch (Exception)
+        {
+            // 네가 OnDisconnect로 상대가 나가면 messages가 통째로 지워질 수 있음
+            // 그 순간 write 실패가 날 수 있으니, 여기서도 동일 토스트 처리
+            ShowFriendOfflineToast(_friendNick);
+        }
     }
 
     IEnumerator CoScrollToBottom()
@@ -289,4 +311,43 @@ public class FriendChatWindow : MonoBehaviour
     }
 
     void OnDisable() => Unsubscribe();
+
+    private async Task<bool> IsFriendOnlineAsync(string friendUid)
+    {
+        if (string.IsNullOrEmpty(friendUid)) return false;
+
+        try
+        {
+            var snap = await FirebaseDatabase.DefaultInstance
+                .GetReference($"presence/{friendUid}/online")
+                .GetValueAsync();
+
+            if (snap == null || !snap.Exists) return false;
+
+            if (snap.Value is bool b) return b;
+
+            bool parsed = false;
+            bool.TryParse(snap.Value.ToString(), out parsed);
+            return parsed;
+        }
+        catch
+        {
+            // 네트워크 문제/권한 문제면 안전하게 offline 취급
+            return false;
+        }
+    }
+
+    private void ShowFriendOfflineToast(string friendNick)
+    {
+        string nick = string.IsNullOrWhiteSpace(friendNick) ? "알 수 없음" : friendNick;
+
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        if (lang == Lauaguage.Kor)
+            ToastMessageManager.instance?.ShowToast($"{nick} 친구가 로그아웃 상태입니다.", $"{nick} is logged out.");
+        else
+            ToastMessageManager.instance?.ShowToast($"{nick} is logged out.", $"{nick} is logged out.");
+    }
 }

@@ -193,6 +193,11 @@ public class FrinedUiManager : MonoBehaviour
         UnhookChatToastSubs();
     }
 
+    private async void Start()
+    {
+        await DeleteAllChatMessagesBeforeLogoutAsync();
+    }
+
     private void OnAuthStateChanged(object sender, EventArgs e)
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
@@ -246,6 +251,9 @@ public class FrinedUiManager : MonoBehaviour
         // Prime 상태 리셋
         _chatToastPrimed = false;
         _knownFriendUids.Clear();
+
+        // OnDisconnect 등록 플래그도 리셋
+        _chatCleanupOnDisconnectRegistered = false;
 
         _myUid = null;
     }
@@ -1239,6 +1247,8 @@ public class FrinedUiManager : MonoBehaviour
 
             // messages 전체 삭제 (양쪽 모두 기록 없어짐)
             tasks.Add(root.Child($"{chatRootPath}/messages").RemoveValueAsync());
+
+            tasks.Add(root.Child($"chatIndex/{myUid}/{chatKey}").RemoveValueAsync());
         }
 
         await Task.WhenAll(tasks);

@@ -191,6 +191,7 @@ public class LobbyUIManager : MonoBehaviour
                     if(pass1 == pass2)
                     {
                         ShowToastByLang("회원 탈퇴 성공", "Account deleted successfully");
+                        await FrinedUiManager.instance.DeleteAllChatMessagesBeforeLogoutAsync();
                         await FireBaseAuthManager.Instance.DeleteCurrentAccountAsync(password.text);
                     }
                     else
