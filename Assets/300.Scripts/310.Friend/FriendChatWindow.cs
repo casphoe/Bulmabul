@@ -1,7 +1,7 @@
-﻿using Firebase.Auth;
-using Firebase.Database;
+﻿using Firebase.Database;
 using Gpm.Ui;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using TMPro;
@@ -17,8 +17,7 @@ public class FriendChatMessageData : InfiniteScrollData
     public string fromNick;
     public long ts;
     public bool isMine;
-
-    public bool useTyping; // 새로 들어오는 메시지에만 true 권장
+    public bool useTyping;
 }
 
 public class FriendChatWindow : MonoBehaviour
@@ -28,11 +27,12 @@ public class FriendChatWindow : MonoBehaviour
     public Button btnClose;
 
     [Header("Header")]
-    public Text txtHeader; // "OOO 채팅중..." / "Chatting with OOO..."
-    public Image dragHandleImage; // ← 여기(상단바)에 UIDragger 달면 됨
+    public Text txtHeader;
+    public Image dragHandleImage;
 
     [Header("Scroll")]
     public InfiniteScroll chatScroll;
+    public ScrollRect chatScrollRect; // ✅ 인스펙터 연결(없으면 자동 탐색)
 
     [Header("Input")]
     public TMP_InputField inputMsg;
@@ -42,24 +42,27 @@ public class FriendChatWindow : MonoBehaviour
     string _myUid;
     string _friendUid;
     string _friendNick;
-    string _chatId;
 
-    // 매니저(히스토리 공유용)
+    // Firebase 경로 (chats/{a}/{b})
+    string _chatRootPath;
+    string _chatKey; // 로컬 딕셔너리 key로도 사용 가능
+
     FrinedUiManager _mgr;
 
-    // firebase
     DatabaseReference _msgRef;
     EventHandler<ChildChangedEventArgs> _onChildAdded;
 
     bool _opened;
 
-    public void Setup(FrinedUiManager mgr, string myUid, string friendUid, string friendNick, string chatId)
+    public void Setup(FrinedUiManager mgr, string myUid, string friendUid, string friendNick)
     {
         _mgr = mgr;
         _myUid = myUid;
         _friendUid = friendUid;
         _friendNick = friendNick;
-        _chatId = chatId;
+
+        // 정렬된 채팅 경로/키 생성
+        BuildChatPath(_myUid, _friendUid, out _chatKey, out _chatRootPath);
 
         if (btnClose) btnClose.onClick.RemoveAllListeners();
         if (btnClose) btnClose.onClick.AddListener(Close);
@@ -67,28 +70,29 @@ public class FriendChatWindow : MonoBehaviour
         if (btnSend) btnSend.onClick.RemoveAllListeners();
         if (btnSend) btnSend.onClick.AddListener(() => _ = SendAsync());
 
-        // 드래그 연결(선택)
         if (dragHandleImage != null)
         {
             var dragger = dragHandleImage.GetComponent<UIDragger>();
             if (dragger == null) dragger = dragHandleImage.gameObject.AddComponent<UIDragger>();
             dragger.target = transform as RectTransform;
         }
+
+        if (chatScrollRect == null)
+            chatScrollRect = GetComponentInChildren<ScrollRect>(true);
     }
 
     public void Open()
     {
         if (root) root.SetActive(true);
-        transform.SetAsLastSibling(); // 맨 앞으로
+        transform.SetAsLastSibling();
         _opened = true;
 
         _mgr?.NotifyChatWindowOpened();
-
         ApplyHeaderLanguage();
 
-        // UI 초기화 후, 메모리 기록 뿌리기
+        // 메모리 히스토리 뿌리기
         FriendInfiniteScrollUtil.ClearAll(chatScroll);
-        var history = _mgr.GetOrCreateChatHistory(_chatId);
+        var history = _mgr.GetOrCreateChatHistory(_chatKey);
         for (int i = 0; i < history.Count; i++)
         {
             var h = history[i];
@@ -106,6 +110,8 @@ public class FriendChatWindow : MonoBehaviour
         }
         FriendInfiniteScrollUtil.UpdateAll(chatScroll);
 
+        StartCoroutine(CoScrollToBottom());
+
         SubscribeIfNeeded();
     }
 
@@ -114,7 +120,6 @@ public class FriendChatWindow : MonoBehaviour
         _opened = false;
         Unsubscribe();
         if (root) root.SetActive(false);
-
         _mgr?.NotifyChatWindowClosed();
     }
 
@@ -127,16 +132,14 @@ public class FriendChatWindow : MonoBehaviour
             : Lauaguage.Kor;
 
         string nick = string.IsNullOrWhiteSpace(_friendNick) ? "알 수 없음" : _friendNick;
-
-        if (lang == Lauaguage.Kor) txtHeader.text = $"{nick} 채팅중...";
-        else txtHeader.text = $"Chatting with {nick}...";
+        txtHeader.text = (lang == Lauaguage.Kor) ? $"{nick} 채팅중..." : $"Chatting with {nick}...";
     }
 
     void SubscribeIfNeeded()
     {
         Unsubscribe();
 
-        _msgRef = FirebaseDatabase.DefaultInstance.GetReference($"chats/{_chatId}/messages");
+        _msgRef = FirebaseDatabase.DefaultInstance.GetReference($"{_chatRootPath}/messages");
 
         _onChildAdded = (s, e) =>
         {
@@ -156,15 +159,8 @@ public class FriendChatWindow : MonoBehaviour
 
             if (string.IsNullOrWhiteSpace(fromNick))
             {
-                if (isMine)
-                {
-                    fromNick = SafeNick(_mgr?.GetMyNick(), "나");
-                }
-                else
-                {
-                    // 친구 닉은 이미 세션에 있으니 이걸 우선 사용
-                    fromNick = SafeNick(_friendNick, ShortUid(fromUid));
-                }
+                if (isMine) fromNick = SafeNick(_mgr?.GetMyNick(), "나");
+                else fromNick = SafeNick(_friendNick, ShortUid(fromUid));
             }
 
             var data = new FriendChatMessageData
@@ -175,22 +171,20 @@ public class FriendChatWindow : MonoBehaviour
                 text = text,
                 ts = ts,
                 isMine = isMine,
-
-                // 새로 들어오는 메시지만 타이핑 애니메이션
                 useTyping = true
             };
 
-
-            // 메모리 히스토리에 추가(중복 방지)
-            var history = _mgr.GetOrCreateChatHistory(_chatId);
+            var history = _mgr.GetOrCreateChatHistory(_chatKey);
             if (history.Exists(x => x.msgId == msgId)) return;
 
             history.Add(data);
 
-            // UI 추가
             int idx = history.Count - 1;
             FriendInfiniteScrollUtil.Insert(chatScroll, data, idx);
             FriendInfiniteScrollUtil.UpdateAll(chatScroll);
+
+            // 새 메시지 오면 자동 아래로
+            StartCoroutine(CoScrollToBottom());
         };
 
         _msgRef.ChildAdded += _onChildAdded;
@@ -218,12 +212,12 @@ public class FriendChatWindow : MonoBehaviour
         string myNick = SafeNick(_mgr?.GetMyNick(), "나");
 
         var push = FirebaseDatabase.DefaultInstance
-            .GetReference($"chats/{_chatId}/messages")
+            .GetReference($"{_chatRootPath}/messages")
             .Push();
 
         string msgId = push.Key;
 
-        // 2) 로컬(메모리) + UI에 즉시 추가
+        //로컬 즉시 반영
         var data = new FriendChatMessageData
         {
             msgId = msgId,
@@ -235,13 +229,13 @@ public class FriendChatWindow : MonoBehaviour
             useTyping = true
         };
 
-        var history = _mgr.GetOrCreateChatHistory(_chatId);
+        var history = _mgr.GetOrCreateChatHistory(_chatKey);
         history.Add(data);
-
         FriendInfiniteScrollUtil.Insert(chatScroll, data, history.Count - 1);
         FriendInfiniteScrollUtil.UpdateAll(chatScroll);
+        StartCoroutine(CoScrollToBottom());
 
-        // 3) DB 전송
+        // DB 전송
         var payload = new Dictionary<string, object>
         {
             ["fromUid"] = _myUid,
@@ -252,39 +246,30 @@ public class FriendChatWindow : MonoBehaviour
 
         await push.SetValueAsync(payload);
 
-        await UpdateChatIndexAsync(
-            chatId: _chatId,
-            myUid: _myUid,
-            myNick: myNick,
-            friendUid: _friendUid,
-            friendNick: _friendNick,
-            lastText: text,
-            ts: now
-                    );
+        // chatIndex는 "내 것만" 갱신하도록 변경(상대꺼 쓰지 마)
+        await _mgr.UpdateMyChatIndexAsync(_friendUid, _friendNick, text, _myUid, now);
     }
 
-    async Task UpdateChatIndexAsync(string chatId, string myUid, string myNick, string friendUid, string friendNick, string lastText, long ts)
+    IEnumerator CoScrollToBottom()
     {
-        var root = FirebaseDatabase.DefaultInstance.RootReference;
+        // UI 업데이트 1프레임 기다렸다가 내림
+        yield return null;
+        if (chatScrollRect != null)
+            chatScrollRect.verticalNormalizedPosition = 0f;
+    }
 
-        // chatIndex/{uid}/{chatId} 형태로 양쪽 다 기록
-        var updates = new Dictionary<string, object>();
-
-        // 내 인덱스
-        updates[$"chatIndex/{myUid}/{chatId}/withUid"] = friendUid;
-        updates[$"chatIndex/{myUid}/{chatId}/withNick"] = friendNick;
-        updates[$"chatIndex/{myUid}/{chatId}/lastText"] = lastText;
-        updates[$"chatIndex/{myUid}/{chatId}/lastFromUid"] = myUid;
-        updates[$"chatIndex/{myUid}/{chatId}/lastTs"] = ts;
-
-        // 상대 인덱스
-        updates[$"chatIndex/{friendUid}/{chatId}/withUid"] = myUid;
-        updates[$"chatIndex/{friendUid}/{chatId}/withNick"] = myNick;
-        updates[$"chatIndex/{friendUid}/{chatId}/lastText"] = lastText;
-        updates[$"chatIndex/{friendUid}/{chatId}/lastFromUid"] = myUid;
-        updates[$"chatIndex/{friendUid}/{chatId}/lastTs"] = ts;
-
-        await root.UpdateChildrenAsync(updates);
+    static void BuildChatPath(string a, string b, out string chatKey, out string chatRootPath)
+    {
+        if (string.CompareOrdinal(a, b) < 0)
+        {
+            chatKey = $"{a}_{b}";
+            chatRootPath = $"chats/{a}/{b}";
+        }
+        else
+        {
+            chatKey = $"{b}_{a}";
+            chatRootPath = $"chats/{b}/{a}";
+        }
     }
 
     static long TryLong(object v)
@@ -303,8 +288,5 @@ public class FriendChatWindow : MonoBehaviour
         return uid.Length >= 6 ? uid.Substring(0, 6) : uid;
     }
 
-    void OnDisable()
-    {
-        Unsubscribe();
-    }
+    void OnDisable() => Unsubscribe();
 }

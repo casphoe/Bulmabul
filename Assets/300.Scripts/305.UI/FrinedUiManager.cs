@@ -3,132 +3,144 @@ using Firebase.Database;
 using Gpm.Ui;
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using System.Collections.Concurrent;
 
 public class FrinedUiManager : MonoBehaviour
 {
-    #region 변수
+    #region Singleton / Inspector
+
+    public static FrinedUiManager instance;
+
     [Header("Panel")]
-    [SerializeField] GameObject friendPanel;
+    [SerializeField] private GameObject friendPanel;
 
     [Header("Search Inputs")]
     public TMP_InputField inputInviteSearch;
     public TMP_InputField inputCurrentFriend;
 
     [Header("Tabs")]
-    public Button btnInviteTab;   // "초대"
-    public Button btnFriendsTab;  // "내 친구"
-    public Button btnFriendSearch; //검색 버튼(탭에 따라 다른 검색 실행)
-    public Button btnFriendCancel;
+    public Button btnInviteTab;      // "초대"
+    public Button btnFriendsTab;     // "내 친구"
+    public Button btnFriendSearch;   // 검색 버튼
+    public Button btnFriendCancel;   // 닫기 버튼
 
     [Header("InfiniteScroll")]
-    public InfiniteScroll friendScroll;           // GPM InfiniteScroll
-    public GameObject scrollContent;    // (선택) content root
+    public InfiniteScroll friendScroll;   // GPM InfiniteScroll
 
     [Header("Friend Request Toast")]
-    [SerializeField] FriendRequestToastUI requestToast; // 인스펙터 연결
+    [SerializeField] private FriendRequestToastUI requestToast;
 
-    DatabaseReference _reqInRef;
+    #endregion
 
+    #region Internal State
 
-    bool _deleteConfirmShowing = false;
+    private string _myUid;
+    private bool isFriendOpen = false;
 
-    struct IncomingReq
+    [SerializeField] private enum TabMode { Invite, Friends }
+    [Header("현재 탭")]
+    [SerializeField] private TabMode _mode = TabMode.Friends;
+
+    private CancellationTokenSource _cts;
+
+    // 메인 스레드로 UI 처리 넘기기
+    private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
+
+    #endregion
+
+    #region Friend Request (Incoming) Toast Queue
+
+    private DatabaseReference _reqInRef;
+
+    private struct IncomingReq
     {
         public string fromUid;
         public string fromNick;
     }
 
-    // 들어온 요청 큐
-    readonly Queue<IncomingReq> _incomingQueue = new();
-    readonly HashSet<string> _queuedSet = new(); // 중복 방지
-    bool _toastShowing = false;
+    private readonly Queue<IncomingReq> _incomingQueue = new();
+    private readonly HashSet<string> _queuedSet = new(); // 중복 방지
+    private bool _toastShowing = false;
+    private string _showingFromUid = null;
 
-    string _myUid;
-    string _showingFromUid = null;
+    private bool _deleteConfirmShowing = false;
 
-    bool isFriendOpen = false;
-
-    #region  알림 리스너 
-
-    DatabaseReference _notiRef;
-    readonly HashSet<string> _notiHandled = new(); // 중복 방지(옵션)
     #endregion
-    [SerializeField] enum TabMode { Invite, Friends }
-    [Header("친구 탭")]
-    [SerializeField] TabMode _mode = TabMode.Friends;
 
-    CancellationTokenSource _cts;
+    #region Notifications Listener
 
-    public static FrinedUiManager instance;
+    private DatabaseReference _notiRef;
+    private readonly HashSet<string> _notiHandled = new(); // 중복 방지
 
+    #endregion
 
-    #region Presence Watch (친구 온라인/오프라인 실시간 반영)
+    #region Presence Watch (Friends 탭에서 온라인 표시)
 
     // uid -> (ref, handler)
     private readonly Dictionary<string, (DatabaseReference r, EventHandler<ValueChangedEventArgs> h)> _presenceSubs
-    = new();
+        = new();
 
-    // 현재 Friends 탭에서 보여주는 데이터 (UID로 바로 찾아서 업데이트)
+    // 현재 Friends 탭에서 사용중인 itemData 참조(UID로 바로 업데이트)
     private readonly Dictionary<string, FriendListItemData> _friendByUid
-    = new();
+        = new();
 
-    // Queue는 스레드 세이프한 ConcurrentQueue로 
-    private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
-
-    // presence 변경이 들어왔을 때 UI 갱신을  몇초마다로 제한
     [SerializeField] private bool _presenceDirty = false;
-
-    // UI 갱신 주기(원하는 값으로 조절: 0.3f~2f 추천)
     [SerializeField] private float presenceUiRefreshInterval = 0.5f;
-    [SerializeField ]private float _nextPresenceUiRefresh = 0f;
+    private float _nextPresenceUiRefresh = 0f;
+
     #endregion
 
-    #region 친구 채팅
+    #region Friend Chat
 
     [Header("Friend Chat Windows")]
-    public Transform chatWindowParent;          // 채팅창들이 생성될 부모(캔버스 안)
-    public FriendChatWindow chatWindowPrefab;   // 채팅창 프리팹
+    public Transform chatWindowParent;
+    public FriendChatWindow chatWindowPrefab;
 
-    // chatId -> window instance
+    // chatKey(=MakeChatId) -> window
     private readonly Dictionary<string, FriendChatWindow> _chatWindows = new();
 
-    // chatId -> history (로그아웃/강제종료 전까지 메모리 유지)
+    // chatKey -> history
     private readonly Dictionary<string, List<FriendChatMessageData>> _chatHistories = new();
-
 
     private int _openedChatWindowCount = 0;
     public bool IsAnyChatWindowOpen => _openedChatWindowCount > 0;
 
-    DatabaseReference _chatIndexRef;
-    EventHandler<ChildChangedEventArgs> _onChatIndexChanged;
+    // 토스트/자동오픈은 chatIndex가 아니라 "messages 직접 구독"으로 처리한다.
+    // chatKey -> (query, handler)
+    private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs> h)> _chatToastSubs
+        = new();
 
-    // friendUid -> (query, handler)
-private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs> h)> _chatMsgSubs
-    = new();
+    // chatKey -> 마지막 본 msgId (초기 1회/중복 토스트 방지)
+    private readonly Dictionary<string, string> _lastToastMsgIdByChat
+        = new();
+
+    private bool _chatToastPrimed = false;
+    private readonly HashSet<string> _knownFriendUids = new(); // 로그아웃 전 친구 uid 캐시
+
+    private string _lastAuthUid = null;
+
+    private bool _chatCleanupOnDisconnectRegistered = false;
 
     #endregion
 
-    #endregion
-
+    #region Unity Lifecycle
 
     private void Awake()
     {
         instance = this;
-        friendPanel.SetActive(false);
+
+        if (friendPanel) friendPanel.SetActive(false);
         isFriendOpen = false;
 
         if (btnInviteTab) btnInviteTab.onClick.AddListener(() => SwitchTab(TabMode.Invite));
         if (btnFriendsTab) btnFriendsTab.onClick.AddListener(() => SwitchTab(TabMode.Friends));
-
         if (btnFriendSearch) btnFriendSearch.onClick.AddListener(() => _ = SearchByCurrentTabAsync());
-
         if (btnFriendCancel) btnFriendCancel.onClick.AddListener(() => FriendPanelOff());
 
         ApplyTabUI();
@@ -136,257 +148,249 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
 
     private void Update()
     {
-        // 메인스레드 큐 처리(스레드 세이프)
+        // ===== 메인스레드 큐 처리 =====
         while (_mainThreadQueue.TryDequeue(out var a))
         {
             try { a?.Invoke(); } catch (Exception e) { Debug.LogWarning(e); }
         }
 
-        // Friends 탭 + 패널 열림 상태에서만 UI 갱신
+        // ===== Presence UI 갱신(부하 제한) =====
         if (isFriendOpen && _mode == TabMode.Friends)
         {
             if (_presenceDirty && Time.unscaledTime >= _nextPresenceUiRefresh)
             {
                 _presenceDirty = false;
                 _nextPresenceUiRefresh = Time.unscaledTime + presenceUiRefreshInterval;
-                SwitchTab(TabMode.Friends);
+
+                // Friends 리스트 다시 뿌리기
+                _ = ReloadAsync();
             }
         }
 
+        // F 키로 친구 패널 토글(너 기존 로직 유지)
         if (Input.GetKeyDown(KeyCode.F))
         {
-            if (IsAnyChatWindowOpen)
-                return;
-
+            if (IsAnyChatWindowOpen) return;
             isFriendOpen = !isFriendOpen;
-
             BtnFriendPanelOnOff(isFriendOpen);
         }
     }
 
-    async void OnEnable()
+    private void OnEnable()
+    {
+        FirebaseAuth.DefaultInstance.StateChanged += OnAuthStateChanged;
+        TryInitAfterLogin(); // 이미 로그인 상태면 즉시 초기화
+    }
+
+    private void OnDisable()
+    {
+        FirebaseAuth.DefaultInstance.StateChanged -= OnAuthStateChanged;
+
+        // 모든 리스너/구독 해제
+        UnhookIncomingListener();
+        UnhookNotificationListener();
+        UnhookPresenceListeners();
+        UnhookChatToastSubs();
+    }
+
+    private void OnAuthStateChanged(object sender, EventArgs e)
+    {
+        var user = FirebaseAuth.DefaultInstance.CurrentUser;
+        string nowUid = user != null ? user.UserId : null;
+
+        // 로그아웃 or 계정 변경 감지
+        if (!string.IsNullOrEmpty(_lastAuthUid) && nowUid != _lastAuthUid)
+        {
+            CleanupOnLogoutLocal(); // 로컬 흔적 제거
+        }
+
+        _lastAuthUid = nowUid;
+
+        // 로그인 상태면 초기화
+        TryInitAfterLogin();
+    }
+
+    private void CleanupOnLogoutLocal()
+    {
+        // UI
+        isFriendOpen = false;
+        if (friendPanel) friendPanel.SetActive(false);
+
+        // 리스너/구독 끊기
+        UnhookIncomingListener();
+        UnhookNotificationListener();
+        UnhookPresenceListeners();
+        UnhookChatToastSubs();
+
+        // 채팅창 전부 닫고 제거
+        foreach (var kv in _chatWindows)
+        {
+            if (kv.Value != null) Destroy(kv.Value.gameObject);
+        }
+        _chatWindows.Clear();
+        _openedChatWindowCount = 0;
+
+        // 로컬 채팅 히스토리 제거
+        _chatHistories.Clear();
+        _lastToastMsgIdByChat.Clear();
+
+        // 큐/중복 기록 리셋
+        _incomingQueue.Clear();
+        _queuedSet.Clear();
+        _toastShowing = false;
+        _showingFromUid = null;
+        _deleteConfirmShowing = false;
+
+        _notiHandled.Clear();
+
+        // Prime 상태 리셋
+        _chatToastPrimed = false;
+        _knownFriendUids.Clear();
+
+        _myUid = null;
+    }
+
+    /// <summary>
+    /// 로그인된 유저가 생기면 uid 확보 + 리스너 훅
+    /// </summary>
+    private void TryInitAfterLogin()
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
         if (user == null) return;
 
         _myUid = user.UserId;
 
-        HookIncomingListener();      // 친구요청 토스트
-        HookNotificationListener();  // 수락/거절 토스트
+        HookIncomingListener();
+        HookNotificationListener();
 
-        HookChatIndexListener();
+        // 로그인 직후 친구목록을 1회 읽어 messages 구독을 걸어둔다.
+        _ = PrimeChatToastSubscriptionsAsync();
 
+        // 패널이 열려있으면 갱신
         if (isFriendOpen)
-            await ReloadAsync();
+            _ = ReloadAsync();
     }
 
-    void OnDisable()
-    {
-        UnhookIncomingListener();
-        UnhookNotificationListener();
-        UnhookPresenceListeners();
+    #endregion
 
-        UnhookChatIndexListener();
-    }
+    #region Panel On/Off / Tabs
 
     public void BtnFriendPanelOnOff(bool isActive)
     {
         isFriendOpen = isActive;
 
-        friendPanel.SetActive(isFriendOpen);
+        if (friendPanel) friendPanel.SetActive(isFriendOpen);
 
         if (!isFriendOpen)
         {
-            // 패널 닫히면 presence 구독 끊기
-            UnhookPresenceListeners();
+            // 패널 닫히면 presence/채팅 토스트 구독 끊기
+            UnhookPresenceListeners();         
             return;
         }
 
-        _ = ReloadAsync(); // 패널 열리면 현재 탭 기준으로 로드 (Friends면 구독도 시작됨)
+        _ = ReloadAsync();
     }
 
-    void FriendPanelOff()
+    private void FriendPanelOff()
     {
         isFriendOpen = false;
-        friendPanel.SetActive(isFriendOpen);
+        if (friendPanel) friendPanel.SetActive(false);
 
         UnhookPresenceListeners();
     }
 
-    void SwitchTab(TabMode m)
+    private void SwitchTab(TabMode m)
     {
         _mode = m;
-
         ApplyTabUI();
 
         if (_mode != TabMode.Friends)
             UnhookPresenceListeners();
 
-        _ = ReloadAsync(); // 탭 바꾸면 그 탭 기준으로 로드
+        _ = ReloadAsync();
     }
 
     /// <summary>
-    /// 탭에 따라 어떤 입력창을 보여줄지 결정
-    /// - Invite 탭: inputInviteSearch 켜짐
-    /// - Friends 탭: inputCurrentFriend 켜짐
+    /// 탭에 따라 어떤 검색 입력창을 보여줄지 결정
     /// </summary>
-    void ApplyTabUI()
+    private void ApplyTabUI()
     {
         if (inputInviteSearch) inputInviteSearch.gameObject.SetActive(_mode == TabMode.Invite);
         if (inputCurrentFriend) inputCurrentFriend.gameObject.SetActive(_mode == TabMode.Friends);
     }
 
-    async Task SearchByCurrentTabAsync()
+    private async Task SearchByCurrentTabAsync()
     {
-        // 검색 버튼 눌렀을 때만 검색 실행
         await ReloadAsync();
     }
 
-    async Task ReloadAsync()
+    private async Task ReloadAsync()
     {
+        // 로그인 안되어있으면 아무 것도 못 함
+        if (string.IsNullOrEmpty(_myUid))
+        {
+            var user = FirebaseAuth.DefaultInstance.CurrentUser;
+            if (user == null) return;
+            _myUid = user.UserId;
+        }
+
         // 이전 로드 취소
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
 
         try
         {
-            if (_mode == TabMode.Invite)
-                await LoadInviteListAsync();   //초대 후보 검색/전체
-            else
-                await LoadFriendsListAsync();  // 내 친구 검색/전체
+            if (_mode == TabMode.Invite) await LoadInviteListAsync();
+            else await LoadFriendsListAsync();
         }
-        catch (System.Exception e)
+        catch (Exception e)
         {
             Debug.LogWarning($"[FriendPanel] Reload failed: {e.Message}");
         }
     }
 
+    #endregion
+
+    #region Invite Candidate List
+
     public async void OnClickInviteButton(FriendListItemData d)
     {
         if (d == null) return;
 
-        // 이미 친구면 아무것도 안함
         if (d.inviteState == FriendListItemData.InviteState.AlreadyFriend) return;
 
-        // None이면 "요청 보내기"
         if (d.inviteState == FriendListItemData.InviteState.None)
         {
             await FriendService.SendFriendRequestAsync(d.uid, d.nick);
-            ToastMessageManager.instance.ShowToast(
-            $"{d.nick} 님에게 친구 요청을 보냈습니다.",
-            $"Friend request sent to {d.nick}."
+
+            ToastMessageManager.instance?.ShowToast(
+                $"{d.nick} 님에게 친구 요청을 보냈습니다.",
+                $"Friend request sent to {d.nick}."
             );
 
             await ReloadAsync();
         }
-
     }
 
-    public void OnClickDeleteButton(FriendListItemData d)
-    {
-        if (d == null) return;
-
-        if (requestToast == null)
-        {
-            // 토스트 UI 없으면 기존처럼 바로 삭제(보험)
-            _ = DeleteFriendNowAsync(d);
-            return;
-        }
-
-        if (_toastShowing || _deleteConfirmShowing) return;
-
-        _deleteConfirmShowing = true;
-        string nick = string.IsNullOrWhiteSpace(d.nick) ? "알 수 없음" : d.nick;
-
-        requestToast.ShowConfirm(
-        messageKor: $"{nick} 님을 친구에서 삭제할까요?",
-        messageEng: $"Remove {nick} from your friends?",
-        onConfirm: () => _ = OnConfirmDeleteAsync(d),
-        onCancel: () => OnCancelDelete()
-        );
-    }
-
-    async Task OnConfirmDeleteAsync(FriendListItemData d)
-    {
-        try
-        {
-            requestToast.Hide();
-
-            // 여기서만 실제 삭제 수행
-            await FriendService.RemoveFriendBothAsync(d.uid);
-
-            ToastMessageManager.instance.ShowToast(
-            $"{d.nick} 님을 친구에서 삭제했습니다.",
-            $"Removed {d.nick} from friends."
-            );
-
-            await ReloadAsync();
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[FriendDelete] fail: {e}");
-            ToastMessageManager.instance.ShowToast(
-            "친구 삭제 실패",
-            "Failed to remove friend"
-            );
-        }
-        finally
-        {
-            _deleteConfirmShowing = false;
-
-            // 친구요청 큐 토스트가 대기중이면 이어서 띄우기
-            _toastShowing = false;
-            _showingFromUid = null;
-            await TryShowNextToastAsync();
-        }
-    }
-
-
-    void OnCancelDelete()
-    {
-        requestToast.Hide();
-        _deleteConfirmShowing = false;
-        // 친구요청 토스트 대기중이면 이어서 띄우기
-        _ = TryShowNextToastAsync();
-    }
-
-
-    // 보험용: requestToast가 null일 때 호출
-    async Task DeleteFriendNowAsync(FriendListItemData d)
-    {
-        try
-        {
-            await FriendService.RemoveFriendBothAsync(d.uid);
-            await ReloadAsync();
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[FriendDelete] fail(no toast): {e}");
-        }
-    }
-
-    #region 초대 후보 리스트
-
-    async Task LoadInviteListAsync()
+    private async Task LoadInviteListAsync()
     {
         UnhookPresenceListeners();
+        UnhookChatToastSubs(); // Invite 탭에선 채팅 토스트 구독 필요 없음(정책)
 
         string keyword = inputInviteSearch ? inputInviteSearch.text : "";
         keyword = (keyword ?? "").Trim();
 
-        // 1) nicknames에서 후보 가져오기
+        // 1) 후보 조회
         var rows = string.IsNullOrEmpty(keyword)
-           ? await FriendService.GetInviteCandidatesDefaultAsync(100)
-           : await FriendService.SearchInviteCandidatesByPrefixAsync(keyword, 50);
+            ? await FriendService.GetInviteCandidatesDefaultAsync(100)
+            : await FriendService.SearchInviteCandidatesByPrefixAsync(keyword, 50);
 
-
-        // 2) 상태용: friends / out / in 을 한 번씩 읽어서 HashSet 만들기
-        var myUid = FirebaseAuth.DefaultInstance.CurrentUser.UserId;
+        // 2) 내 상태 읽기 (friends/out/in)
+        var myUid = _myUid;
 
         var friendsSnapTask = FirebaseDatabase.DefaultInstance.GetReference($"friends/{myUid}").GetValueAsync();
         var outSnapTask = FirebaseDatabase.DefaultInstance.GetReference($"friendRequestsOut/{myUid}").GetValueAsync();
         var inSnapTask = FirebaseDatabase.DefaultInstance.GetReference($"friendRequestsIn/{myUid}").GetValueAsync();
-
         await Task.WhenAll(friendsSnapTask, outSnapTask, inSnapTask);
 
         var friendSet = new HashSet<string>();
@@ -395,49 +399,46 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
 
         var friendsSnap = friendsSnapTask.Result;
         if (friendsSnap != null && friendsSnap.Exists)
-            foreach (var c in friendsSnap.Children) friendSet.Add(c.Key); // key = friendUid
+            foreach (var c in friendsSnap.Children) friendSet.Add(c.Key);
 
         var outSnap = outSnapTask.Result;
         if (outSnap != null && outSnap.Exists)
-            foreach (var c in outSnap.Children) outSet.Add(c.Key); // key = targetUid
+            foreach (var c in outSnap.Children) outSet.Add(c.Key);
 
         var inSnap = inSnapTask.Result;
         if (inSnap != null && inSnap.Exists)
-            foreach (var c in inSnap.Children) inSet.Add(c.Key); // key = fromUid
+            foreach (var c in inSnap.Children) inSet.Add(c.Key);
 
-        // 3) 리스트 만들기 + 프로필 채우기
+        // 3) 리스트 구성 + 프로필
         var dataList = new List<FriendListItemData>();
         var tasks = new List<Task>();
+
         foreach (var r in rows)
         {
+            // 이미 친구면 후보에서 제외(너 기존 정책 유지)
+            if (friendSet.Contains(r.uid)) continue;
 
             var state = FriendListItemData.InviteState.None;
-            if (friendSet.Contains(r.uid)) state = FriendListItemData.InviteState.AlreadyFriend;
-            else if (outSet.Contains(r.uid)) state = FriendListItemData.InviteState.Outgoing;
+            if (outSet.Contains(r.uid)) state = FriendListItemData.InviteState.Outgoing;
             else if (inSet.Contains(r.uid)) state = FriendListItemData.InviteState.Incoming;
-
-            if (friendSet.Contains(r.uid))
-                continue;
-
 
             var item = new FriendListItemData
             {
                 mode = FriendListItemData.RowMode.InviteCandidate,
                 uid = r.uid,
-                nick = r.nickKey,    // 일단 임시 표시
+                nick = r.nickKey, // 임시
                 photoUrl = "",
                 inviteState = state,
                 isOnline = false
             };
-            dataList.Add(item);
 
+            dataList.Add(item);
             tasks.Add(LoadProfileIntoItemAsync(item));
         }
 
         await Task.WhenAll(tasks);
 
         FriendInfiniteScrollUtil.ClearAll(friendScroll);
-
         for (int i = 0; i < dataList.Count; i++)
         {
             var mF = dataList[i];
@@ -452,16 +453,12 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
             };
             FriendInfiniteScrollUtil.Insert(friendScroll, data, i);
         }
-
         FriendInfiniteScrollUtil.UpdateAll(friendScroll);
     }
 
-    static async Task LoadProfileIntoItemAsync(FriendListItemData item)
+    private static async Task LoadProfileIntoItemAsync(FriendListItemData item)
     {
-        // 너는 지금 users/{uid}를 읽는데 rules상 남의 users는 못 읽음.
-        // userPublic을 만들었다면 여기서 userPublic/{uid}로 읽는 게 맞아.
-        // (일단 네 FriendService.GetUserProfileBasicAsync가 users 읽는 버전이라면 거기부터 바꿔야 함)
-
+        // userPublic 기반으로 읽도록 FriendService 내부가 되어 있어야 베스트
         var (nick, photoUrl) = await FriendService.GetUserProfileBasicAsync(item.uid);
         if (!string.IsNullOrWhiteSpace(nick)) item.nick = nick;
         item.photoUrl = (photoUrl ?? "").Trim();
@@ -469,10 +466,10 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
 
     #endregion
 
-    #region 내 친구 리스트
-    async Task LoadFriendsListAsync()
+    #region Friends List
+
+    private async Task LoadFriendsListAsync()
     {
-        // 내 친구 탭 검색어
         string keyword = inputCurrentFriend ? inputCurrentFriend.text : "";
         keyword = (keyword ?? "").Trim();
 
@@ -503,7 +500,6 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
                 isOnline = f.isOnline
             };
 
-            // 이게 중요: 스크롤에 넣는 data 인스턴스를 map에 등록
             _friendByUid[data.uid] = data;
             uids.Add(data.uid);
 
@@ -512,36 +508,204 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
 
         FriendInfiniteScrollUtil.UpdateAll(friendScroll);
 
+        // 1) presence 구독
         SyncPresenceSubscriptions(uids);
+
+        // 2) 채팅 토스트/자동 오픈을 위한 메시지 구독
+        SyncChatToastSubscriptions(friends);
     }
+
     #endregion
 
-    // ===== UI 버튼 액션(초대/삭제) =====
-    public async Task OnClickRowAction(FriendListItemData d)
+    #region Friend Delete (Confirm Toast)
+
+    public void OnClickDeleteButton(FriendListItemData d)
     {
-        if (d.mode == FriendListItemData.RowMode.InviteCandidate)
+        if (d == null) return;
+
+        // 토스트 UI 없으면 바로 삭제(보험)
+        if (requestToast == null)
         {
-            // "초대" = 친구요청 보내기
-            await FriendService.SendFriendRequestAsync(d.uid, d.nick);
-            Debug.Log($"Friend request sent to {d.nick} ({d.uid})");
+            _ = DeleteFriendNowAsync(d);
+            return;
         }
-        else
+
+        // 다른 토스트(요청 수락/거절)나 삭제 확인이 이미 떠있으면 막기
+        if (_toastShowing || _deleteConfirmShowing) return;
+
+        _deleteConfirmShowing = true;
+
+        string nick = string.IsNullOrWhiteSpace(d.nick) ? "알 수 없음" : d.nick;
+
+        // 확인창 띄우기
+        requestToast.ShowConfirm(
+            messageKor: $"{nick} 님을 친구에서 삭제할까요?",
+            messageEng: $"Remove {nick} from your friends?",
+            onConfirm: () => _ = OnConfirmDeleteAsync(d),
+            onCancel: () => OnCancelDelete()
+        );
+    }
+
+    private async Task OnConfirmDeleteAsync(FriendListItemData d)
+    {
+        try
         {
-            // "삭제" = 양쪽 삭제
+            // 확인창 닫기
+            requestToast.Hide();
+
+            // 실제 삭제 수행(양쪽 friends에서 제거)
             await FriendService.RemoveFriendBothAsync(d.uid);
-            Debug.Log($"Friend removed {d.nick} ({d.uid})");
+
+            ToastMessageManager.instance?.ShowToast(
+                $"{d.nick} 님을 친구에서 삭제했습니다.",
+                $"Removed {d.nick} from friends."
+            );
+
+            // 리스트 갱신
             await ReloadAsync();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[FriendDelete] fail: {e}");
+            ToastMessageManager.instance?.ShowToast("친구 삭제 실패", "Failed to remove friend");
+        }
+        finally
+        {
+            _deleteConfirmShowing = false;
+
+            // 삭제 확인 때문에 대기하던 친구요청 토스트 이어서 처리
+            _toastShowing = false;
+            _showingFromUid = null;
+            await TryShowNextToastAsync();
         }
     }
 
-    #region 친구 요청 시 토스트 메시지 띄여주는 기능
+    private void OnCancelDelete()
+    {
+        requestToast.Hide();
+        _deleteConfirmShowing = false;
 
-    void HookIncomingListener()
+        // 삭제 취소 후, 대기중인 요청 토스트 이어서 띄우기
+        _ = TryShowNextToastAsync();
+    }
+
+    // requestToast가 없을 때의 보험용
+    private async Task DeleteFriendNowAsync(FriendListItemData d)
+    {
+        try
+        {
+            await FriendService.RemoveFriendBothAsync(d.uid);
+            await ReloadAsync();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[FriendDelete] fail(no toast): {e}");
+        }
+    }
+
+    #endregion
+
+
+    #region Presence
+
+    private void SyncPresenceSubscriptions(HashSet<string> uids)
+    {
+        // 필요없는 구독 제거
+        var removeList = new List<string>();
+        foreach (var kv in _presenceSubs)
+            if (!uids.Contains(kv.Key)) removeList.Add(kv.Key);
+
+        foreach (var uid in removeList)
+            UnsubscribePresence(uid);
+
+        // 신규 구독 추가
+        foreach (var uid in uids)
+        {
+            if (_presenceSubs.ContainsKey(uid)) continue;
+            SubscribePresence(uid);
+        }
+    }
+
+    private void SubscribePresence(string uid)
+    {
+        var r = FirebaseDatabase.DefaultInstance.GetReference($"presence/{uid}");
+
+        EventHandler<ValueChangedEventArgs> h = (s, e) =>
+        {
+            if (e.DatabaseError != null) return;
+            var snap = e.Snapshot;
+
+            bool online = false;
+            long lastSeen = 0;
+
+            if (snap != null && snap.Exists)
+            {
+                online = TryBool(snap.Child("online").Value);
+                lastSeen = TryLong(snap.Child("lastSeen").Value);
+            }
+
+            _mainThreadQueue.Enqueue(() => ApplyPresence(uid, online, lastSeen));
+        };
+
+        r.ValueChanged += h;
+        _presenceSubs[uid] = (r, h);
+    }
+
+    private void UnsubscribePresence(string uid)
+    {
+        if (!_presenceSubs.TryGetValue(uid, out var sub)) return;
+        try { sub.r.ValueChanged -= sub.h; } catch { }
+        _presenceSubs.Remove(uid);
+    }
+
+    private void UnhookPresenceListeners()
+    {
+        foreach (var kv in _presenceSubs)
+        {
+            try { kv.Value.r.ValueChanged -= kv.Value.h; } catch { }
+        }
+        _presenceSubs.Clear();
+        _friendByUid.Clear();
+        _presenceDirty = false;
+    }
+
+    private void ApplyPresence(string uid, bool online, long lastSeen)
+    {
+        if (!_friendByUid.TryGetValue(uid, out var data) || data == null) return;
+
+        if (data.isOnline != online)
+        {
+            data.isOnline = online;
+            _presenceDirty = true;
+        }
+    }
+
+    private static bool TryBool(object v)
+    {
+        if (v == null) return false;
+        if (v is bool b) return b;
+        if (bool.TryParse(v.ToString(), out var bb)) return bb;
+        if (int.TryParse(v.ToString(), out var n)) return n != 0;
+        return false;
+    }
+
+    private static long TryLong(object v)
+    {
+        if (v == null) return 0;
+        if (long.TryParse(v.ToString(), out var n)) return n;
+        return 0;
+    }
+
+    #endregion
+
+    #region Friend Request / Notifications
+
+    private void HookIncomingListener()
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
         if (user == null) return;
 
-        if (_reqInRef != null) return; // 이미 훅돼있으면 중복 방지
+        if (_reqInRef != null) return;
 
         _myUid = user.UserId;
 
@@ -550,18 +714,17 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
 
         if (requestToast) requestToast.Hide();
 
-        // 최초 1회도 읽어서 큐에 넣어두기(앱 켰을 때 이미 와있던 요청 처리)
         _ = EnqueueExistingIncomingAsync();
     }
 
-    void UnhookIncomingListener()
+    private void UnhookIncomingListener()
     {
         if (_reqInRef != null)
             _reqInRef.ValueChanged -= OnIncomingChanged;
         _reqInRef = null;
     }
 
-    async Task EnqueueExistingIncomingAsync()
+    private async Task EnqueueExistingIncomingAsync()
     {
         var snap = await FirebaseDatabase.DefaultInstance.GetReference($"friendRequestsIn/{_myUid}").GetValueAsync();
         if (snap != null && snap.Exists)
@@ -576,53 +739,38 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         }
     }
 
-    // ValueChanged 이벤트
-    void OnIncomingChanged(object sender, ValueChangedEventArgs e)
+    private void OnIncomingChanged(object sender, ValueChangedEventArgs e)
     {
         if (e.DatabaseError != null) return;
         if (e.Snapshot == null) return;
 
-        // 현재 들어온 요청 전체를 기준으로 큐에 추가(중복은 _queuedSet이 막음)
         if (e.Snapshot.Exists)
         {
             foreach (var c in e.Snapshot.Children)
             {
                 string fromUid = c.Child("fromUid").Value?.ToString();
                 if (string.IsNullOrEmpty(fromUid))
-                    fromUid = c.Key; // 키=fromUid 구조면 fallback
+                    fromUid = c.Key;
 
                 string fromNick = c.Child("fromNick").Value?.ToString() ?? "";
                 EnqueueIncoming(fromUid, fromNick);
             }
         }
 
-        // 메인스레드에서 토스트 띄우기 시도
         _ = TryShowNextToastAsync();
     }
 
-    void EnqueueIncoming(string fromUid, string fromNick)
+    private void EnqueueIncoming(string fromUid, string fromNick)
     {
         if (string.IsNullOrEmpty(fromUid)) return;
-
         if (_showingFromUid == fromUid) return;
-
-        // 이미 큐에 있거나, 지금 띄우는 중이면 스킵
         if (_queuedSet.Contains(fromUid)) return;
 
-        // 이미 친구인 경우는 토스트 안 띄우고 싶으면 여기서 친구 여부 체크 가능(옵션)
-        _incomingQueue.Enqueue(new IncomingReq
-        {
-            fromUid = fromUid,
-            fromNick = fromNick
-        });
+        _incomingQueue.Enqueue(new IncomingReq { fromUid = fromUid, fromNick = fromNick });
         _queuedSet.Add(fromUid);
     }
 
-    #endregion
-
-    #region 알림 훅 / 언훅
-
-    void HookNotificationListener()
+    private void HookNotificationListener()
     {
         if (string.IsNullOrEmpty(_myUid)) return;
         if (_notiRef != null) return;
@@ -631,7 +779,7 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         _notiRef.ChildAdded += OnNotiChildAdded;
     }
 
-    void UnhookNotificationListener()
+    private void UnhookNotificationListener()
     {
         if (_notiRef != null)
             _notiRef.ChildAdded -= OnNotiChildAdded;
@@ -639,9 +787,7 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         _notiHandled.Clear();
     }
 
-    #region 알림 도착시 토스트 + 즉시 삭제
-
-    void OnNotiChildAdded(object sender, ChildChangedEventArgs e)
+    private void OnNotiChildAdded(object sender, ChildChangedEventArgs e)
     {
         if (e.DatabaseError != null) return;
         if (e.Snapshot == null || !e.Snapshot.Exists) return;
@@ -649,58 +795,37 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         string id = e.Snapshot.Key;
         if (string.IsNullOrEmpty(id)) return;
 
-        // 중복 방지(옵션)
         if (_notiHandled.Contains(id)) return;
         _notiHandled.Add(id);
 
         string type = e.Snapshot.Child("type").Value?.ToString() ?? "";
         string byNick = e.Snapshot.Child("byNick").Value?.ToString() ?? "";
 
-        // 메시지 만들기
         switch (type)
         {
             case "friend_accepted":
-                ToastMessageManager.instance.ShowToast(
-                    $"{byNick} 님이 친구 요청을 수락했습니다.",
-                    $"{byNick} accepted your friend request."
-                );
+                ToastMessageManager.instance?.ShowToast($"{byNick} 님이 친구 요청을 수락했습니다.", $"{byNick} accepted your friend request.");
                 break;
-
             case "friend_declined":
-                ToastMessageManager.instance.ShowToast(
-                    $"{byNick} 님이 친구 요청을 거절했습니다.",
-                    $"{byNick} declined your friend request."
-                );
+                ToastMessageManager.instance?.ShowToast($"{byNick} 님이 친구 요청을 거절했습니다.", $"{byNick} declined your friend request.");
                 break;
-
             case "friend_canceled":
-                ToastMessageManager.instance.ShowToast(
-                    $"{byNick} 님이 친구 요청을 취소했습니다.",
-                    $"{byNick} canceled the friend request."
-                );
+                ToastMessageManager.instance?.ShowToast($"{byNick} 님이 친구 요청을 취소했습니다.", $"{byNick} canceled the friend request.");
                 break;
             case "friend_removed":
-                ToastMessageManager.instance.ShowToast(
-                    $"{byNick} 님이 친구를 삭제했습니다.",
-                    $"{byNick} removed you from friends."
-                );
+                ToastMessageManager.instance?.ShowToast($"{byNick} 님이 친구를 삭제했습니다.", $"{byNick} removed you from friends.");
                 break;
         }
 
-        // "확인 처리" = DB에서 삭제 (다음 접속 때 안 뜸)
         _ = FirebaseDatabase.DefaultInstance
             .GetReference($"notifications/{_myUid}/{id}")
             .RemoveValueAsync();
 
-        StartCoroutine(FriendUiCorotue(0.5f));
+        StartCoroutine(FriendUiCoroutine(0.5f));
+        _ = PrimeChatToastSubscriptionsAsync();
     }
-    #endregion
 
-    #endregion
-
-    #region 토스트 메시지에서 수락 , 거절 처리
-
-    async Task TryShowNextToastAsync()
+    private async Task TryShowNextToastAsync()
     {
         if (_toastShowing) return;
         if (requestToast == null) return;
@@ -713,11 +838,9 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
 
         _showingFromUid = req.fromUid;
 
-        // 1) fromNick 우선 사용
         string nick = req.fromNick;
-
-        // 2) 비어있으면 userPublic로 보완(옵션)
         string photoUrl = "";
+
         if (string.IsNullOrWhiteSpace(nick))
         {
             var p = await FriendService.GetUserProfileBasicAsync(req.fromUid);
@@ -737,10 +860,9 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         );
     }
 
-    async Task OnAcceptAsync(string fromUid)
+    private async Task OnAcceptAsync(string fromUid)
     {
         requestToast.Hide();
-
         await FriendService.AcceptFriendRequestAsync(fromUid);
 
         _showingFromUid = null;
@@ -749,10 +871,9 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         await TryShowNextToastAsync();
     }
 
-    async Task OnDeclineAsync(string fromUid)
+    private async Task OnDeclineAsync(string fromUid)
     {
         requestToast.Hide();
-
         await FriendService.DeclineFriendRequestAsync(fromUid);
 
         _showingFromUid = null;
@@ -761,134 +882,73 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         await TryShowNextToastAsync();
     }
 
-    IEnumerator FriendUiCorotue(float delay)
+    private IEnumerator FriendUiCoroutine(float delay)
     {
         yield return new WaitForSeconds(delay);
-
-        if (_mode == TabMode.Invite)
-        {
-            SwitchTab(TabMode.Invite);
-        }
-        else
-            SwitchTab(TabMode.Friends);
+        _ = ReloadAsync();
     }
+
     #endregion
 
-    #region Presence Hook/Unhook/Apply
+    #region Friend Chat: Open Window / History / Index
 
-    private void SyncPresenceSubscriptions(HashSet<string> uids)
+    public static string MakeChatId(string a, string b)
     {
-        if (!isFriendOpen || _mode != TabMode.Friends)
-        {
-            UnhookPresenceListeners();
-            return;
-        }
-
-        // 1) 필요 없는 구독 제거
-        var removeList = new List<string>();
-        foreach (var kv in _presenceSubs)
-        {
-            if (!uids.Contains(kv.Key))
-                removeList.Add(kv.Key);
-        }
-        foreach (var uid in removeList)
-            UnsubscribePresence(uid);
-
-
-        // 2) 신규 구독 추가
-        foreach (var uid in uids)
-        {
-            if (_presenceSubs.ContainsKey(uid)) continue;
-            SubscribePresence(uid);
-        }
+        if (string.CompareOrdinal(a, b) < 0) return $"{a}_{b}";
+        return $"{b}_{a}";
     }
 
-
-    private void SubscribePresence(string uid)
+    /// <summary>
+    /// FriendChatWindow이 사용할 메모리 히스토리
+    /// </summary>
+    public List<FriendChatMessageData> GetOrCreateChatHistory(string chatKey)
     {
-        var r = FirebaseDatabase.DefaultInstance.GetReference($"presence/{uid}");
-
-
-        EventHandler<ValueChangedEventArgs> h = (s, e) =>
+        if (!_chatHistories.TryGetValue(chatKey, out var list))
         {
-            if (e.DatabaseError != null) return;
-            var snap = e.Snapshot;
+            list = new List<FriendChatMessageData>(128);
+            _chatHistories[chatKey] = list;
+        }
+        return list;
+    }
 
-            bool online = false;
-            long lastSeen = 0;
+    /// <summary>
+    /// 내 닉네임 얻기(너 기존 계정 구조 유지)
+    /// </summary>
+    public string GetMyNick()
+    {
+        return FireBaseAuthManager.Instance.CurrentAccount.NickName;
+    }
 
-            if (snap != null && snap.Exists)
-            {
-                online = TryBool(snap.Child("online").Value);
-                lastSeen = TryLong(snap.Child("lastSeen").Value);
-            }
-            _mainThreadQueue.Enqueue(() => ApplyPresence(uid, online, lastSeen));
+    /// <summary>
+    /// FriendChatWindow에서 호출: "내 chatIndex만" 갱신 (rules상 안전)
+    /// </summary>
+    public async Task UpdateMyChatIndexAsync(string withUid, string withNick, string lastText, string lastFromUid, long ts)
+    {
+        if (string.IsNullOrEmpty(_myUid)) return;
+
+        var root = FirebaseDatabase.DefaultInstance.RootReference;
+        string chatKey = MakeChatId(_myUid, withUid);
+
+        var updates = new Dictionary<string, object>
+        {
+            [$"chatIndex/{_myUid}/{chatKey}/withUid"] = withUid ?? "",
+            [$"chatIndex/{_myUid}/{chatKey}/withNick"] = withNick ?? "",
+            [$"chatIndex/{_myUid}/{chatKey}/lastText"] = lastText ?? "",
+            [$"chatIndex/{_myUid}/{chatKey}/lastFromUid"] = lastFromUid ?? "",
+            [$"chatIndex/{_myUid}/{chatKey}/lastTs"] = ts
         };
 
-        r.ValueChanged += h;
-        _presenceSubs[uid] = (r, h);
+        await root.UpdateChildrenAsync(updates);
     }
 
-
-    private void UnsubscribePresence(string uid)
-    {
-        if (!_presenceSubs.TryGetValue(uid, out var sub)) return;
-        try { sub.r.ValueChanged -= sub.h; } catch { }
-        _presenceSubs.Remove(uid);
-    }
-
-
-    private void UnhookPresenceListeners()
-    {
-        foreach (var kv in _presenceSubs)
-        {
-            try { kv.Value.r.ValueChanged -= kv.Value.h; } catch { }
-        }
-        _presenceSubs.Clear();
-        _friendByUid.Clear();
-        _presenceDirty = false;
-    }
-
-
-    private void ApplyPresence(string uid, bool online, long lastSeen)
-    {
-        // 지금 표시중인 친구 목록에 없으면 무시
-        if (!_friendByUid.TryGetValue(uid, out var data) || data == null)
-            return;
-        // 값이 실제로 바뀌었을 때만 dirty
-        if (data.isOnline != online)
-        {
-            data.isOnline = online;
-            _presenceDirty = true; // 몇 초마다 UpdateAll 하도록 트리거
-        }
-    }
-
-
-    static bool TryBool(object v)
-    {
-        if (v == null) return false;
-        if (v is bool b) return b;
-        if (bool.TryParse(v.ToString(), out var bb)) return bb;
-        // 0/1 형태 처리
-        if (int.TryParse(v.ToString(), out var n)) return n != 0;
-        return false;
-    }
-
-    static long TryLong(object v)
-    {
-        if (v == null) return 0;
-        if (long.TryParse(v.ToString(), out var n)) return n;
-        return 0;
-    }
-
-    #endregion
-
-    #region 친구 상태 온라인일 때 채팅 칠수 있는 UI 켜주기 기능
+    /// <summary>
+    /// 친구 액션에서 채팅 열기
+    /// </summary>
     public void OnFriendActionSelected(FriendListItemData d, int actionInt)
     {
         if (d == null) return;
 
-        // 0=None, 1=Chat, 2=Invite, 3=Profile (FriendListItem의 enum과 동일)
+        // 0=None, 1=Chat, 2=Invite, 3=Profile
         switch (actionInt)
         {
             case 1: // Chat
@@ -897,8 +957,7 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
                     ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
                     return;
                 }
-
-                OpenFriendChatWindow(d);             
+                OpenFriendChatWindow(d.uid, d.nick);
                 break;
 
             case 2: // Invite
@@ -907,79 +966,61 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
                     ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
                     return;
                 }
-                // TODO: 파티/룸 초대 보내기 (d.uid 기반)
                 Debug.Log($"[FriendAction] Invite party to {d.nick} ({d.uid})");
                 break;
 
             case 3: // Profile
-                    // TODO: 프로필 보기 (오프라인이어도 보이게 할지 정책 선택)
                 Debug.Log($"[FriendAction] View profile {d.nick} ({d.uid})");
                 break;
         }
     }
-    #endregion
 
-    #region 친구 채팅
-
-    public static string MakeChatId(string a, string b)
+    /// <summary>
+    /// FriendListItemData 없이도 열 수 있게 friendUid/nick만 받는 버전
+    /// </summary>
+    public void OpenFriendChatWindow(string friendUid, string friendNick)
     {
-        if (string.CompareOrdinal(a, b) < 0) return $"{a}_{b}";
-        return $"{b}_{a}";
-    }
-
-    public List<FriendChatMessageData> GetOrCreateChatHistory(string chatId)
-    {
-        if (!_chatHistories.TryGetValue(chatId, out var list))
-        {
-            list = new List<FriendChatMessageData>(128);
-            _chatHistories[chatId] = list;
-        }
-        return list;
-    }
-
-    public void OpenFriendChatWindow(FriendListItemData d)
-    {
-        if (d == null) return;
-
-        if (!d.isOnline)
-        {
-            ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
-            return;
-        }
+        if (string.IsNullOrEmpty(friendUid)) return;
 
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
         if (user == null) return;
 
         _myUid = user.UserId;
 
-        string chatId = MakeChatId(_myUid, d.uid);
+        string chatKey = MakeChatId(_myUid, friendUid);
 
-        // 이미 창 있으면 -> 재오픈 & 맨 앞으로
-        if (_chatWindows.TryGetValue(chatId, out var win) && win != null)
+        // 이미 창 있으면 앞으로 + Open
+        if (_chatWindows.TryGetValue(chatKey, out var win) && win != null)
         {
-            win.ApplyHeaderLanguage(); // 언어 바뀌었을 수 있음
             win.Open();
             return;
         }
 
-        // 없으면 생성
         if (chatWindowPrefab == null || chatWindowParent == null)
         {
-            Debug.LogWarning("ChatWindow Prefab/Parent not set.");
+            Debug.LogWarning("[Chat] Prefab/Parent not set.");
             return;
         }
 
-        var newWin = Instantiate(chatWindowPrefab, chatWindowParent);
-        newWin.name = $"ChatWindow_{chatId}";
-        newWin.Setup(this, _myUid, d.uid, d.nick, chatId);
-        _chatWindows[chatId] = newWin;
+        string safeNick = string.IsNullOrWhiteSpace(friendNick) ? "알 수 없음" : friendNick;
 
+        var newWin = Instantiate(chatWindowPrefab, chatWindowParent);
+        newWin.name = $"ChatWindow_{chatKey}";
+
+        // FriendChatWindow 신버전 Setup 시그니처: (mgr, myUid, friendUid, friendNick)
+        newWin.Setup(this, _myUid, friendUid, safeNick);
+
+        _chatWindows[chatKey] = newWin;
         newWin.Open();
     }
 
-    public string GetMyNick()
+    /// <summary>
+    /// (FriendListItemData)에서 호출 편의용
+    /// </summary>
+    public void OpenFriendChatWindow(FriendListItemData d)
     {
-        return FireBaseAuthManager.Instance.CurrentAccount.NickName;
+        if (d == null) return;
+        OpenFriendChatWindow(d.uid, d.nick);
     }
 
     internal void NotifyChatWindowOpened()
@@ -994,88 +1035,266 @@ private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs
         if (_openedChatWindowCount < 0) _openedChatWindowCount = 0;
     }
 
+    #endregion
 
-    void HookChatIndexListener()
+    #region Chat Toast / Auto Open (핵심)
+
+    /// <summary>
+    /// Friends 탭에서 보여지는 친구 목록 기준으로
+    /// chats/{uidA}/{uidB}/messages 의 "마지막 1개"를 구독한다.
+    ///
+    /// - 목적: chatIndex 없이도 새 메시지 도착 시
+    ///   1) 토스트
+    ///   2) 채팅창 자동 오픈
+    ///
+    /// - 주의: 구독 직후 기존 마지막 1개가 바로 들어오므로
+    ///   msgId 기억해서 "초기 1회"는 무시한다.
+    /// </summary>
+    private void SyncChatToastSubscriptions(List<FriendRow> friends)
     {
-        if (string.IsNullOrEmpty(_myUid)) return;
-        if (_chatIndexRef != null) return;
+        var need = new HashSet<string>();
 
-        _chatIndexRef = FirebaseDatabase.DefaultInstance.GetReference($"chatIndex/{_myUid}");
-
-        _onChatIndexChanged = (s, e) =>
+        foreach (var f in friends)
         {
-            if (e.DatabaseError != null) return;
-            if (e.Snapshot == null || !e.Snapshot.Exists) return;
+            if (string.IsNullOrEmpty(f.uid)) continue;
 
-            string chatId = e.Snapshot.Key;
-            string withUid = e.Snapshot.Child("withUid").Value?.ToString() ?? "";
-            string withNick = e.Snapshot.Child("withNick").Value?.ToString() ?? "";
-            string lastText = e.Snapshot.Child("lastText").Value?.ToString() ?? "";
-            string lastFromUid = e.Snapshot.Child("lastFromUid").Value?.ToString() ?? "";
+            BuildChatPath(_myUid, f.uid, out string chatKey, out string chatRootPath);
+            need.Add(chatKey);
 
-            //내가 보낸 업데이트면(내 기기에서 보낸 메시지) 알림/오픈 안 함
-            if (lastFromUid == _myUid) return;
+            if (_chatToastSubs.ContainsKey(chatKey))
+                continue;
 
-            // 메인스레드에서 UI 처리
-            _mainThreadQueue.Enqueue(() =>
+            // 마지막 1개만
+            var q = FirebaseDatabase.DefaultInstance
+                .GetReference($"{chatRootPath}/messages")
+                .LimitToLast(1);
+
+            // 초기 1회 무시 플래그
+            bool primed = false;
+
+            EventHandler<ChildChangedEventArgs> h = (s, e) =>
             {
-                // 1) 토스트
-                ToastMessageManager.instance?.ShowToast(
-                    $"{withNick} : {lastText}",
-                    $"{withNick}: {lastText}"
-                );
+                if (e.DatabaseError != null) return;
+                if (e.Snapshot == null || !e.Snapshot.Exists) return;
 
-                // 2) 채팅창이 안 열려 있으면 자동 오픈
-                if (!_chatWindows.TryGetValue(chatId, out var win) || win == null || !win.gameObject.activeInHierarchy)
+                string msgId = e.Snapshot.Key;
+
+                // 구독 직후 1회는 기존 메시지일 가능성이 큼 -> 토스트 X
+                if (!primed)
                 {
-                    OpenFriendChatWindowByUid(withUid, withNick);  // 아래 구현
+                    primed = true;
+                    _lastToastMsgIdByChat[chatKey] = msgId;
+                    return;
                 }
-            });
-        };
 
-        _chatIndexRef.ChildAdded += _onChatIndexChanged;
-        _chatIndexRef.ChildChanged += _onChatIndexChanged;
-    }
+                // msgId 중복 방지
+                if (_lastToastMsgIdByChat.TryGetValue(chatKey, out var prev) && prev == msgId)
+                    return;
+                _lastToastMsgIdByChat[chatKey] = msgId;
 
-    void UnhookChatIndexListener()
-    {
-        if (_chatIndexRef != null && _onChatIndexChanged != null)
-        {
-            _chatIndexRef.ChildAdded -= _onChatIndexChanged;
-            _chatIndexRef.ChildChanged -= _onChatIndexChanged;
+                string fromUid = e.Snapshot.Child("fromUid").Value?.ToString() ?? "";
+                if (fromUid == _myUid) return; // 내가 보낸 건 토스트 X
+
+                string text = e.Snapshot.Child("text").Value?.ToString() ?? "";
+                string fromNick = e.Snapshot.Child("fromNick").Value?.ToString() ?? (f.nick ?? "알 수 없음");
+
+                long ts = 0;
+                long.TryParse(e.Snapshot.Child("ts").Value?.ToString(), out ts);
+
+                // 메인스레드에서 UI
+                _mainThreadQueue.Enqueue(() =>
+                {
+                    ToastMessageManager.instance?.ShowToast(
+                        $"{fromNick} : {text}",
+                        $"{fromNick}: {text}"
+                    );
+
+                    // 채팅창 자동 오픈
+                    OpenFriendChatWindow(f.uid, string.IsNullOrWhiteSpace(f.nick) ? fromNick : f.nick);
+                });
+
+                // (선택) 내 chatIndex도 갱신해두면 내 리스트 UI에 도움됨
+                _ = UpdateMyChatIndexAsync(f.uid,
+                                          string.IsNullOrWhiteSpace(f.nick) ? fromNick : f.nick,
+                                          text,
+                                          fromUid,
+                                          ts);
+            };
+
+            q.ChildAdded += h;
+            _chatToastSubs[chatKey] = (q, h);
         }
-        _chatIndexRef = null;
-        _onChatIndexChanged = null;
+
+        // 필요 없는 구독 제거
+        var remove = new List<string>();
+        foreach (var k in _chatToastSubs.Keys)
+            if (!need.Contains(k)) remove.Add(k);
+
+        foreach (var k in remove)
+        {
+            var sub = _chatToastSubs[k];
+            try { sub.q.ChildAdded -= sub.h; } catch { }
+            _chatToastSubs.Remove(k);
+            _lastToastMsgIdByChat.Remove(k);
+        }
     }
 
-    void OpenFriendChatWindowByUid(string friendUid, string friendNick)
+    private void UnhookChatToastSubs()
     {
-        if (string.IsNullOrEmpty(friendUid)) return;
+        foreach (var kv in _chatToastSubs)
+        {
+            try { kv.Value.q.ChildAdded -= kv.Value.h; } catch { }
+        }
+        _chatToastSubs.Clear();
+        _lastToastMsgIdByChat.Clear();
+    }
 
+    /// <summary>
+    /// chats/{uidA}/{uidB} 경로 만들기(항상 동일하게 정렬)
+    /// </summary>
+    private static void BuildChatPath(string a, string b, out string chatKey, out string chatRootPath)
+    {
+        if (string.CompareOrdinal(a, b) < 0)
+        {
+            chatKey = $"{a}_{b}";
+            chatRootPath = $"chats/{a}/{b}";
+        }
+        else
+        {
+            chatKey = $"{b}_{a}";
+            chatRootPath = $"chats/{b}/{a}";
+        }
+    }
+
+
+    /// <summary>
+    /// 로그인 직후(친구창 안 열어도) 채팅 토스트/자동오픈이 동작하도록
+    /// 친구 목록을 1회 읽어 messages 구독을 "미리" 걸어둔다.
+    /// </summary>
+    private async Task PrimeChatToastSubscriptionsAsync()
+    {
+        try
+        {
+            var user = FirebaseAuth.DefaultInstance.CurrentUser;
+            if (user == null) return;
+
+            _myUid = user.UserId;
+
+            // 중복 Prime 방지 (이미 구독 걸렸으면 다시 안 건다)
+            if (_chatToastPrimed && _chatToastSubs.Count > 0) return;
+
+            var friends = await FriendService.GetMyFriendsAsync();
+            if (friends == null) return;
+
+            // 로그아웃/종료 때 서버 기록 삭제 필요하면 여기서 uid 캐시
+            _knownFriendUids.Clear();
+            foreach (var f in friends)
+                if (!string.IsNullOrEmpty(f.uid)) _knownFriendUids.Add(f.uid);
+
+            await RegisterChatCleanupOnDisconnectAsync();
+
+            SyncChatToastSubscriptions(friends);
+
+            _chatToastPrimed = true;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[ChatToast] Prime failed: {e.Message}");
+        }
+    }
+
+    #endregion
+
+    #region 로그아웃 시 채팅 기록 삭제
+
+
+    public async Task DeleteAllChatMessagesBeforeLogoutAsync()
+    {
+        var user = FirebaseAuth.DefaultInstance.CurrentUser;
+        if (user == null) return;
+
+        string myUid = user.UserId;
+
+        // friend uid 캐시가 없으면 한번 읽어서 채운다
+        if (_knownFriendUids.Count == 0)
+        {
+            var friends = await FriendService.GetMyFriendsAsync();
+            if (friends != null)
+            {
+                foreach (var f in friends)
+                    if (!string.IsNullOrEmpty(f.uid)) _knownFriendUids.Add(f.uid);
+            }
+        }
+
+        var root = FirebaseDatabase.DefaultInstance.RootReference;
+        var tasks = new List<Task>();
+
+        foreach (var fid in _knownFriendUids)
+        {
+            if (string.IsNullOrEmpty(fid)) continue;
+
+            // BuildChatPath랑 동일 정렬로 삭제
+            string chatKey, chatRootPath;
+            BuildChatPath(myUid, fid, out chatKey, out chatRootPath);
+
+            // messages 전체 삭제 (양쪽 모두 기록 없어짐)
+            tasks.Add(root.Child($"{chatRootPath}/messages").RemoveValueAsync());
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+
+
+    private async Task RegisterChatCleanupOnDisconnectAsync()
+    {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
         if (user == null) return;
 
         _myUid = user.UserId;
 
-        string chatId = MakeChatId(_myUid, friendUid);
+        // 중복 등록 방지
+        if (_chatCleanupOnDisconnectRegistered) return;
 
-        // 이미 있으면 앞으로 + Open
-        if (_chatWindows.TryGetValue(chatId, out var win) && win != null)
+        // 친구 UID 확보
+        if (_knownFriendUids.Count == 0)
         {
-            win.Open();
-            return;
+            var friends = await FriendService.GetMyFriendsAsync();
+            if (friends != null)
+            {
+                foreach (var f in friends)
+                    if (!string.IsNullOrEmpty(f.uid))
+                        _knownFriendUids.Add(f.uid);
+            }
         }
 
-        if (chatWindowPrefab == null || chatWindowParent == null)
-            return;
+        var root = FirebaseDatabase.DefaultInstance.RootReference;
+        var tasks = new List<Task>();
 
-        // FriendListItemData 없이도 열 수 있게 임시로 구성
-        var newWin = Instantiate(chatWindowPrefab, chatWindowParent);
-        newWin.name = $"ChatWindow_{chatId}";
-        newWin.Setup(this, _myUid, friendUid, friendNick, chatId);
-        _chatWindows[chatId] = newWin;
+        foreach (var fid in _knownFriendUids)
+        {
+            if (string.IsNullOrEmpty(fid)) continue;
 
-        newWin.Open();
+            BuildChatPath(_myUid, fid, out string chatKey, out string chatRootPath);
+
+            // 채팅 메시지 "전체" 삭제 예약 (오프라인/강제종료 시 서버가 실행)
+            var msgRef = root.Child($"{chatRootPath}/messages");
+
+            // SDK에 RemoveValue()가 있으면 그걸 쓰고,
+            // 없으면 SetValue(null)로 대체 가능
+            // tasks.Add(msgRef.OnDisconnect().RemoveValue());
+            tasks.Add(msgRef.OnDisconnect().SetValue(null));
+
+            // (선택) 내 chatIndex도 삭제 예약 (내쪽만)
+            var indexRef = root.Child($"chatIndex/{_myUid}/{chatKey}");
+            // tasks.Add(indexRef.OnDisconnect().RemoveValue());
+            tasks.Add(indexRef.OnDisconnect().SetValue(null));
+        }
+
+        await Task.WhenAll(tasks);
+        _chatCleanupOnDisconnectRegistered = true;
+
+        Debug.Log("[ChatCleanup] OnDisconnect delete registered");
     }
 
     #endregion

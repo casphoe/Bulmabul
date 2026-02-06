@@ -170,6 +170,7 @@ public class LobbyUIManager : MonoBehaviour
                 try
                 {
                     ShowToastByLang("로그아웃 성공", "Logout success");
+                    await FrinedUiManager.instance.DeleteAllChatMessagesBeforeLogoutAsync();
                     await FireBaseAuthManager.Instance.LogoutToScene0Async();
                 }
                 catch (Exception e)
