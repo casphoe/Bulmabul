@@ -114,6 +114,13 @@ public class Account
         set => photoUrl = value?.Trim();
     }
 
+    [Header("Dice Gacha")]
+    [SerializeField] private int diceTotalPullCount;
+    public int DiceTotalPullCount { get => diceTotalPullCount; set => diceTotalPullCount = Mathf.Max(0, value); }
+
+    [SerializeField] private int dicePityCount; // SR/레어 보장 카운트
+    public int DicePityCount { get => dicePityCount; set => dicePityCount = Mathf.Max(0, value); }
+
 }
 
 [Serializable]

@@ -303,8 +303,8 @@ public class FireBaseAuthManager : MonoBehaviour
             AttendanceMonthKey = DateTime.Now.ToString("yyyy-MM"),
             AttendanceCountThisMonth = 0,
 
-            ClaimedAttendanceDays = new System.Collections.Generic.List<int>(),
-            DiceInventory = new System.Collections.Generic.List<OwnedDice>(),
+            ClaimedAttendanceDays = new List<int>(),
+            DiceInventory = new List<OwnedDice>(),
             EquippedDice = null
         };
 
