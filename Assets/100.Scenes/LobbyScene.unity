@@ -10840,7 +10840,19 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1645901132}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls: []
+      m_Calls:
+      - m_Target: {fileID: 1951908745}
+        m_TargetAssemblyTypeName: LobbyUIManager, Assembly-CSharp
+        m_MethodName: BtnClick
+        m_Mode: 3
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 9
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &1645901132
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -13362,7 +13374,19 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1940043099}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls: []
+      m_Calls:
+      - m_Target: {fileID: 1951908745}
+        m_TargetAssemblyTypeName: LobbyUIManager, Assembly-CSharp
+        m_MethodName: BtnClick
+        m_Mode: 3
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 10
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!1 &1944209710
 GameObject:
   m_ObjectHideFlags: 0
@@ -13653,6 +13677,7 @@ MonoBehaviour:
   - {fileID: 1270676966}
   profilePanel: {fileID: 231591306}
   profileImage: {fileID: 1883635859}
+  shopPanel: {fileID: 1968746836}
 --- !u!114 &1951908746
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -13826,13 +13851,14 @@ GameObject:
   - component: {fileID: 1968746837}
   - component: {fileID: 1968746839}
   - component: {fileID: 1968746838}
+  - component: {fileID: 1968746840}
   m_Layer: 5
   m_Name: ShopPanel
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1968746837
 RectTransform:
   m_ObjectHideFlags: 0
@@ -13892,6 +13918,25 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1968746836}
   m_CullTransparentMesh: 1
+--- !u!114 &1968746840
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1968746836}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee7428f9d7fcd634f83c474d3bd0353d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  btnShops:
+  - {fileID: 1955513492}
+  - {fileID: 137530065}
+  shopObjects:
+  - {fileID: 1564130682}
+  - {fileID: 492631728}
+  shop: 0
 --- !u!1 &1978219764
 GameObject:
   m_ObjectHideFlags: 0

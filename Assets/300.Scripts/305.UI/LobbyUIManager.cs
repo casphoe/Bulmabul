@@ -93,6 +93,11 @@ public class LobbyUIManager : MonoBehaviour
 
     #endregion
 
+    #region Shop Ui
+    [Header("Shop Panel")]
+    [SerializeField] GameObject shopPanel;
+    #endregion
+
     public static LobbyUIManager instance;
     ProflieManger profileManger;
 
@@ -156,6 +161,7 @@ public class LobbyUIManager : MonoBehaviour
         createRoomPanel.SetActive(isActive);
         roomPanel.SetActive(!isActive);
         profilePanel.SetActive(isActive);
+        shopPanel.SetActive(isActive);
     }
 
     public async void BtnClick(int num)
@@ -236,6 +242,12 @@ public class LobbyUIManager : MonoBehaviour
             case 8:
                 profilePanel.SetActive(true);
                 profileManger.ProfileSaveOnOff(false);
+                break;
+            case 9:
+                shopPanel.SetActive(true);
+                break;
+            case 10:
+                shopPanel.SetActive(false);
                 break;
         }
     }

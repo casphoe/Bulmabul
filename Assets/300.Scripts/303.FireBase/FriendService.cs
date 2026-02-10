@@ -516,6 +516,13 @@ public static class FriendService
     }
     #region 친구 거절
 
+    /// <summary>
+    /// 친구 요청 "거절" 처리.
+    /// - 내게 들어온 요청(friendRequestsIn)과 상대가 보낸 요청(friendRequestsOut)을 동시에 제거한다.
+    /// - 상대(fromUid)에게 "거절됨" 알림(notification)을 하나 생성한다.
+    /// - 모든 변경을 UpdateChildrenAsync(멀티패스 업데이트)로 한 번에 처리하여
+    ///   중간 상태(한쪽만 지워짐 등) 없이 원자적으로 반영되게 한다.
+    /// </summary>
     public static async Task DeclineFriendRequestAsync(string fromUid)
     {
         string myUid = MyUid;
@@ -619,6 +626,15 @@ public static class FriendService
         await Root.UpdateChildrenAsync(updates);
     }
 
+    /// <summary>
+    /// "내 채팅 목록(chatIndex)에서만" 특정 상대(otherUid)와의 채팅 항목을 삭제한다.
+    /// - 실제 채팅 메시지 데이터(chats/...)는 삭제하지 않는다.
+    /// - 즉, UI에서 대화방 목록만 지우는 용도(내 쪽에서만 숨김/정리).
+    ///
+    /// 사용 시나리오:
+    /// - 내가 채팅방을 '나가기/삭제' 눌렀을 때:
+    ///   메시지는 남겨두고(상대/서버 기록 유지), 내 목록에서만 제거하고 싶을 때.
+    /// </summary>
     public static async Task DeleteMyChatIndexOnlyAsync(string otherUid)
     {
         string myUid = MyUid;
@@ -628,6 +644,22 @@ public static class FriendService
         await Root.Child($"chatIndex/{myUid}/{chatKey}").RemoveValueAsync();
     }
 
+    /// <summary>
+    /// 두 UID(a, b)로부터 "항상 동일한" 채팅 식별 키(chatKey)와
+    /// 채팅 메시지 루트 경로(chatRootPath)를 생성한다.
+    ///
+    /// 핵심:
+    /// - a,b 순서에 상관없이 결과가 같아야 한다.
+    /// - 이를 위해 CompareOrdinal로 문자열을 비교해 작은 쪽을 앞에 둔다.
+    ///
+    /// 예)
+    /// a=U2, b=U9 => chatKey="U2_U9", chatRootPath="chats/U2/U9"
+    /// a=U9, b=U2 => chatKey="U2_U9", chatRootPath="chats/U2/U9"  (동일!)
+    ///
+    /// 이렇게 해야:
+    /// - 한쪽은 "U2_U9", 다른쪽은 "U9_U2"로 저장되는 불일치 문제를 방지
+    /// - 같은 대화방을 둘이 동일하게 참조 가능
+    /// </summary>
     static void BuildChatPath(string a, string b, out string chatKey, out string chatRootPath)
     {
         if (string.CompareOrdinal(a, b) < 0)
