@@ -84,23 +84,53 @@ public static class FriendService
         return ParseNickIndexSnapshot(snap);
     }
 
+    /// <summary>
+    /// nick 인덱스 스냅샷(DataSnapshot)을 파싱해서
+    /// (uid, nickKey) 튜플 리스트로 변환한다.
+    ///
+    /// 예상 스냅샷 구조 예시:
+    /// nickIndex
+    ///   ├─ "abc" : "UID_1"
+    ///   ├─ "bcd" : "UID_2"
+    ///   └─ "zzz" : "UID_3"
+    ///
+    /// 즉,
+    /// - child.Key   = nickKey (정규화된 닉네임 키, 검색/정렬용)
+    /// - child.Value = uid     (해당 닉키를 가진 유저 uid)
+    ///
+    /// 반환:
+    /// - 내 uid(myUid)는 제외
+    /// - uid가 비어있는 항목은 제외
+    /// - (uid, nickKey) 리스트를 nickKey 기준으로 오름차순 정렬하여 반환
+    /// </summary>
     static List<(string uid, string nickKey)> ParseNickIndexSnapshot(DataSnapshot snap)
     {
+        // 최종 반환할 결과 리스트(튜플 형태: (uid, nickKey))
         var list = new List<(string uid, string nickKey)>();
+
+        // 스냅샷이 null이거나 존재하지 않으면(해당 노드 자체가 없으면)
+        // 빈 리스트를 반환해서 호출 측에서 NRE 없이 처리 가능하도록 한다.
         if (snap == null || !snap.Exists) return list;
 
+        // 내 uid를 캐싱해 둔다.
         string myUid = MyUid;
 
+        // - 현재 스냅샷 아래에 있는 모든 자식 노드를 순회
         foreach (var child in snap.Children)
         {
+            // 인덱스 구조에서 Key로 저장된 닉네임 키(정렬/검색용 문자열)
             string nickKey = child.Key;
+            // DB에 저장된 값이 object 형태로 들어오므로 ToString()으로 문자열 변환
             string uid = child.Value?.ToString() ?? "";
+            // uid가 비어있으면 정상 데이터가 아니므로 스킵
             if (string.IsNullOrEmpty(uid)) continue;
-            if (uid == myUid) continue; // 나 제외
+            // 나 제외
+            if (uid == myUid) continue;
+            // 유효한 데이터만 결과 리스트에 추가
             list.Add((uid, nickKey));
         }
 
-        // 정렬(원하면)
+        //nickKey 기준으로 오름차순 정렬
         list.Sort((a, b) => string.CompareOrdinal(a.nickKey, b.nickKey));
         return list;
     }
@@ -173,6 +203,12 @@ public static class FriendService
         return list;
     }
 
+    /// <summary>
+    /// 친구 리스트 한 줄(FriendRow)에 "공개 프로필(닉네임/프로필 이미지 URL)"을 채워 넣는다.
+    /// - DB의 userPublic(또는 public profile)에서 가져온 값을 우선 적용
+    /// - public이 비어있으면 FriendRow에 남아있던 값(친구 테이블에 저장된 값)을 "최후 fallback"으로 유지
+    /// - 그래도 닉네임이 비면 UI가 완전히 비어 보이지 않도록 uid 앞 6글자를 임시 표시
+    /// </summary>
     static async Task FillPublicProfileAsync(FriendRow row)
     {
         var (nick, photoUrl) = await GetUserProfileBasicAsync(row.uid);
@@ -189,6 +225,12 @@ public static class FriendService
             row.nick = row.uid.Length >= 6 ? row.uid.Substring(0, 6) : row.uid;
     }
 
+    /// <summary>
+    /// FriendRow에 "온라인 상태(presence)"를 채워 넣는다.
+    /// - presence/{uid} 경로에서 online(bool), lastSeen(long) 값을 읽는다.
+    /// - 권한 문제(PermissionDenied) / 네트워크 오류 / 데이터 없음 등을 모두 안전하게 처리
+    /// - 실패 시에는 온라인 false / lastSeen 0으로 초기화하여 UI가 예측 가능하게 유지되도록 한다.
+    /// </summary>
     static async Task FillPresenceAsync(FriendRow row)
     {
 
@@ -545,15 +587,26 @@ public static class FriendService
     public static async Task RemoveFriendBothAsync(string friendUid)
     {
         string myUid = MyUid;
+        if (string.IsNullOrEmpty(friendUid) || friendUid == myUid) return;
 
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         string myNick = await GetMyNickPublicAsync();
+        // chats 경로는 항상 정렬 규칙으로 동일하게
+        BuildChatPath(myUid, friendUid, out string chatKey, out string chatRootPath);
 
         var updates = new Dictionary<string, object>();
+        // 1) friends 양쪽 삭제 (규칙상 auth.uid가 $uid 또는 $friendUid면 write 허용)
         updates[$"friends/{myUid}/{friendUid}"] = null;
         updates[$"friends/{friendUid}/{myUid}"] = null;
 
+        // 2) 채팅 메시지 전체 삭제 (공유 messages라 양쪽 기록이 같이 사라짐)
+        updates[$"{chatRootPath}/messages"] = null;
+
+        // 3) 내 chatIndex만 삭제 (rules 때문에 상대 chatIndex는 내가 삭제 못함)
+        updates[$"chatIndex/{myUid}/{chatKey}"] = null;
+
+        // 4) 상대에게 "친구 삭제됨" 알림 보내기 (상대가 자기 chatIndex 정리하도록)
         string pushId = Root.Child($"notifications/{friendUid}").Push().Key;
         updates[$"notifications/{friendUid}/{pushId}"] = new Dictionary<string, object>
         {
@@ -564,6 +617,29 @@ public static class FriendService
         };
 
         await Root.UpdateChildrenAsync(updates);
+    }
+
+    public static async Task DeleteMyChatIndexOnlyAsync(string otherUid)
+    {
+        string myUid = MyUid;
+        if (string.IsNullOrEmpty(otherUid) || otherUid == myUid) return;
+
+        BuildChatPath(myUid, otherUid, out string chatKey, out _);
+        await Root.Child($"chatIndex/{myUid}/{chatKey}").RemoveValueAsync();
+    }
+
+    static void BuildChatPath(string a, string b, out string chatKey, out string chatRootPath)
+    {
+        if (string.CompareOrdinal(a, b) < 0)
+        {
+            chatKey = $"{a}_{b}";
+            chatRootPath = $"chats/{a}/{b}";
+        }
+        else
+        {
+            chatKey = $"{b}_{a}";
+            chatRootPath = $"chats/{b}/{a}";
+        }
     }
 
     #endregion

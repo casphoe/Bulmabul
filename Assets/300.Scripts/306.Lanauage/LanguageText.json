@@ -279,6 +279,14 @@
     {
       "key": "txt.ShowProfile",
       "text": "프로필 보기"
+    },
+    {
+      "key": "txt.Dice",
+      "text": "주사위 뽑기"
+    },
+    {
+      "key": "txt.Purchase",
+      "text": "재화 구매"
     }
   ],
   "eng": [
@@ -561,6 +569,14 @@
     {
       "key": "txt.ShowProfile",
       "text": "View Profile"
+    },
+    {
+      "key": "txt.Dice",
+      "text": "Dice Draw"
+    },
+    {
+      "key": "txt.Purchase",
+      "text": "Purchase Goods"
     }
   ]
 }

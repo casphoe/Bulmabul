@@ -1,11 +1,11 @@
-using Gpm.Ui;
+ï»¿using Gpm.Ui;
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
 
 public class FriendChattingItem : InfiniteScrollItem
 {
-    public RectTransform bubbleRoot;  // ¹öºí ÀÌ¹ÌÁö ·çÆ®¸¸!
+    public RectTransform bubbleRoot;  // ë²„ë¸” ì´ë¯¸ì§€ ë£¨íŠ¸ë§Œ!
     public Text txtMessage;
     public Text txtClock;
     public Text txtNick;
@@ -27,7 +27,7 @@ public class FriendChattingItem : InfiniteScrollItem
 
         var d = (FriendChatMessageData)scrollData;
 
-        // ¼¿ Àç»ç¿ëµÉ ¶§ ÀÌÀü Å¸ÀÌÇÎ ÁßÁö
+        // ì…€ ì¬ì‚¬ìš©ë  ë•Œ ì´ì „ íƒ€ì´í•‘ ì¤‘ì§€
         StopTyping();
 
 
@@ -46,8 +46,8 @@ public class FriendChattingItem : InfiniteScrollItem
 
         if (txtClock)
         {
-            // ts°¡ Unix seconds ±âÁØÀÌ¶ó¸é º¸±â ÁÁ°Ô HH:mm·Î
-            // (UTC·Î ÀúÀåÇßÀ¸¸é ToLocalTime()ÀÌ ÇÑ±¹½Ã°£À¸·Î ¹Ù²ãÁÜ)
+            // tsê°€ Unix seconds ê¸°ì¤€ì´ë¼ë©´ ë³´ê¸° ì¢‹ê²Œ HH:mmë¡œ
+            // (UTCë¡œ ì €ì¥í–ˆìœ¼ë©´ ToLocalTime()ì´ í•œêµ­ì‹œê°„ìœ¼ë¡œ ë°”ê¿”ì¤Œ)
             if (d.ts > 0)
             {
                 var dt = System.DateTimeOffset.FromUnixTimeSeconds(d.ts).ToLocalTime();
@@ -63,7 +63,7 @@ public class FriendChattingItem : InfiniteScrollItem
 
         string full = d.text ?? "";
 
-        // Å¸ÀÌÇÎ ¾øÀÌ Áï½Ã Ç¥½Ã
+        // íƒ€ì´í•‘ ì—†ì´ ì¦‰ì‹œ í‘œì‹œ
         if (!typingEnabled || !d.useTyping)
         {
             _pendingTyping = false;
@@ -71,7 +71,7 @@ public class FriendChattingItem : InfiniteScrollItem
             return;
         }
 
-        // Å¸ÀÌÇÎ ½ÃÀÛ
+        // íƒ€ì´í•‘ ì‹œì‘
         txtMessage.text = "";
         if (isActiveAndEnabled && gameObject.activeInHierarchy)
         {
@@ -80,7 +80,7 @@ public class FriendChattingItem : InfiniteScrollItem
         }
         else
         {
-            // ºñÈ°¼º »óÅÂ¸é ¿¹¾à¸¸ ÇØµÎ°í, OnEnable¿¡¼­ ½ÃÀÛ
+            // ë¹„í™œì„± ìƒíƒœë©´ ì˜ˆì•½ë§Œ í•´ë‘ê³ , OnEnableì—ì„œ ì‹œì‘
             _pendingTyping = true;
             _pendingFullText = full;
             _pendingMsgId = _boundMsgId;
@@ -109,10 +109,10 @@ public class FriendChattingItem : InfiniteScrollItem
 
     IEnumerator CoType(Text target, string full, string msgIdAtStart)
     {
-        // ÇÑ ±ÛÀÚ¾¿ Ãâ·Â
+        // í•œ ê¸€ìì”© ì¶œë ¥
         for (int i = 0; i < full.Length; i++)
         {
-            // ¼¿ Àç»ç¿ëµÇ¾î ´Ù¸¥ msg·Î ¹Ù²î¾úÀ¸¸é Áß´Ü
+            // ì…€ ì¬ì‚¬ìš©ë˜ì–´ ë‹¤ë¥¸ msgë¡œ ë°”ë€Œì—ˆìœ¼ë©´ ì¤‘ë‹¨
             if (_boundMsgId != msgIdAtStart) yield break;
 
             if (!isActiveAndEnabled || !gameObject.activeInHierarchy) yield break;

@@ -11,6 +11,26 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
+
+
+/// <summary>
+/// 친구 UI / 친구 요청 토스트 / 알림 / 프레즌스(온라인) / 친구 채팅 창 관리까지
+/// 한 곳에서 담당하는 매니저.
+///
+/// 주요 책임(Responsibility)
+/// 1) 친구 패널 On/Off + 탭 전환(초대 / 내 친구)
+/// 2) 초대 후보 검색/표시 + 친구요청 보내기
+/// 3) 내 친구 목록 표시 + 온라인 상태(프레즌스) 실시간 반영
+/// 4) 친구 요청 수신(friendRequestsIn) 감지 → 수락/거절 토스트 큐 처리
+/// 5) 알림(notifications) 감지 → 토스트 표시 후 서버에서 알림 삭제
+/// 6) 친구 채팅: 채팅창 생성/관리 + 메시지 도착 시 토스트/자동오픈(채팅 인덱스 없이도 동작)
+/// 7) 로그아웃/계정 변경 시 모든 리스너/상태 정리 + 필요 시 채팅 기록 삭제(OnDisconnect/수동)
+///
+///  주의 포인트
+/// - Firebase 이벤트 콜백은 메인 스레드가 아닐 수 있으므로,
+///   UI 변경은 _mainThreadQueue 를 통해 Update에서 안전하게 처리한다.
+/// - 구독(리스너) 등록/해제 누락 시 중복 토스트, 메모리 누수, 이벤트 중복 호출이 발생할 수 있다.
+/// </summary>
 public class FrinedUiManager : MonoBehaviour
 {
     #region Singleton / Inspector
@@ -21,7 +41,14 @@ public class FrinedUiManager : MonoBehaviour
     [SerializeField] private GameObject friendPanel;
 
     [Header("Search Inputs")]
+    /// <summary>
+    /// "초대" 탭에서 후보 검색 키워드 입력창
+    /// </summary>
     public TMP_InputField inputInviteSearch;
+
+    /// <summary>
+    /// "내 친구" 탭에서 친구 검색 키워드 입력창
+    /// </summary>
     public TMP_InputField inputCurrentFriend;
 
     [Header("Tabs")]
@@ -40,91 +67,203 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Internal State
 
+    /// <summary>
+    /// 내 UID(로그인 된 계정)
+    /// </summary>
     private string _myUid;
+
+    /// <summary>
+    /// 친구 패널이 현재 열려있는지 여부
+    /// </summary>
     private bool isFriendOpen = false;
 
+    /// <summary>
+    /// 현재 탭 모드
+    /// - Invite : 초대 후보
+    /// - Friends : 내 친구
+    /// </summary>
     [SerializeField] private enum TabMode { Invite, Friends }
+
     [Header("현재 탭")]
     [SerializeField] private TabMode _mode = TabMode.Friends;
 
+    /// <summary>
+    /// 목록 로드/검색 시 이전 요청을 취소하기 위한 토큰
+    /// (빠르게 탭 전환/검색 연타할 때 마지막 요청만 살리기 위함)
+    /// </summary>
     private CancellationTokenSource _cts;
 
-    // 메인 스레드로 UI 처리 넘기기
+    /// <summary>
+    /// Firebase 콜백 스레드에서 UI를 직접 만지면 위험하므로
+    /// Action을 큐에 넣고 Update에서 메인스레드로 실행한다.
+    /// </summary>
     private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
 
     #endregion
 
     #region Friend Request (Incoming) Toast Queue
 
+    /// <summary>
+    /// friendRequestsIn/{myUid} 참조 (친구 요청 "받은" 목록)
+    /// </summary>
     private DatabaseReference _reqInRef;
 
+    /// <summary>
+    /// 수신된 친구요청 정보를 토스트 큐에 넣기 위한 구조체
+    /// </summary>
     private struct IncomingReq
     {
         public string fromUid;
         public string fromNick;
     }
 
+    /// <summary>
+    /// "받은 친구요청" 토스트를 순서대로 보여주기 위한 큐
+    /// </summary>
     private readonly Queue<IncomingReq> _incomingQueue = new();
-    private readonly HashSet<string> _queuedSet = new(); // 중복 방지
+
+    /// <summary>
+    /// 같은 요청이 여러 번 들어오는 중복을 막기 위한 set(이미 큐에 넣은 fromUid 기록)
+    /// </summary>
+    private readonly HashSet<string> _queuedSet = new();
+
+    /// <summary>
+    /// 지금 친구요청 토스트가 화면에 떠있는지 여부
+    /// </summary>
     private bool _toastShowing = false;
+
+    /// <summary>
+    /// 현재 토스트로 보여주는 요청의 fromUid
+    /// (같은 uid가 연속으로 들어오면 중복 방지)
+    /// </summary>
     private string _showingFromUid = null;
 
+    /// <summary>
+    /// 삭제 확인 토스트가 떠있는지 여부
+    /// (친구요청 토스트와 동시에 뜨면 UX/상태 꼬임 방지)
+    /// </summary>
     private bool _deleteConfirmShowing = false;
 
     #endregion
 
     #region Notifications Listener
 
+    /// <summary>
+    /// notifications/{myUid} 참조
+    /// (친구 수락/거절/취소/삭제 등 서버가 남긴 알림)
+    /// </summary>
     private DatabaseReference _notiRef;
-    private readonly HashSet<string> _notiHandled = new(); // 중복 방지
+
+    /// <summary>
+    /// notifications ChildAdded가 네트워크 상태/재접속으로 중복 호출될 수 있어
+    /// 처리한 알림 id를 기록하여 중복 토스트 방지
+    /// </summary>
+    private readonly HashSet<string> _notiHandled = new();
 
     #endregion
 
     #region Presence Watch (Friends 탭에서 온라인 표시)
 
-    // uid -> (ref, handler)
+    /// <summary>
+    /// friends 탭에서만 필요한 온라인 상태 구독 목록
+    /// uid -> (presence reference, event handler)
+    /// </summary>
     private readonly Dictionary<string, (DatabaseReference r, EventHandler<ValueChangedEventArgs> h)> _presenceSubs
         = new();
 
-    // 현재 Friends 탭에서 사용중인 itemData 참조(UID로 바로 업데이트)
+    /// <summary>
+    /// Friends 탭에 표시 중인 데이터 캐시
+    /// uid -> FriendListItemData
+    /// (presence 이벤트에서 해당 uid의 isOnline만 바로 업데이트하기 위함)
+    /// </summary>
     private readonly Dictionary<string, FriendListItemData> _friendByUid
         = new();
 
+    /// <summary>
+    /// presence 변경을 감지했고 UI 갱신이 필요함을 표시하는 플래그
+    /// </summary>
     [SerializeField] private bool _presenceDirty = false;
+
+    /// <summary>
+    /// presence 변경이 잦을 수 있으니 UI 리로드를 너무 자주 하지 않도록 최소 간격(초)
+    /// </summary>
     [SerializeField] private float presenceUiRefreshInterval = 0.5f;
+
+    /// <summary>
+    /// 다음 UI 갱신 가능 시점(언스케일 타임 기준)
+    /// </summary>
     private float _nextPresenceUiRefresh = 0f;
 
     #endregion
 
+
     #region Friend Chat
 
     [Header("Friend Chat Windows")]
+    /// <summary>
+    /// 채팅창들이 생성될 부모 Transform
+    /// </summary>
     public Transform chatWindowParent;
+
+    /// <summary>
+    /// 채팅창 프리팹
+    /// </summary>
     public FriendChatWindow chatWindowPrefab;
 
-    // chatKey(=MakeChatId) -> window
+    /// <summary>
+    /// chatKey(=MakeChatId) -> 열린 채팅창 인스턴스
+    /// </summary>
     private readonly Dictionary<string, FriendChatWindow> _chatWindows = new();
 
-    // chatKey -> history
+    /// <summary>
+    /// chatKey -> 메모리 채팅 히스토리(스크롤 표시/리로드용)
+    /// </summary>
     private readonly Dictionary<string, List<FriendChatMessageData>> _chatHistories = new();
 
+    /// <summary>
+    /// 현재 열린 채팅창 개수(친구패널 토글 시 "채팅창 열려있으면 막기" 용도)
+    /// </summary>
     private int _openedChatWindowCount = 0;
+
+    /// <summary>
+    /// 채팅창이 하나라도 열려있는지
+    /// </summary>
     public bool IsAnyChatWindowOpen => _openedChatWindowCount > 0;
 
-    // 토스트/자동오픈은 chatIndex가 아니라 "messages 직접 구독"으로 처리한다.
-    // chatKey -> (query, handler)
+    /// <summary>
+    /// 채팅 토스트 구독:
+    /// chatKey -> (query, handler)
+    /// - chats/{uidA}/{uidB}/messages 의 마지막 1개를 구독하여 새 메시지 감지
+    /// </summary>
     private readonly Dictionary<string, (Query q, EventHandler<ChildChangedEventArgs> h)> _chatToastSubs
         = new();
 
-    // chatKey -> 마지막 본 msgId (초기 1회/중복 토스트 방지)
+    /// <summary>
+    /// chatKey -> 마지막 토스트 처리한 msgId
+    /// (중복 토스트 방지)
+    /// </summary>
     private readonly Dictionary<string, string> _lastToastMsgIdByChat
         = new();
 
+    /// <summary>
+    /// 로그인 직후, 친구 목록을 한 번 읽어 "채팅 토스트 구독"을 미리 걸어두었는지
+    /// </summary>
     private bool _chatToastPrimed = false;
-    private readonly HashSet<string> _knownFriendUids = new(); // 로그아웃 전 친구 uid 캐시
 
+    /// <summary>
+    /// 로그아웃/강제종료 대비: 내 친구 uid 캐시
+    /// (채팅 기록 삭제/OnDisconnect 등록 때 사용)
+    /// </summary>
+    private readonly HashSet<string> _knownFriendUids = new();
+
+    /// <summary>
+    /// 마지막으로 확인한 Auth UID (계정 변경/로그아웃 감지)
+    /// </summary>
     private string _lastAuthUid = null;
 
+    /// <summary>
+    /// OnDisconnect 기반 채팅 기록 삭제 예약을 등록했는지(중복 방지)
+    /// </summary>
     private bool _chatCleanupOnDisconnectRegistered = false;
 
     #endregion
@@ -138,6 +277,7 @@ public class FrinedUiManager : MonoBehaviour
         if (friendPanel) friendPanel.SetActive(false);
         isFriendOpen = false;
 
+        // 탭 전환 / 검색 / 닫기 버튼
         if (btnInviteTab) btnInviteTab.onClick.AddListener(() => SwitchTab(TabMode.Invite));
         if (btnFriendsTab) btnFriendsTab.onClick.AddListener(() => SwitchTab(TabMode.Friends));
         if (btnFriendSearch) btnFriendSearch.onClick.AddListener(() => _ = SearchByCurrentTabAsync());
@@ -148,15 +288,16 @@ public class FrinedUiManager : MonoBehaviour
 
     private void Update()
     {
-        // ===== 메인스레드 큐 처리 =====
+        // 메인스레드 큐 처리
         while (_mainThreadQueue.TryDequeue(out var a))
         {
             try { a?.Invoke(); } catch (Exception e) { Debug.LogWarning(e); }
         }
 
-        // ===== Presence UI 갱신(부하 제한) =====
+        // Presence UI 갱신(부하 제한)
         if (isFriendOpen && _mode == TabMode.Friends)
         {
+            // online 변경이 있었다면 일정 간격마다 ReloadAsync 호출
             if (_presenceDirty && Time.unscaledTime >= _nextPresenceUiRefresh)
             {
                 _presenceDirty = false;
@@ -167,21 +308,31 @@ public class FrinedUiManager : MonoBehaviour
             }
         }
 
-        // F 키로 친구 패널 토글(너 기존 로직 유지)
+        // F 키로 친구 패널 토글
         if (Input.GetKeyDown(KeyCode.F))
         {
+            // 채팅창이 열려있으면 친구패널 토글하지 않음 (UX/입력 충돌 방지)
             if (IsAnyChatWindowOpen) return;
             isFriendOpen = !isFriendOpen;
             BtnFriendPanelOnOff(isFriendOpen);
         }
     }
 
+    /// <summary>
+    /// 오브젝트 활성화 시:
+    /// - Firebase Auth StateChanged 구독
+    /// - 이미 로그인 상태면 즉시 초기화(TryInitAfterLogin)
+    /// </summary>
     private void OnEnable()
     {
         FirebaseAuth.DefaultInstance.StateChanged += OnAuthStateChanged;
         TryInitAfterLogin(); // 이미 로그인 상태면 즉시 초기화
     }
 
+    /// <summary>
+    /// 오브젝트 비활성화 시:
+    /// - 모든 리스너/구독 해제(중복 호출/메모리 누수 방지)
+    /// </summary>
     private void OnDisable()
     {
         FirebaseAuth.DefaultInstance.StateChanged -= OnAuthStateChanged;
@@ -198,6 +349,11 @@ public class FrinedUiManager : MonoBehaviour
         await DeleteAllChatMessagesBeforeLogoutAsync();
     }
 
+    /// <summary>
+    /// FirebaseAuth 상태 변화(로그인/로그아웃/계정 전환) 이벤트 핸들러
+    /// - 계정이 바뀌거나 로그아웃되면 로컬 상태/리스너를 싹 정리
+    /// - 로그인 상태가 되면 리스너 훅 + 채팅 토스트 Prime 등 초기화
+    /// </summary>
     private void OnAuthStateChanged(object sender, EventArgs e)
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
@@ -215,6 +371,13 @@ public class FrinedUiManager : MonoBehaviour
         TryInitAfterLogin();
     }
 
+    /// <summary>
+    /// 로그아웃/계정 전환 시, 로컬에서 유지하던 상태와 UI를 모두 정리한다.
+    /// - Firebase 리스너 제거
+    /// - 채팅창 파괴
+    /// - 토스트 큐/중복 기록 초기화
+    /// - Prime 상태/캐시 초기화
+    /// </summary>
     private void CleanupOnLogoutLocal()
     {
         // UI
@@ -246,6 +409,7 @@ public class FrinedUiManager : MonoBehaviour
         _showingFromUid = null;
         _deleteConfirmShowing = false;
 
+        // 알림 중복 기록 초기화
         _notiHandled.Clear();
 
         // Prime 상태 리셋
@@ -259,7 +423,12 @@ public class FrinedUiManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 로그인된 유저가 생기면 uid 확보 + 리스너 훅
+    /// 로그인된 유저가 존재하면:
+    /// 1) 내 UID 확보
+    /// 2) 친구 요청 수신 리스너 연결(friendRequestsIn)
+    /// 3) 알림 리스너 연결(notifications)
+    /// 4) 친구 목록 1회 읽어서 채팅 토스트/자동오픈 구독을 "미리" 연결(Prime)
+    /// 5) 패널이 열려있다면 즉시 리스트 Reload
     /// </summary>
     private void TryInitAfterLogin()
     {
@@ -283,6 +452,11 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Panel On/Off / Tabs
 
+    /// <summary>
+    /// 친구 패널 토글
+    /// - 켜면 ReloadAsync로 현재 탭 데이터 로드
+    /// - 끄면 presence 구독 해제(불필요한 실시간 리스너 제거)
+    /// </summary>
     public void BtnFriendPanelOnOff(bool isActive)
     {
         isFriendOpen = isActive;
@@ -307,6 +481,13 @@ public class FrinedUiManager : MonoBehaviour
         UnhookPresenceListeners();
     }
 
+    /// <summary>
+    /// 탭 전환:
+    /// - _mode 변경
+    /// - 입력창 표시 상태 갱신
+    /// - Friends 탭이 아니면 presence 구독 해제
+    /// - ReloadAsync로 현재 탭 데이터 로드
+    /// </summary>
     private void SwitchTab(TabMode m)
     {
         _mode = m;
@@ -332,6 +513,13 @@ public class FrinedUiManager : MonoBehaviour
         await ReloadAsync();
     }
 
+    /// <summary>
+    /// 현재 탭 기준으로 목록 데이터를 다시 불러와 InfiniteScroll을 갱신한다.
+    /// - 로그인 확인
+    /// - 이전 로드 작업 취소(연타/전환 시 마지막만 반영)
+    /// - Invite 탭이면 LoadInviteListAsync
+    /// - Friends 탭이면 LoadFriendsListAsync
+    /// </summary>
     private async Task ReloadAsync()
     {
         // 로그인 안되어있으면 아무 것도 못 함
@@ -361,6 +549,12 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Invite Candidate List
 
+    /// <summary>
+    /// 초대 후보 리스트에서 "친구 요청 보내기" 버튼을 눌렀을 때 호출되는 함수.
+    /// - AlreadyFriend이면 무시
+    /// - None 상태면 FriendService.SendFriendRequestAsync 실행
+    /// - 성공 토스트 표시 후 목록 리로드
+    /// </summary>
     public async void OnClickInviteButton(FriendListItemData d)
     {
         if (d == null) return;
@@ -380,6 +574,20 @@ public class FrinedUiManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Invite 탭 목록 로드:
+    /// 1) 검색 키워드가 있으면 prefix 기반 검색, 없으면 기본 후보 N명
+    /// 2) 내 friends / friendRequestsOut / friendRequestsIn 를 읽어서 각 후보의 상태를 결정
+    ///    - AlreadyFriend : 후보에서 제외(정책)
+    ///    - Outgoing : 내가 요청 보낸 상태
+    ///    - Incoming : 상대가 나에게 요청을 보낸 상태
+    /// 3) 각 후보의 프로필(닉네임/사진 URL)을 비동기로 채움
+    /// 4) InfiniteScroll에 데이터 삽입 후 갱신
+    ///
+    /// 또한 Invite 탭에서는
+    /// - presence 구독 불필요 → UnhookPresenceListeners
+    /// - 채팅 토스트 구독 정책상 불필요 → UnhookChatToastSubs
+    /// </summary>
     private async Task LoadInviteListAsync()
     {
         UnhookPresenceListeners();
@@ -464,6 +672,11 @@ public class FrinedUiManager : MonoBehaviour
         FriendInfiniteScrollUtil.UpdateAll(friendScroll);
     }
 
+    /// <summary>
+    /// Invite 후보 item에 프로필 정보(닉, 사진URL)를 채운다.
+    /// - FriendService.GetUserProfileBasicAsync(uid)를 통해 조회
+    /// - item.nick, item.photoUrl 갱신
+    /// </summary>
     private static async Task LoadProfileIntoItemAsync(FriendListItemData item)
     {
         // userPublic 기반으로 읽도록 FriendService 내부가 되어 있어야 베스트
@@ -476,6 +689,14 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Friends List
 
+    /// <summary>
+    /// Friends 탭 목록 로드:
+    /// 1) 내 친구 목록 FriendService.GetMyFriendsAsync 조회
+    /// 2) 검색 키워드가 있으면 닉네임 포함 검색으로 필터
+    /// 3) InfiniteScroll 갱신 + _friendByUid 캐시에 저장
+    /// 4) presence 구독을 현재 친구 uid 목록 기준으로 Sync
+    /// 5) 채팅 토스트/자동오픈을 위한 메시지 구독도 현재 친구 목록 기준으로 Sync
+    /// </summary>
     private async Task LoadFriendsListAsync()
     {
         string keyword = inputCurrentFriend ? inputCurrentFriend.text : "";
@@ -483,6 +704,7 @@ public class FrinedUiManager : MonoBehaviour
 
         var friends = await FriendService.GetMyFriendsAsync();
 
+        // 닉네임 검색 필터
         if (!string.IsNullOrEmpty(keyword))
         {
             friends = friends.FindAll(f =>
@@ -527,6 +749,12 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Friend Delete (Confirm Toast)
 
+    /// <summary>
+    /// Friends 탭에서 "삭제" 버튼을 눌렀을 때 호출.
+    /// - requestToast가 있으면 "삭제 확인" 토스트를 띄운다.
+    /// - 토스트가 없다면 바로 삭제(DeleteFriendNowAsync)하는 보험 로직.
+    /// - 이미 다른 토스트가 떠있으면 동작을 막아 상태 충돌 방지.
+    /// </summary>
     public void OnClickDeleteButton(FriendListItemData d)
     {
         if (d == null) return;
@@ -554,22 +782,46 @@ public class FrinedUiManager : MonoBehaviour
         );
     }
 
+    /// <summary>
+    /// 삭제 확인 토스트에서 "확인"을 눌렀을 때 실행되는 실제 삭제 처리
+    ///
+    /// 목적:
+    /// - 친구 관계(friends) 양쪽 제거
+    /// - "해당 친구와의 채팅방(messages)"만 삭제
+    /// - 내 채팅 리스트용 인덱스(chatIndex)는 내 것만 삭제
+    /// - 그 친구와 열려있던 채팅창(UI)도 즉시 닫고, 메모리 캐시/구독도 정리
+    ///
+    /// 처리 흐름:
+    /// 1) 확인 토스트 닫기
+    /// 2) 서버 데이터 삭제(친구/채팅/인덱스)
+    /// 3) 내 로컬 UI/캐시/구독 즉시 정리(채팅창 강제 종료)
+    /// 4) 성공 토스트 표시
+    /// 5) 친구 리스트 리로드(화면 반영)
+    ///
+    /// finally:
+    /// - 삭제 확인 상태 플래그 해제
+    /// - 삭제 확인 때문에 멈춰있던 "친구요청 토스트 큐"가 있으면 이어서 표시
+    /// </summary>
     private async Task OnConfirmDeleteAsync(FriendListItemData d)
     {
         try
         {
-            // 확인창 닫기
+            // 1) 확인창 닫기
             requestToast.Hide();
 
-            // 실제 삭제 수행(양쪽 friends에서 제거)
+            // 2) 서버 데이터 삭제(친구양쪽 + 채팅 messages + 내 chatIndex)
             await FriendService.RemoveFriendBothAsync(d.uid);
 
+            // 3) 내 로컬 채팅 UI/캐시/구독 즉시 정리
+            CloseAndClearChatWith(d.uid);
+
+            // 4) 석옥 토스트 표시
             ToastMessageManager.instance?.ShowToast(
                 $"{d.nick} 님을 친구에서 삭제했습니다.",
                 $"Removed {d.nick} from friends."
             );
 
-            // 리스트 갱신
+            // 5) 리스트 갱신
             await ReloadAsync();
         }
         catch (Exception e)
@@ -584,10 +836,73 @@ public class FrinedUiManager : MonoBehaviour
             // 삭제 확인 때문에 대기하던 친구요청 토스트 이어서 처리
             _toastShowing = false;
             _showingFromUid = null;
+
             await TryShowNextToastAsync();
         }
     }
 
+    /// <summary>
+    /// 특정 친구(friendUid)와의 채팅 관련 로컬 상태를 "그 친구 것만" 즉시 정리
+    ///
+    /// 정리 대상:
+    /// 1) 열려있는 채팅창(UI) 닫기 + 파괴
+    /// 2) 로컬 채팅 히스토리(_chatHistories) 제거
+    /// 3) 채팅 토스트/자동오픈 구독(_chatToastSubs) 해제
+    /// 4) 중복 토스트 방지용 마지막 msgId 기록(_lastToastMsgIdByChat) 제거
+    ///
+    /// 목적:
+    /// - 친구 삭제 후에도 그 친구 채팅창이 떠있거나,
+    /// - 과거 메시지가 로컬 캐시에 남아서 다시 보이거나,
+    /// - 메시지 구독이 남아 토스트/자동오픈이 재발생하는 문제 방지
+    /// </summary>
+    private void CloseAndClearChatWith(string friendUid)
+    {
+        // (0) 방어: friendUid가 없으면 아무 것도 할 수 없음
+        if (string.IsNullOrEmpty(friendUid)) return;
+
+        // (1) 내 UID 보정
+        if (string.IsNullOrEmpty(_myUid))
+        {
+            var user = FirebaseAuth.DefaultInstance.CurrentUser;
+            if (user == null) return;
+            _myUid = user.UserId;
+        }
+        // (2) "내 uid + 친구 uid"로 채팅방 고유 키(chatKey) 생성
+        string chatKey = MakeChatId(_myUid, friendUid);
+
+        // (3) 열려있는 채팅창이 있으면 닫고 제거
+        // - Close() 내부에서:
+        //   - Firebase ChildAdded 구독 해제(Unsubscribe)
+        //   - _openedChatWindowCount 감소(입력 충돌 방지용 카운터)
+        // - Destroy로 UI 오브젝트까지 파괴
+        if (_chatWindows.TryGetValue(chatKey, out var win) && win != null)
+        {
+            // Close()에서 Unsubscribe + opened 카운트 감소 처리됨
+            win.Close();
+            Destroy(win.gameObject);
+        }
+        _chatWindows.Remove(chatKey);
+
+        // (4) 로컬 히스토리 제거
+        _chatHistories.Remove(chatKey);
+
+        // (5) "채팅 토스트/자동오픈" 구독 해제
+        if (_chatToastSubs.TryGetValue(chatKey, out var sub))
+        {
+            try { sub.q.ChildAdded -= sub.h; } catch { }
+            _chatToastSubs.Remove(chatKey);
+        }
+
+        // (6) 마지막 토스트 msgId 기록 제거
+        _lastToastMsgIdByChat.Remove(chatKey);
+    }
+
+    /// <summary>
+    /// 삭제 확인에서 "취소" 눌렀을 때:
+    /// - 확인 토스트 숨김
+    /// - 플래그 해제
+    /// - 대기 중인 친구요청 토스트가 있다면 이어서 표시
+    /// </summary>
     private void OnCancelDelete()
     {
         requestToast.Hide();
@@ -597,7 +912,10 @@ public class FrinedUiManager : MonoBehaviour
         _ = TryShowNextToastAsync();
     }
 
-    // requestToast가 없을 때의 보험용
+    /// <summary>
+    /// requestToast가 없을 때의 보험 로직:
+    /// - 양쪽 friends에서 제거 후 리로드
+    /// </summary>
     private async Task DeleteFriendNowAsync(FriendListItemData d)
     {
         try
@@ -616,6 +934,11 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Presence
 
+    /// <summary>
+    /// Friends 탭에서 현재 표시 중인 uid 목록(uids) 기준으로 presence 구독을 동기화한다.
+    /// - 리스트에서 사라진 uid는 구독 해제
+    /// - 새로 등장한 uid는 구독 추가
+    /// </summary>
     private void SyncPresenceSubscriptions(HashSet<string> uids)
     {
         // 필요없는 구독 제거
@@ -634,6 +957,11 @@ public class FrinedUiManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 특정 친구 uid의 presence/{uid}를 구독한다.
+    /// - online / lastSeen 값을 읽어 ApplyPresence로 반영한다.
+    /// - Firebase 이벤트는 메인 스레드가 아닐 수 있으므로 Queue로 넘긴다.
+    /// </summary>
     private void SubscribePresence(string uid)
     {
         var r = FirebaseDatabase.DefaultInstance.GetReference($"presence/{uid}");
@@ -659,6 +987,9 @@ public class FrinedUiManager : MonoBehaviour
         _presenceSubs[uid] = (r, h);
     }
 
+    /// <summary>
+    /// 특정 uid의 presence 구독을 해제한다.
+    /// </summary>
     private void UnsubscribePresence(string uid)
     {
         if (!_presenceSubs.TryGetValue(uid, out var sub)) return;
@@ -666,6 +997,10 @@ public class FrinedUiManager : MonoBehaviour
         _presenceSubs.Remove(uid);
     }
 
+    /// <summary>
+    /// 현재 활성화된 presence 구독을 전부 해제한다.
+    /// - 패널 닫힘 / 탭 전환(Invite) / Disable 시 호출
+    /// </summary>
     private void UnhookPresenceListeners()
     {
         foreach (var kv in _presenceSubs)
@@ -677,6 +1012,13 @@ public class FrinedUiManager : MonoBehaviour
         _presenceDirty = false;
     }
 
+    /// <summary>
+    /// presence 이벤트로 받은 online 상태를
+    /// Friends 탭에 표시 중인 FriendListItemData에 반영한다.
+    ///
+    /// - online 값이 바뀌었으면 _presenceDirty=true로 표시
+    /// - Update에서 일정 간격으로 ReloadAsync가 호출되어 UI가 갱신된다.
+    /// </summary>
     private void ApplyPresence(string uid, bool online, long lastSeen)
     {
         if (!_friendByUid.TryGetValue(uid, out var data) || data == null) return;
@@ -688,6 +1030,10 @@ public class FrinedUiManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Firebase에서 들어오는 값이 bool/int/string 등 다양할 수 있어
+    /// 최대한 bool로 해석하는 유틸
+    /// </summary>
     private static bool TryBool(object v)
     {
         if (v == null) return false;
@@ -697,6 +1043,9 @@ public class FrinedUiManager : MonoBehaviour
         return false;
     }
 
+    /// <summary>
+    /// Firebase 값(long/int/string)을 long으로 변환하는 유틸
+    /// </summary>
     private static long TryLong(object v)
     {
         if (v == null) return 0;
@@ -708,6 +1057,11 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Friend Request / Notifications
 
+    /// <summary>
+    /// friendRequestsIn/{myUid} 의 ValueChanged 리스너를 연결한다.
+    /// - 받은 친구요청이 생기면 큐에 넣고 토스트를 순서대로 표시한다.
+    /// - 이미 리스너가 연결돼 있으면 중복 등록하지 않는다.
+    /// </summary>
     private void HookIncomingListener()
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
@@ -722,9 +1076,13 @@ public class FrinedUiManager : MonoBehaviour
 
         if (requestToast) requestToast.Hide();
 
+        // 이미 들어와 있던 요청들도 큐에 넣어서 토스트 표시
         _ = EnqueueExistingIncomingAsync();
     }
 
+    /// <summary>
+    /// friendRequestsIn 리스너 해제
+    /// </summary>
     private void UnhookIncomingListener()
     {
         if (_reqInRef != null)
@@ -732,6 +1090,10 @@ public class FrinedUiManager : MonoBehaviour
         _reqInRef = null;
     }
 
+    /// <summary>
+    /// 현재 DB에 존재하는 friendRequestsIn 을 1회 읽어서
+    /// 기존 요청들도 토스트 큐에 넣고 표시한다.
+    /// </summary>
     private async Task EnqueueExistingIncomingAsync()
     {
         var snap = await FirebaseDatabase.DefaultInstance.GetReference($"friendRequestsIn/{_myUid}").GetValueAsync();
@@ -747,6 +1109,11 @@ public class FrinedUiManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// friendRequestsIn/{myUid} 값 변경 시 호출되는 콜백.
+    /// - snapshot 전체를 훑으며 요청들을 큐에 넣는다.
+    /// - 이후 TryShowNextToastAsync로 토스트 표시를 시도한다.
+    /// </summary>
     private void OnIncomingChanged(object sender, ValueChangedEventArgs e)
     {
         if (e.DatabaseError != null) return;
@@ -768,6 +1135,11 @@ public class FrinedUiManager : MonoBehaviour
         _ = TryShowNextToastAsync();
     }
 
+    /// <summary>
+    /// 받은 친구요청을 토스트 큐에 넣는다.
+    /// - showing 중인 uid는 제외
+    /// - 이미 큐에 넣은 uid는 제외(중복 방지)
+    /// </summary>
     private void EnqueueIncoming(string fromUid, string fromNick)
     {
         if (string.IsNullOrEmpty(fromUid)) return;
@@ -778,6 +1150,11 @@ public class FrinedUiManager : MonoBehaviour
         _queuedSet.Add(fromUid);
     }
 
+    /// <summary>
+    /// notifications/{myUid} 의 ChildAdded 리스너 연결.
+    /// - 친구 수락/거절/취소/삭제 등의 알림을 토스트로 보여주고,
+    ///   읽은 알림은 서버에서 RemoveValueAsync로 삭제한다.
+    /// </summary>
     private void HookNotificationListener()
     {
         if (string.IsNullOrEmpty(_myUid)) return;
@@ -787,6 +1164,9 @@ public class FrinedUiManager : MonoBehaviour
         _notiRef.ChildAdded += OnNotiChildAdded;
     }
 
+    /// <summary>
+    /// notifications 리스너 해제 + 중복 처리 기록 초기화
+    /// </summary>
     private void UnhookNotificationListener()
     {
         if (_notiRef != null)
@@ -795,6 +1175,12 @@ public class FrinedUiManager : MonoBehaviour
         _notiHandled.Clear();
     }
 
+    /// <summary>
+    /// notifications/{myUid}에 새 알림이 추가되면 호출.
+    /// - type에 따라 토스트 표시
+    /// - 알림 노드는 서버에서 삭제(읽음 처리)
+    /// - 이후 UI 리로드, 채팅 토스트 Prime 갱신 시도
+    /// </summary>
     private void OnNotiChildAdded(object sender, ChildChangedEventArgs e)
     {
         if (e.DatabaseError != null) return;
@@ -803,12 +1189,15 @@ public class FrinedUiManager : MonoBehaviour
         string id = e.Snapshot.Key;
         if (string.IsNullOrEmpty(id)) return;
 
+        // 중복 처리 방지
         if (_notiHandled.Contains(id)) return;
         _notiHandled.Add(id);
 
         string type = e.Snapshot.Child("type").Value?.ToString() ?? "";
         string byNick = e.Snapshot.Child("byNick").Value?.ToString() ?? "";
+        string byUid = e.Snapshot.Child("byUid").Value?.ToString() ?? "";
 
+        // 알림 타입별 토스트 메시지
         switch (type)
         {
             case "friend_accepted":
@@ -822,17 +1211,40 @@ public class FrinedUiManager : MonoBehaviour
                 break;
             case "friend_removed":
                 ToastMessageManager.instance?.ShowToast($"{byNick} 님이 친구를 삭제했습니다.", $"{byNick} removed you from friends.");
+
+                // 상대가 날 삭제했으니, 내 chatIndex 삭제 + 채팅 UI/로컬 정리
+                _ = FriendService.DeleteMyChatIndexOnlyAsync(byUid);
+
+                _mainThreadQueue.Enqueue(() =>
+                {
+                    CloseAndClearChatWith(byUid);
+                });
                 break;
         }
 
+        // 서버 알림 삭제(읽음 처리)
         _ = FirebaseDatabase.DefaultInstance
             .GetReference($"notifications/{_myUid}/{id}")
             .RemoveValueAsync();
 
+        // UI 갱신 및 채팅 토스트 구독을 최신 친구 목록 기준으로 갱신
         StartCoroutine(FriendUiCoroutine(0.5f));
         _ = PrimeChatToastSubscriptionsAsync();
     }
 
+    /// <summary>
+    /// 대기 중인 "받은 친구요청" 토스트를 하나 꺼내 표시한다.
+    /// - 이미 토스트가 떠있으면 리턴
+    /// - requestToast가 없으면 리턴
+    /// - 큐가 비어있으면 리턴
+    ///
+    /// 표시 흐름:
+    /// 1) 큐에서 요청 pop
+    /// 2) 닉/프로필이 없으면 FriendService로 조회
+    /// 3) 프로필 이미지 다운로드(캐시)
+    /// 4) requestToast.Show로 UI 표시
+    /// 5) Accept/Decline 버튼 콜백에서 FriendService 처리 후 다음 토스트로 넘어감
+    /// </summary>
     private async Task TryShowNextToastAsync()
     {
         if (_toastShowing) return;
@@ -849,6 +1261,7 @@ public class FrinedUiManager : MonoBehaviour
         string nick = req.fromNick;
         string photoUrl = "";
 
+        // 닉네임이 없다면 프로필을 추가 조회
         if (string.IsNullOrWhiteSpace(nick))
         {
             var p = await FriendService.GetUserProfileBasicAsync(req.fromUid);
@@ -856,10 +1269,12 @@ public class FrinedUiManager : MonoBehaviour
             photoUrl = p.photoUrl;
         }
 
+        // 프로필 이미지 다운로드(캐시)
         Texture tex = null;
         if (!string.IsNullOrWhiteSpace(photoUrl))
             tex = await FriendProfileImageCache.GetAsync(photoUrl);
 
+        // 요청 토스트 표시 + 수락/거절 콜백 연결
         requestToast.Show(
             nick: string.IsNullOrWhiteSpace(nick) ? "알 수 없음" : nick,
             photo: tex,
@@ -868,6 +1283,13 @@ public class FrinedUiManager : MonoBehaviour
         );
     }
 
+    /// <summary>
+    /// 친구 요청 수락:
+    /// - 토스트 숨김
+    /// - FriendService.AcceptFriendRequestAsync 실행
+    /// - 토스트 상태 플래그 초기화
+    /// - 다음 대기 토스트 표시
+    /// </summary>
     private async Task OnAcceptAsync(string fromUid)
     {
         requestToast.Hide();
@@ -879,6 +1301,13 @@ public class FrinedUiManager : MonoBehaviour
         await TryShowNextToastAsync();
     }
 
+    /// <summary>
+    /// 친구 요청 거절:
+    /// - 토스트 숨김
+    /// - FriendService.DeclineFriendRequestAsync 실행
+    /// - 토스트 상태 플래그 초기화
+    /// - 다음 대기 토스트 표시
+    /// </summary>
     private async Task OnDeclineAsync(string fromUid)
     {
         requestToast.Hide();
@@ -890,6 +1319,9 @@ public class FrinedUiManager : MonoBehaviour
         await TryShowNextToastAsync();
     }
 
+    /// <summary>
+    /// 약간의 지연 후 ReloadAsync 호출하는 코루틴(UX용)
+    /// </summary>
     private IEnumerator FriendUiCoroutine(float delay)
     {
         yield return new WaitForSeconds(delay);
@@ -900,6 +1332,11 @@ public class FrinedUiManager : MonoBehaviour
 
     #region Friend Chat: Open Window / History / Index
 
+    /// <summary>
+    /// 두 UID로부터 "항상 동일한 순서"의 chatKey를 만든다.
+    /// - A_B 또는 B_A 형태
+    /// - 정렬 규칙이 항상 같아야 같은 친구끼리 동일한 채팅방 키가 된다.
+    /// </summary>
     public static string MakeChatId(string a, string b)
     {
         if (string.CompareOrdinal(a, b) < 0) return $"{a}_{b}";
@@ -928,7 +1365,10 @@ public class FrinedUiManager : MonoBehaviour
     }
 
     /// <summary>
-    /// FriendChatWindow에서 호출: "내 chatIndex만" 갱신 (rules상 안전)
+    /// chatIndex/{myUid}/{chatKey} 를 갱신한다.
+    /// - 채팅 리스트(최근 메시지/상대/시간 표시)에 필요한 인덱스 데이터
+    /// - 실제 메시지 내용을 전부 스캔하지 않아도 되게 보조하는 용도
+    ///
     /// </summary>
     public async Task UpdateMyChatIndexAsync(string withUid, string withNick, string lastText, string lastFromUid, long ts)
     {
@@ -950,7 +1390,9 @@ public class FrinedUiManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 친구 액션에서 채팅 열기
+    /// 친구 리스트 아이템에서 액션 선택(채팅/초대/프로필 등)
+    /// - actionInt: 0=None, 1=Chat, 2=Invite, 3=Profile
+    /// - Chat/Invite는 오프라인이면 막는 정책 적용
     /// </summary>
     public void OnFriendActionSelected(FriendListItemData d, int actionInt)
     {
@@ -984,7 +1426,13 @@ public class FrinedUiManager : MonoBehaviour
     }
 
     /// <summary>
-    /// FriendListItemData 없이도 열 수 있게 friendUid/nick만 받는 버전
+    /// friendUid + friendNick만으로 채팅창을 연다.
+    ///
+    /// 동작:
+    /// 1) 현재 로그인 uid 확보
+    /// 2) chatKey 생성
+    /// 3) 이미 열린 창이 있으면 그 창을 앞으로 가져오고 Open()
+    /// 4) 없으면 prefab instantiate → Setup → Open()
     /// </summary>
     public void OpenFriendChatWindow(string friendUid, string friendNick)
     {
@@ -1031,12 +1479,18 @@ public class FrinedUiManager : MonoBehaviour
         OpenFriendChatWindow(d.uid, d.nick);
     }
 
+    /// <summary>
+    /// FriendChatWindow가 "열릴 때" 호출해주도록 만들어둔 카운터 증가용 콜백
+    /// </summary>
     internal void NotifyChatWindowOpened()
     {
         _openedChatWindowCount++;
         if (_openedChatWindowCount < 0) _openedChatWindowCount = 0;
     }
 
+    /// <summary>
+    /// FriendChatWindow가 "닫힐 때" 호출해주도록 만들어둔 카운터 감소용 콜백
+    /// </summary>
     internal void NotifyChatWindowClosed()
     {
         _openedChatWindowCount--;
@@ -1100,9 +1554,11 @@ public class FrinedUiManager : MonoBehaviour
                     return;
                 _lastToastMsgIdByChat[chatKey] = msgId;
 
+                // 내가 보낸 메시지면 토스트 X
                 string fromUid = e.Snapshot.Child("fromUid").Value?.ToString() ?? "";
                 if (fromUid == _myUid) return; // 내가 보낸 건 토스트 X
 
+                // 메시지 내용 / 보낸 사람 닉 / 타임스탬프
                 string text = e.Snapshot.Child("text").Value?.ToString() ?? "";
                 string fromNick = e.Snapshot.Child("fromNick").Value?.ToString() ?? (f.nick ?? "알 수 없음");
 
@@ -1147,6 +1603,10 @@ public class FrinedUiManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 채팅 토스트 구독을 전부 해제한다.
+    /// - Disable / 로그아웃 / Invite 탭 전환 시 호출
+    /// </summary>
     private void UnhookChatToastSubs()
     {
         foreach (var kv in _chatToastSubs)
@@ -1176,8 +1636,13 @@ public class FrinedUiManager : MonoBehaviour
 
 
     /// <summary>
-    /// 로그인 직후(친구창 안 열어도) 채팅 토스트/자동오픈이 동작하도록
+    /// 로그인 직후(친구창을 열지 않아도) 채팅 토스트/자동오픈이 동작하도록
     /// 친구 목록을 1회 읽어 messages 구독을 "미리" 걸어둔다.
+    ///
+    /// - _chatToastPrimed && _chatToastSubs.Count>0 이면 중복 Prime 방지
+    /// - 친구 uid를 _knownFriendUids에 캐시 (로그아웃/종료 시 정리용)
+    /// - OnDisconnect 기반 채팅 기록 삭제 예약도 등록(RegisterChatCleanupOnDisconnectAsync)
+    /// - SyncChatToastSubscriptions 로 메시지 구독 연결
     /// </summary>
     private async Task PrimeChatToastSubscriptionsAsync()
     {
@@ -1215,7 +1680,15 @@ public class FrinedUiManager : MonoBehaviour
 
     #region 로그아웃 시 채팅 기록 삭제
 
-
+    /// <summary>
+    /// (명시적으로 호출했을 때) 내 친구들과의 채팅 메시지(messages) 및 내 chatIndex를 삭제한다.
+    ///
+    /// - chats/{sortedA}/{sortedB}/messages 를 전부 RemoveValueAsync
+    ///   → 양쪽 모두 채팅 메시지가 사라짐(공유 경로라면)
+    /// - chatIndex/{myUid}/{chatKey} 를 RemoveValueAsync
+    ///   → 내 채팅 리스트 인덱스만 삭제
+    ///
+    /// </summary>
     public async Task DeleteAllChatMessagesBeforeLogoutAsync()
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
@@ -1255,7 +1728,14 @@ public class FrinedUiManager : MonoBehaviour
     }
 
 
-
+    /// <summary>
+    /// 앱 강제 종료/오프라인 상황에서도 서버가 자동으로 정리를 수행하도록
+    /// Firebase OnDisconnect()를 이용해 messages/chatIndex 삭제를 예약한다.
+    ///
+    /// - messages : chats/{sortedA}/{sortedB}/messages → SetValue(null)
+    /// - chatIndex: chatIndex/{myUid}/{chatKey} → SetValue(null)
+    ///
+    /// </summary>
     private async Task RegisterChatCleanupOnDisconnectAsync()
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
