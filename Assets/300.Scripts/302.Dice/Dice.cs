@@ -114,6 +114,12 @@ public static class DiceTables
         _loaded = true;
     }
 
+    public static Dice RollByPullType(PullType pullType)
+    {
+        if (!_loaded) throw new Exception("DiceTables not loaded. Call DiceTables.LoadOrThrow() first.");
+        return RollFrom(pullType);
+    }
+
     // 1뽑: single 테이블 사용.
     public static Dice RollDiceSingle()
     {

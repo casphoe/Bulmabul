@@ -287,6 +287,10 @@
     {
       "key": "txt.Purchase",
       "text": "재화 구매"
+    },
+    {
+      "key": "txt.DrawSkip",
+      "text": "뽑기 스킵"
     }
   ],
   "eng": [
@@ -577,6 +581,10 @@
     {
       "key": "txt.Purchase",
       "text": "Purchase Gold"
+    },
+    {
+      "key": "txt.DrawSkip",
+      "text": "Draw Skip"
     }
   ]
 }
