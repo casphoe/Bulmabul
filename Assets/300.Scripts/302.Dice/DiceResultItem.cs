@@ -38,8 +38,8 @@ public class DiceResultItem : MonoBehaviour
         switch (grade)
         {
             case DiceGrade.Common: imgDice.color = Color.white; break;
-            case DiceGrade.Rare: imgDice.color = new Color(0.25f, 0.55f, 1f, 1f); break;
-            case DiceGrade.Epic: imgDice.color = new Color(1f, 0.84f, 0.2f, 1f); break;
+            case DiceGrade.Rare: imgDice.color = new Color(0 / 255f, 120 / 255f, 1f, 1f); break;
+            case DiceGrade.Epic: imgDice.color = new Color(1f, 220 / 255f, 0, 1f); break;
             default: imgDice.color = Color.white; break;
         }
     }

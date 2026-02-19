@@ -1,9 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Firebase.Auth;
+﻿using Firebase.Auth;
 using Firebase.Database;
 using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using UnityEngine;
 
 
 /// <summary>
@@ -43,13 +44,6 @@ public static class AccountCloudStore
     static DatabaseReference LevelRef(string uid) => UserRef(uid).Child("accountLevel");
     static DatabaseReference ExpRef(string uid) => UserRef(uid).Child("accountExp");
 
-    static string ToNameKey(string name)
-    {
-        name = (name ?? "").Trim();
-        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+", " ");
-        return name;
-    }
-
 
     /// <summary>
     /// Account 전체 저장:
@@ -66,6 +60,17 @@ public static class AccountCloudStore
         string nickKey = NicknameService.ToNickKey(acc.NickName);
         string nameKey = NameService.ToNameKey(acc.Name);
 
+        // 3) 주사위 인벤토리(평문)로 변환: rules가 요구하는 구조로
+        // users/{uid}/diceInventory/{diceKey} = { grade, star, level, count, exp }
+        var diceInvMap = BuildDiceInventoryMap(acc);
+
+        // equippedDiceKey: rules length<=64
+        string equippedKey = "";
+        if (acc.EquippedDice != null)
+            equippedKey = acc.EquippedDice.Key; // "Grade|Star|Level" 형태
+
+        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         var updates = new Dictionary<string, object>
         {
             [$"users/{uid}/accountEnc"] = enc,
@@ -73,11 +78,57 @@ public static class AccountCloudStore
             [$"users/{uid}/nick"] = nickKey,        
             [$"users/{uid}/nameKey"] = nameKey,     
             [$"users/{uid}/accountLevel"] = acc.AccountLevel,
-            [$"users/{uid}/accountExp"] = acc.AccountExp
+            [$"users/{uid}/accountExp"] = acc.AccountExp,
+
+            // 뽑기 관련 메타
+            [$"users/{uid}/diceTotalPullCount"] = acc.DiceTotalPullCount,
+            [$"users/{uid}/dicePityCount"] = Mathf.Clamp(acc.DicePityCount, 0, 49),
+            [$"users/{uid}/lastDicePullAt"] = nowMs,
+            [$"users/{uid}/equippedDiceKey"] = equippedKey,
+
+            // 주사위 인벤토리 평문 저장
+            [$"users/{uid}/diceInventory"] = diceInvMap
         };
 
 
-        await Root.UpdateChildrenAsync(updates);
+        try
+        {
+            await Root.UpdateChildrenAsync(updates);
+        }
+        catch (Exception e)
+        {
+            Debug.LogException(e);
+            throw;
+        }
+    }
+
+    static Dictionary<string, object> BuildDiceInventoryMap(Account acc)
+    {
+        var result = new Dictionary<string, object>();
+
+        if (acc.DiceInventory == null) return result;
+
+        foreach (var od in acc.DiceInventory)
+        {
+            if (od == null) continue;
+
+            // rules에서 $diceKey는 길이 제한이 없지만, 안전하게 너무 길면 패스 가능
+            // 여기서는 Key가 "Grade|Star|Level" 이므로 안전
+            string diceKey = od.Key;
+
+            var node = new Dictionary<string, object>
+            {
+                ["grade"] = od.Grade.ToString(), // Common/Rare/Epic/Legendary
+                ["star"] = od.Star,
+                ["level"] = od.Level,
+                ["count"] = od.Count,
+                ["exp"] = od.Exp
+            };
+
+            result[diceKey] = node;
+        }
+
+        return result;
     }
 
     /// <summary>

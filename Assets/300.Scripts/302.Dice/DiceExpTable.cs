@@ -7,7 +7,7 @@ using UnityEngine;
 public static class DiceExpTable
 {
     private const string CSV_DIR = "Csv";
-    private const string EXP_CSV_FILE = "dice_level_exp_table_round10.csv";
+    private const string EXP_CSV_FILE = "dice_level_exp_table.csv";
 
     // key: "Grade|Star|Level" (Level=1..9) -> expToNext
     private static readonly Dictionary<string, int> expToNextByKey = new();

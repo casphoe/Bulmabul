@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -32,6 +33,10 @@ public class ShopUiManager : MonoBehaviour
     [SerializeField] Button btnConfirmClose;
     [SerializeField] GameObject doubleClickArea;
 
+    [SerializeField] GameObject noSkipRoot; // 0번 패널
+    [SerializeField] GameObject skipRoot;   // 1번 패널
+
+
     [Header("더블클릭 연출 컨트롤러(선택)")]
     [SerializeField] DiceClickRevealFX diceRevealFx; // 아래 스크립트
 
@@ -50,6 +55,9 @@ public class ShopUiManager : MonoBehaviour
     int _pendingPullCount = 0;
     bool _isRolling = false;
 
+    DoubleClickTrigger _dc;
+    FireBaseAuthManager _auth;
+
     private void Awake()
     {
         shop = ShopUi.Dice;
@@ -58,13 +66,17 @@ public class ShopUiManager : MonoBehaviour
             int idx = i; // 클로저 방지
             btnShops[i].onClick.AddListener(() => ShopUiClick(idx));
         }
-
+        _auth = FireBaseAuthManager.Instance;
         // 뽑기 버튼 연결 + 가격 텍스트 세팅
         ApplyShopUI(shop);
 
         SetupDiceButtons();
         SetupConfirmPopup();
-        RefreshPityText();
+    }
+
+    private void OnEnable()
+    {
+        RefreshPityText(_auth.CurrentAccount);
     }
 
     #region 주사위 뽑기 함수
@@ -90,16 +102,6 @@ public class ShopUiManager : MonoBehaviour
     {
         if (btnDices == null || btnDices.Length < 2) return;
 
-        var lang = (LaguageManager.Instance != null)
-            ? LaguageManager.Instance.currentLang
-            : Lauaguage.Kor;
-
-        string oneText = (lang == Lauaguage.Eng) ? $"Single {ONE_COST}" : $"1회 뽑기 {ONE_COST}원";
-        string tenText = (lang == Lauaguage.Eng) ? $"10 Pull {TEN_COST}" : $"10회 뽑기 {TEN_COST}원";
-
-        SetButtonChildText(btnDices[0], oneText);
-        SetButtonChildText(btnDices[1], tenText);
-
         btnDices[0].onClick.AddListener(() => OnPressPullButton(1));
         btnDices[1].onClick.AddListener(() => OnPressPullButton(10));
     }
@@ -111,18 +113,12 @@ public class ShopUiManager : MonoBehaviour
         if (btnConfirmClose != null)
             btnConfirmClose.onClick.AddListener(CloseConfirmPopup);
 
-        var dc = pullConfirmPopup != null
-       ? pullConfirmPopup.GetComponentInChildren<DoubleClickTrigger>(true)
-       : null;
-
-        if (dc != null)
+        if (doubleClickArea != null)
         {
-            dc.Open(); // 아래에 ResetClick 추가할 거임
-            dc.onDoubleClick = () => _ = OnConfirmDoubleClickAsync();
-        }
-        else
-        {
-            Debug.LogWarning("[ShopUiManager] DoubleClickTrigger를 찾지 못했습니다. (팝업 내부에 붙어있는지 확인)");
+            _dc = doubleClickArea.GetComponent<DoubleClickTrigger>();
+            if (_dc == null) _dc = doubleClickArea.AddComponent<DoubleClickTrigger>();
+            _dc.onDoubleClick = () => _ = OnConfirmDoubleClickAsync();
+            _dc.DisOpen(); // 시작은 닫힘 상태
         }
     }
 
@@ -146,18 +142,19 @@ public class ShopUiManager : MonoBehaviour
         _pendingPullCount = pullCount;
 
         if (pullConfirmPopup != null)
-        {
             pullConfirmPopup.SetActive(true);
-            SetConfirmPopupMode(skipMode: false); // 0번 자식 ON
-        }
 
-        //매번 새 뽑기 시작 시 상태 초기화
+        SetConfirmPopupMode(skipMode: false);
+
+        // 매번 새 세션 오픈 (중요)
+        if (_dc != null) _dc.Open();
+
+        // 연출 초기화 + 흔들림 시작
         if (diceRevealFx != null)
+        {
             diceRevealFx.ResetForNewPull();
-
-        // 더블클릭 전 회전 연출 시작
-        if (diceRevealFx != null)
             diceRevealFx.BeginIdle();
+        }
 
 
         var lang = (LaguageManager.Instance != null)
@@ -174,23 +171,16 @@ public class ShopUiManager : MonoBehaviour
 
     void SetConfirmPopupMode(bool skipMode)
     {
-        if (pullConfirmPopup == null) return;
-
-        Transform root = pullConfirmPopup.transform;
-
-        // 컨테이너(0번)
-        if (root.childCount <= 0) return;
-        Transform container = root.GetChild(0);
-
-        // container의 0=NoSkip, 1=Skip
-        if (container.childCount > 0) container.GetChild(0).gameObject.SetActive(!skipMode);
-        if (container.childCount > 1) container.GetChild(1).gameObject.SetActive(skipMode);
+        if (noSkipRoot != null) noSkipRoot.SetActive(!skipMode);
+        if (skipRoot != null) skipRoot.SetActive(skipMode);
     }
 
 
     void CloseConfirmPopup()
     {
         _pendingPullCount = 0;
+
+        if (_dc != null) _dc.DisOpen();
 
         // EndIdle + 크기원복까지 포함
         if (diceRevealFx != null)
@@ -205,13 +195,13 @@ public class ShopUiManager : MonoBehaviour
         if (_isRolling) return;
         if (_pendingPullCount != 1 && _pendingPullCount != 10) return;
 
+        if (_dc != null) _dc.DisOpen();
+
         // 더블클릭 시: 800x800 확대 + crack 연출 먼저
         if (diceRevealFx != null)
         {
             await diceRevealFx.PlayCrackAndBurstAsync();
-            // 연출 도중/끝나고 "스킵 UI(1번 자식)"처럼 바꾸고 싶다면:
-            if (pullConfirmPopup != null)
-                SetConfirmPopupMode(skipMode: true);
+            SetConfirmPopupMode(skipMode: true);
         }
 
         await TryPullAsync(_pendingPullCount, skipReveal: false);
@@ -219,99 +209,116 @@ public class ShopUiManager : MonoBehaviour
 
     async Task TryPullAsync(int pullCount, bool skipReveal)
     {
-        var auth = FireBaseAuthManager.Instance;
-        if (auth == null || auth.CurrentAccount == null)
-        {
-            ToastMessageManager.instance.ShowToast("계정 정보가 없습니다.", "No account data.");
-            return;
-        }
-
-        // 0) 비용 체크
-        int cost = (pullCount == 10) ? TEN_COST : ONE_COST;
-        float cash = auth.CurrentAccount.Cash;
-
-        if (cash < cost)
-        {
-            float lack = cost - cash;
-
-            // “얼마 부족” 토스트
-            ToastMessageManager.instance.ShowToast(
-                $"재화가 부족합니다. {lack:0}원 부족해요.",
-                $"Not enough currency. You need {lack:0} more."
-            );
-            return;
-        }
-
-        // 1) CSV 테이블 로드(최초 1회)
-        try
-        {
-            DiceTables.LoadOrThrow();
-        }
-        catch (Exception e)
-        {
-            Debug.LogError(e);
-            ToastMessageManager.instance.ShowToast("주사위 테이블 로드 실패", "Failed to load dice tables.");
-            return;
-        }
-
+        if (_isRolling) return;
         _isRolling = true;
-        CloseConfirmPopup();
 
-        // 2) 결과 팝업 열고 이펙트 재생
-        if (resultPopup != null)
-            resultPopup.Open(pullCount);
-
-        // 3) 실제 뽑기 결과 생성 (+ pity 적용 예시)
-        // Epic = SR, "50회에서 SR 보장": Epic 안 나왔으면 pityCount 증가, Epic 이상 나오면 pityCount 0
-        var rolledList = new List<Dice>();
-
-        if (pullCount == 1)
-        {
-            var d = RollWithPity(auth.CurrentAccount, PullType.Single);
-            rolledList.Add(d);
-        }
-        else
-        {
-            // 10뽑은 1~9 + 10번째 Rare+ 보장 (네 DiceTables.RollDiceTen이 이미 그 구조)
-            for (int i = 0; i < 9; i++)
-                rolledList.Add(RollWithPity(auth.CurrentAccount, PullType.Ten_1to9));
-
-            rolledList.Add(RollWithPity(auth.CurrentAccount, PullType.Ten_Slot10_Guarantee));
-        }
-
-        // 4) 이펙트 → 결과 표시
-        // 스킵이면 연출 없이 결과만
-        if (resultPopup != null)
-        {
-            if (skipReveal)
-                resultPopup.ShowResultsInstant(rolledList);   // 연출 없이 바로 결과
-            else
-                await resultPopup.PlayEffectThenShowAsync(rolledList); // 연출 후 결과
-        }
-
-        // 5) 재화 차감
-        auth.CurrentAccount.Cash -= cost;
-        if (auth.CurrentAccount.Cash < 0) auth.CurrentAccount.Cash = 0;
-
-        // 6) 인벤 반영(중복이면 exp/레벨업 처리)
-        foreach (var d in rolledList)
-            DiceTables.AddToAccountInventory(auth.CurrentAccount, d);
-
-        // 7) Firebase 저장 (뽑기 끝난 후 한 번에)
         try
         {
-            // 네 프로젝트에 이미 있는 저장 함수로 호출
-            // (원자 저장을 원하면 UpdateChildrenAsync로 cash/diceInventory/pity 같이 올리면 됨)
+            var auth = _auth;
+            if (auth == null || auth.CurrentAccount == null)
+            {
+                ToastMessageManager.instance.ShowToast("계정 정보가 없습니다.", "No account data.");
+                return;
+            }
+
+            int cost = (pullCount == 10) ? TEN_COST : ONE_COST;
+            float cash = auth.CurrentAccount.Cash;
+
+            if (cash < cost)
+            {
+                float lack = cost - cash;
+                ToastMessageManager.instance.ShowToast(
+                    $"재화가 부족합니다. {lack:0}원 부족해요.",
+                    $"Not enough currency. You need {lack:0} more."
+                );
+                return;
+            }
+
+            // CSV 로드
+            DiceTables.LoadOrThrow();
+
+            CloseConfirmPopup();
+
+            if (resultPopup != null)
+                resultPopup.Open(pullCount);
+
+            // 뽑기 결과
+            var rolledList = new List<Dice>();
+            if (pullCount == 1)
+            {
+                rolledList.Add(RollWithPity(auth.CurrentAccount, PullType.Single));
+            }
+            else
+            {
+                for (int i = 0; i < 9; i++)
+                    rolledList.Add(RollWithPity(auth.CurrentAccount, PullType.Ten_1to9));
+
+                rolledList.Add(RollWithPity(auth.CurrentAccount, PullType.Ten_Slot10_Guarantee));
+            }
+
+            // "이번 뽑기 단위"로 pity 최종값 고정 (SR 나오면 무조건 0)
+            ApplyPityAfterBatch(auth.CurrentAccount, rolledList.Count, rolledList);
+
+            // 결과 표시
+            if (resultPopup != null)
+            {
+                if (skipReveal) resultPopup.ShowResultsInstant(rolledList);
+                else await resultPopup.PlayEffectThenShowAsync(rolledList);
+            }
+
+            // 재화 차감
+            auth.CurrentAccount.Cash = Mathf.Max(0, auth.CurrentAccount.Cash - cost);
+
+            auth.CurrentAccount.DiceTotalPullCount += pullCount;
+
+            // 인벤 반영(여기서 pity도 이미 RollWithPity에서 누적됨)
+            foreach (var d in rolledList)
+                DiceTables.AddToAccountInventory(auth.CurrentAccount, d);
+
+            //  먼저 pity 텍스트 갱신 (현재 acc 기준)
+            RefreshPityText(auth.CurrentAccount);
+
+            // 그 다음 전체 UI(캐시 등) 갱신
+            LobbyUIManager.instance.RefreshPlayerUI();
+
+            // 마지막에 저장
             await AccountCloudStore.SaveFullAsync(auth.CurrentAccount);
         }
         catch (Exception e)
         {
-            Debug.LogWarning($"[Pull] Save failed: {e.Message}");
-            ToastMessageManager.instance.ShowToast("저장 실패(네트워크 확인)", "Save failed (check network).");
+            Debug.LogException(e);
+            ToastMessageManager.instance.ShowToast("뽑기 처리 중 오류", "Error during pull.");
+        }
+        finally
+        {
+            _isRolling = false; // 무조건 풀림
+        }
+    }
+
+    void ApplyPityAfterBatch(Account acc, int pullCount, List<Dice> rolledList)
+    {
+        if (acc == null || rolledList == null) return;
+
+        bool anyEpic = false;
+        for (int i = 0; i < rolledList.Count; i++)
+        {
+            if (rolledList[i].grade >= DiceGrade.Epic)
+            {
+                anyEpic = true;
+                break;
+            }
         }
 
-        RefreshPityText();
-        _isRolling = false;
+        if (anyEpic)
+        {
+            // SR(Epic) 이상이 한 번이라도 나오면 무조건 0 고정 => UI는 50회
+            acc.DicePityCount = 0;
+        }
+        else
+        {
+            // 이번 뽑기에서 SR이 하나도 없으면 뽑은 횟수만큼 누적
+            acc.DicePityCount = Mathf.Clamp(acc.DicePityCount + pullCount, 0, 49);
+        }
     }
 
     Dice RollWithPity(Account acc, PullType pullType)
@@ -349,15 +356,11 @@ public class ShopUiManager : MonoBehaviour
             {
                 d = (pullType == PullType.Single)
                     ? DiceTables.RollDiceSingle()
-                    : d; // ten 개별 롤을 못 쓰면 pity 강제는 ten에서 "한 칸만 Epic으로 교체" 방식으로 처리 권장
+                    : DiceTables.RollByPullType(pullType);
             }
         }
 
-        // pityCount 갱신
-        if (d.grade >= DiceGrade.Epic) pity = 0;
-        else pity = Mathf.Clamp(pity + 1, 0, 49);
-
-        SetPityCount(acc, pity);
+        // pityCount 갱신    
         return d;
     }
 
@@ -365,35 +368,35 @@ public class ShopUiManager : MonoBehaviour
     // 네가 Account에 DicePityCount를 추가하면 아래 두 함수는 한 줄로 끝남.
     int GetPityCount(Account acc)
     {
-        // TODO: acc.DicePityCount 로 교체
-        // 임시로 0 처리
-        return 0;
+        return Mathf.Clamp(acc.DicePityCount, 0, 49);
     }
 
-    void SetPityCount(Account acc, int value)
-    {
-        // TODO: acc.DicePityCount = value;
-    }
-
-    void RefreshPityText()
+    void RefreshPityText(Account acc)
     {
         if (txtPick == null) return;
+        if (acc == null) return;
 
         var lang = (LaguageManager.Instance != null)
             ? LaguageManager.Instance.currentLang
             : Lauaguage.Kor;
 
-        var auth = FireBaseAuthManager.Instance;
-        int pity = (auth != null && auth.CurrentAccount != null) ? GetPityCount(auth.CurrentAccount) : 0;
-        int remain = 50 - pity; // pity=0이면 50 남음, pity=49이면 1 남음
+        int pity = Mathf.Clamp(acc.DicePityCount, 0, 49);
+        int remain = Mathf.Clamp(50 - pity, 1, 50);
 
         txtPick.text = (lang == Lauaguage.Eng)
             ? $"SR(Epic) guaranteed in {remain}"
             : $"SR(Epic) 보장까지 {remain}회";
+
+        string oneText = (lang == Lauaguage.Eng) ? $"Single {ONE_COST}" : $"1회 뽑기 {ONE_COST}원";
+        string tenText = (lang == Lauaguage.Eng) ? $"10 Pull {TEN_COST}" : $"10회 뽑기 {TEN_COST}원";
+
+        SetButtonChildText(btnDices[0], oneText);
+        SetButtonChildText(btnDices[1], tenText);
     }
 
     void SetButtonChildText(Button btn, string value)
     {
+
         if (btn == null) return;
         var t = btn.GetComponentInChildren<Text>(true);
         if (t != null) t.text = value;

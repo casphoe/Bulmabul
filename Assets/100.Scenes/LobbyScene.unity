@@ -14962,6 +14962,8 @@ MonoBehaviour:
   txtConfirmDesc: {fileID: 840055229}
   btnConfirmClose: {fileID: 0}
   doubleClickArea: {fileID: 2006777006}
+  noSkipRoot: {fileID: 1794317787}
+  skipRoot: {fileID: 1786408770}
   diceRevealFx: {fileID: 2006777011}
   resultPopup: {fileID: 536372840}
   shop: 0
