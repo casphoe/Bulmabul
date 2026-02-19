@@ -111,14 +111,18 @@ public class ShopUiManager : MonoBehaviour
         if (btnConfirmClose != null)
             btnConfirmClose.onClick.AddListener(CloseConfirmPopup);
 
-        if (doubleClickArea != null)
-        {
-            var dc = doubleClickArea.GetComponent<DoubleClickTrigger>();
-            if (dc == null) dc = doubleClickArea.gameObject.AddComponent<DoubleClickTrigger>();
+        var dc = pullConfirmPopup != null
+       ? pullConfirmPopup.GetComponentInChildren<DoubleClickTrigger>(true)
+       : null;
 
-            // 중복 할당 방지용으로 한번만 세팅
-            dc.onDoubleClick = null;
+        if (dc != null)
+        {
+            dc.Open(); // 아래에 ResetClick 추가할 거임
             dc.onDoubleClick = () => _ = OnConfirmDoubleClickAsync();
+        }
+        else
+        {
+            Debug.LogWarning("[ShopUiManager] DoubleClickTrigger를 찾지 못했습니다. (팝업 내부에 붙어있는지 확인)");
         }
     }
 
@@ -147,6 +151,15 @@ public class ShopUiManager : MonoBehaviour
             SetConfirmPopupMode(skipMode: false); // 0번 자식 ON
         }
 
+        //매번 새 뽑기 시작 시 상태 초기화
+        if (diceRevealFx != null)
+            diceRevealFx.ResetForNewPull();
+
+        // 더블클릭 전 회전 연출 시작
+        if (diceRevealFx != null)
+            diceRevealFx.BeginIdle();
+
+
         var lang = (LaguageManager.Instance != null)
             ? LaguageManager.Instance.currentLang
             : Lauaguage.Kor;
@@ -157,39 +170,31 @@ public class ShopUiManager : MonoBehaviour
                 ? "Double-click to start."
                 : "더블클릭하면 뽑기를 시작합니다.";
         }
-
-        // 더블클릭 전 회전 연출 시작
-        if (diceRevealFx != null)
-            diceRevealFx.BeginIdle(); // +30/-30 회전
     }
 
     void SetConfirmPopupMode(bool skipMode)
     {
         if (pullConfirmPopup == null) return;
 
-        Transform t = pullConfirmPopup.transform;
+        Transform root = pullConfirmPopup.transform;
 
-        // 모든 자식 OFF
-        for (int i = 0; i < t.childCount; i++)
-            t.GetChild(i).gameObject.SetActive(false);
+        // 컨테이너(0번)
+        if (root.childCount <= 0) return;
+        Transform container = root.GetChild(0);
 
-        // 0 = NoSkip, 1 = Skip
-        if (!skipMode)
-        {
-            if (t.childCount > 0) t.GetChild(0).gameObject.SetActive(true);
-        }
-        else
-        {
-            if (t.childCount > 1) t.GetChild(1).gameObject.SetActive(true);
-        }
+        // container의 0=NoSkip, 1=Skip
+        if (container.childCount > 0) container.GetChild(0).gameObject.SetActive(!skipMode);
+        if (container.childCount > 1) container.GetChild(1).gameObject.SetActive(skipMode);
     }
 
 
     void CloseConfirmPopup()
     {
         _pendingPullCount = 0;
+
+        // EndIdle + 크기원복까지 포함
         if (diceRevealFx != null)
-            diceRevealFx.EndIdle();
+            diceRevealFx.ResetForNewPull();
 
         if (pullConfirmPopup != null)
             pullConfirmPopup.SetActive(false);

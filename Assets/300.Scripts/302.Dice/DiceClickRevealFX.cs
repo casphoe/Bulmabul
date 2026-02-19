@@ -29,6 +29,7 @@ public class DiceClickRevealFX : MonoBehaviour
     bool _idle;
     float _t;
     Vector2 _originSize;
+    bool _originCaptured;
 
     void Reset()
     {
@@ -41,8 +42,18 @@ public class DiceClickRevealFX : MonoBehaviour
         if (targetRect == null) targetRect = GetComponent<RectTransform>();
         if (targetImage == null) targetImage = GetComponent<Image>();
 
-        if (targetRect != null) _originSize = targetRect.sizeDelta;
-        if (crackOverlay != null) crackOverlay.gameObject.SetActive(false);
+        CaptureOriginIfNeeded();
+        ResetForNewPull(); // 시작 시도 깨끗하게
+    }
+
+    void CaptureOriginIfNeeded()
+    {
+        if (_originCaptured) return;
+        if (targetRect != null)
+        {
+            _originSize = targetRect.sizeDelta;
+            _originCaptured = true;
+        }
     }
 
     void Update()
@@ -54,8 +65,40 @@ public class DiceClickRevealFX : MonoBehaviour
         targetRect.localRotation = Quaternion.Euler(0, 0, a);
     }
 
+    /// <summary>
+    /// 다음 뽑기(확인창 열릴 때)마다 호출해서 상태 초기화
+    /// </summary>
+    public void ResetForNewPull()
+    {
+        CaptureOriginIfNeeded();
+
+        _idle = false;
+        _t = 0f;
+
+        if (targetRect != null)
+        {
+            targetRect.localRotation = Quaternion.identity;
+            if (_originCaptured) targetRect.sizeDelta = _originSize; // 크기 원복
+        }
+
+        if (crackOverlay != null)
+        {
+            crackOverlay.sprite = null;
+            crackOverlay.gameObject.SetActive(false);
+        }
+
+        if (burstParticle != null)
+        {
+            burstParticle.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
+    }
+
     public void BeginIdle()
     {
+        CaptureOriginIfNeeded();
+
+        // 혹시 이전 연출 잔여가 남아있을 수 있으니 회전/크랙 정리
+        if (crackOverlay != null) crackOverlay.gameObject.SetActive(false);
         _idle = true;
         _t = 0;
     }
@@ -120,9 +163,6 @@ public class DiceClickRevealFX : MonoBehaviour
         // 계속 보여주고 싶으면 끄지 말고 유지해도 됨.
         if (crackOverlay != null)
             crackOverlay.gameObject.SetActive(false);
-
-        // 필요하면 원래 크기로 되돌림
-        // targetRect.sizeDelta = _originSize;
     }
 
     static async Task WaitUnscaled(float sec)
