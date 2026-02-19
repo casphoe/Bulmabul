@@ -256,8 +256,10 @@ public class ShopUiManager : MonoBehaviour
                 rolledList.Add(RollWithPity(auth.CurrentAccount, PullType.Ten_Slot10_Guarantee));
             }
 
+            bool wasPity49 = (auth.CurrentAccount.DicePityCount >= 49);
+
             // "이번 뽑기 단위"로 pity 최종값 고정 (SR 나오면 무조건 0)
-            ApplyPityAfterBatch(auth.CurrentAccount, rolledList.Count, rolledList);
+            ApplyPityAfterBatch(auth.CurrentAccount, pullCount, rolledList, wasPity49);
 
             // 결과 표시
             if (resultPopup != null)
@@ -295,9 +297,9 @@ public class ShopUiManager : MonoBehaviour
         }
     }
 
-    void ApplyPityAfterBatch(Account acc, int pullCount, List<Dice> rolledList)
+    void ApplyPityAfterBatch(Account acc, int pullCount, List<Dice> rolledList, bool wasPity49)
     {
-        if (acc == null || rolledList == null) return;
+        if (acc == null || rolledList == null || rolledList.Count == 0) return;
 
         bool anyEpic = false;
         for (int i = 0; i < rolledList.Count; i++)
@@ -311,9 +313,36 @@ public class ShopUiManager : MonoBehaviour
 
         if (anyEpic)
         {
-            // SR(Epic) 이상이 한 번이라도 나오면 무조건 0 고정 => UI는 50회
+            // SR(Epic)+가 하나라도 나오면 리셋
+            acc.DicePityCount = 0;
+            return;
+        }
+
+        // SR이 하나도 안 나왔음
+        if (wasPity49)
+        {
+            // 천장 보장: "이번 배치"에서 1개를 Epic 이상으로 강제 교체
+            int idx = UnityEngine.Random.Range(0, rolledList.Count);
+
+            // Epic 이상이 나올 때까지 재뽑 (안전장치)
+            const int GUARD = 100;
+            for (int g = 0; g < GUARD; g++)
+            {
+                // ten이면 보장슬롯 테이블을 써주는 게 가장 깔끔
+                // (너가 이미 Ten_Slot10_Guarantee가 있으니까 그걸 이용)
+                Dice forced = DiceTables.RollByPullType(PullType.Ten_Slot10_Guarantee);
+
+                if (forced.grade >= DiceGrade.Epic)
+                {
+                    rolledList[idx] = forced;
+                    break;
+                }
+            }
+
+            // 보장 성공했으니 리셋
             acc.DicePityCount = 0;
         }
+
         else
         {
             // 이번 뽑기에서 SR이 하나도 없으면 뽑은 횟수만큼 누적

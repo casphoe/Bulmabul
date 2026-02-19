@@ -326,7 +326,7 @@ public static class DiceTables
     private static List<string> SplitLines(string text)
     {
         var lines = new List<string>();
-        using var sr = new System.IO.StringReader(text);
+        using var sr = new StringReader(text);
         string line;
         while ((line = sr.ReadLine()) != null)
         {
