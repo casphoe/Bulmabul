@@ -48,7 +48,7 @@ public class ShopUiManager : MonoBehaviour
 
     [SerializeField] Toggle toggleSkip; // 인스펙터 연결
 
-    const int ONE_COST = 10;
+    const int ONE_COST = 100;
 
     static int TEN_COST => (ONE_COST * 10) - ONE_COST;
 
@@ -126,6 +126,8 @@ public class ShopUiManager : MonoBehaviour
     {
         if (_isRolling) return;
 
+        if (!CanPullOrToast(pullCount)) return;
+
         // 스킵 ON이면 "바로 뽑기"
         if (IsSkipOn)
         {
@@ -135,6 +137,33 @@ public class ShopUiManager : MonoBehaviour
 
         // 스킵 OFF면 확인창(0번 자식) 띄우고 더블클릭 대기
         OpenConfirmPopup_NoSkip(pullCount);
+    }
+
+
+    bool CanPullOrToast(int pullCount)
+    {
+        var auth = _auth;
+        if (auth == null || auth.CurrentAccount == null)
+        {
+            ToastMessageManager.instance.ShowToast("계정 정보가 없습니다.", "No account data.");
+            return false;
+        }
+
+        int cost = (pullCount == 10) ? TEN_COST : ONE_COST;
+        float cash = auth.CurrentAccount.Cash;
+
+        // NaN 방어(가끔 로드 꼬이면 NaN 나와서 비교가 항상 false가 될 수 있음)
+        if (float.IsNaN(cash) || cash < cost)
+        {
+            float lack = float.IsNaN(cash) ? cost : (cost - cash);
+            ToastMessageManager.instance.ShowToast(
+                $"재화가 부족합니다. {lack:0}원 부족해요.",
+                $"Not enough currency. You need {lack:0} more."
+            );
+            return false;
+        }
+
+        return true;
     }
 
     void OpenConfirmPopup_NoSkip(int pullCount)
@@ -223,16 +252,6 @@ public class ShopUiManager : MonoBehaviour
 
             int cost = (pullCount == 10) ? TEN_COST : ONE_COST;
             float cash = auth.CurrentAccount.Cash;
-
-            if (cash < cost)
-            {
-                float lack = cost - cash;
-                ToastMessageManager.instance.ShowToast(
-                    $"재화가 부족합니다. {lack:0}원 부족해요.",
-                    $"Not enough currency. You need {lack:0} more."
-                );
-                return;
-            }
 
             // CSV 로드
             DiceTables.LoadOrThrow();
