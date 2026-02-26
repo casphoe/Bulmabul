@@ -58,6 +58,13 @@ public class Dice
 }
 #endregion
 
+public static class DiceUpgradeRules
+{
+    public const int MAX_LEVEL = 10;
+    public const int MAX_STAR = 5;
+    public const int PROMOTE_SHARDS = 5;
+}
+
 /// <summary>
 /// CSV를 로드해서:
 /// - 가챠 확률표(dice_gacha_prob_table.csv)로 등급/별/레벨 추첨
@@ -166,24 +173,107 @@ public static class DiceTables
         // 중복 판단: Grade + Star 기준(레벨 무시)
         var found = acc.DiceInventory.Find(x => x.Grade == rolled.grade && x.Star == rolled.star);
 
-        if (found != null) found.Count += 1;
-        else
+        if (found == null)
         {
-            // 최초 획득: 가챠에서 나온 레벨로 시작(원하면 항상 1로 고정해도 됨)
+            // 최초 획득: shard=0 시작
             acc.DiceInventory.Add(new OwnedDice
             {
                 Grade = rolled.grade,
                 Star = rolled.star,
                 Level = rolled.level,
                 Count = 1,
-                Exp = 0
+                Exp = 0,
+                Shard = 0
             });
             return;
         }
 
-        // “다음 레벨 필요 경험치의 20%” 지급
-        int gain = DiceProgression.CalcDuplicateExp(found);
-        DiceProgression.AddExpAndTryLevelUp(found, gain);
+        // 보유 수 증가(원하는 의미가 아니라면 유지/제거 선택)
+        found.Count += 1;
+
+        // 이번 중복 처리 "전"에 레벨10이었는지 체크
+        bool wasMaxLevel = (found.Level >= DiceUpgradeRules.MAX_LEVEL);
+
+        DiceProgression.OnDuplicate(acc, found, wasMaxLevel);
+    }
+
+    public static void PromoteStarFromShards(Account acc, OwnedDice from)
+    {
+        // shard 5개 미만이면 아무것도 안 함
+        if (from == null || acc == null) return;
+        if (from.Shard < DiceUpgradeRules.PROMOTE_SHARDS) return;
+
+        // 기존 private AutoPromoteStar 호출
+        AutoPromoteStar(acc, from);
+    }
+
+    // 자동 별 승급: Star+1, Level=1, Exp=0, Shard=0
+    static void AutoPromoteStar(Account acc, OwnedDice from)
+    {
+        if (acc == null || from == null) return;
+
+        // 승급 전 장착 여부 체크 (참조 + 키 둘 다 확인)
+        string beforeEquipKey = $"{from.Grade}|{from.Star}";
+        bool wasEquipped =
+            (acc.EquippedDice == from) ||
+            (!string.IsNullOrWhiteSpace(acc.EquippedDiceKey) && acc.EquippedDiceKey == beforeEquipKey);
+
+        if (from.Star >= DiceUpgradeRules.MAX_STAR)
+        {
+            // ★ 5는 더 이상 승급 없음(원하면 shard 계속 쌓이게 두거나 0으로 리셋 선택)
+            from.Shard = DiceUpgradeRules.PROMOTE_SHARDS; // cap
+
+            // 장착 중이었다면 그대로 장착 유지 + 키 보정
+            if (wasEquipped)
+            {
+                acc.EquippedDice = from;
+                acc.EquippedDiceKey = from.EquipKey;
+            }
+
+            return;
+        }
+
+        // shard 소비
+        from.Shard -= DiceUpgradeRules.PROMOTE_SHARDS;
+
+        int nextStar = from.Star + 1;
+
+        // 승급 후 들어갈 타겟(같은 Grade, 다음 Star)
+        var target = acc.DiceInventory.Find(x => x.Grade == from.Grade && x.Star == nextStar);
+
+        if (target == null)
+        {
+            target = new OwnedDice
+            {
+                Grade = from.Grade,
+                Star = nextStar,
+                Level = 1,
+                Exp = 0,
+                Count = 0,
+                Shard = 0
+            };
+            acc.DiceInventory.Add(target);
+        }
+
+        // “승급하면 레벨 1” (요구사항)
+        // 여기서 Count를 어떻게 옮길지는 게임 기획에 따라 다름.
+        // 가장 무난: 기존 보유 수는 유지해서 합쳐준다.
+        target.Count += Mathf.Max(1, from.Count); // 최소 1은 승급으로 생성된다고 가정 가능
+        target.Level = 1;
+        target.Exp = 0;
+        target.Shard = 0;
+
+        // 기존 별 항목 제거 (별이 바뀌면 다른 주사위로 판단한다는 네 기준)
+        acc.DiceInventory.Remove(from);
+
+        // 장착 중이던 주사위가 승급되었으면 승급 결과를 장착 상태로 유지
+        if (wasEquipped)
+        {
+            acc.EquippedDice = target;
+            acc.EquippedDiceKey = target.EquipKey;
+        }
+
+        DiceInventorySort.SortDiceInventory(acc);
     }
 
     private static Dice RollFrom(PullType pullType)

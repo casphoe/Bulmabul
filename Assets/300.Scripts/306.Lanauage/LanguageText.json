@@ -291,6 +291,14 @@
     {
       "key": "txt.DrawSkip",
       "text": "뽑기 스킵"
+    },
+    {
+      "key": "txt.Equip",
+      "text": "장착"
+    },
+    {
+      "key": "txt.Grade",
+      "text": "승급"
     }
   ],
   "eng": [
@@ -585,6 +593,14 @@
     {
       "key": "txt.DrawSkip",
       "text": "Draw Skip"
+    },
+    {
+      "key": "txt.Equip",
+      "text": "Equip"
+    },
+    {
+      "key": "txt.Grade",
+      "text": "Up"
     }
   ]
 }

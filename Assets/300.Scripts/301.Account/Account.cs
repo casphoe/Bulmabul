@@ -99,6 +99,13 @@ public class Account
         set => equippedDice = value;
     }
 
+    [SerializeField] private string equippedDiceKey;
+    public string EquippedDiceKey
+    {
+        get => equippedDiceKey ?? "";
+        set => equippedDiceKey = value?.Trim() ?? "";
+    }
+
     [Header("계정 레벨 / 경험치")]
     [SerializeField] private int accountLevel = 1;   // 기본 1레벨
     public int AccountLevel { get => accountLevel; set => accountLevel = Mathf.Max(1, value); }
@@ -161,5 +168,17 @@ public class OwnedDice
         set => exp = value;
     }
 
+    [SerializeField] private int shard;
+    // 레벨10 이후 중복 누적으로 쌓는 재화
+    public int Shard
+    {
+        get => shard;
+        set => shard = value;
+    }
+
+    public string EquipKey => $"{Grade}|{Star}";
     public string Key => $"{Grade}|{Star}|{Level}";
+
+    [SerializeField] private int promoteExp; // 레벨10 이후 승급용 누적치
+    public int PromoteExp { get => promoteExp; set => promoteExp = Mathf.Max(0, value); }
 }

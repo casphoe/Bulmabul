@@ -259,6 +259,11 @@ public class FireBaseAuthManager : MonoBehaviour
 
         CurrentAccount = await AccountCloudStore.LoadOrThrowAsync();
 
+        DiceInventorySort.SortDiceInventory(CurrentAccount);
+
+        // 인벤토리 로드 후 장착 복원
+        DiceEquipService.RestoreEquippedDice(CurrentAccount);
+
         // 로그인 날짜 갱신(원하면)
         CurrentAccount.LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         await AccountCloudStore.SaveFullAsync(CurrentAccount);
@@ -281,7 +286,9 @@ public class FireBaseAuthManager : MonoBehaviour
             Star = 1,
             Level = 1,
             Count = 1,
-            Exp = 0
+            Exp = 0,
+            Shard = 0,
+            PromoteExp = 0
         };
 
         var acc = new Account
@@ -310,6 +317,7 @@ public class FireBaseAuthManager : MonoBehaviour
 
         acc.DiceInventory.Add(starterDice);
         acc.EquippedDice = starterDice;
+        acc.EquippedDiceKey = starterDice.EquipKey;
 
         return acc;
     }
