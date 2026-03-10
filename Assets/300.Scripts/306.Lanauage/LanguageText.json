@@ -299,6 +299,10 @@
     {
       "key": "txt.Grade",
       "text": "승급"
+    },
+    {
+      "key": "txt.DiceEquip",
+      "text": "주사위 장착"
     }
   ],
   "eng": [
@@ -601,6 +605,10 @@
     {
       "key": "txt.Grade",
       "text": "Up"
+    },
+    {
+      "key": "txt.DiceEquip",
+      "text": "Dice Equip"
     }
   ]
 }

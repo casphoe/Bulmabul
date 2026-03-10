@@ -122,7 +122,9 @@ public static class AccountCloudStore
                 ["star"] = od.Star,
                 ["level"] = od.Level,
                 ["count"] = od.Count,
-                ["exp"] = od.Exp
+                ["exp"] = od.Exp,
+                ["shard"] = Mathf.Max(0, od.Shard),
+                ["promoteExp"] = Mathf.Max(0, od.PromoteExp)
             };
 
             result[diceKey] = node;
