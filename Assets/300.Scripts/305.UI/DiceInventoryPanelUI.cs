@@ -12,28 +12,35 @@ public class DiceInventoryPanelUI : MonoBehaviour
     [SerializeField] private GameObject equipTargetPanel;
     [SerializeField] private GameObject promoteListPanel;
 
-    [Header("List Contents (Grid/Vertical Layout)")]
-    [SerializeField] private Transform equipContentRoot;    // 장착 목록 content
-    [SerializeField] private Transform promoteContentRoot;  // 승급 목록 content
+    [SerializeField] private GameObject equipShowPanel;
+    [SerializeField] private GameObject promoteShowPanel;
 
-    [Header("Slot Prefab")]
-    [SerializeField] private DiceInventorySlotUI slotPrefab;
+    [Header("Controllers (각각 다른 InfiniteScroll)")]
+    [SerializeField] private DiceInventoryListController equipList;
+    [SerializeField] private DiceInventoryListController promoteList;
 
     [Header("Title Txt")]
     [SerializeField] private Text txtTitle;
 
     private Account _acc;
-    private OwnedDice _selectedDice;
     private int selectNum = 0;
-
-    // 생성된 슬롯 캐시(패널별)
-    private readonly List<DiceInventorySlotUI> _equipSlots = new();
-    private readonly List<DiceInventorySlotUI> _promoteSlots = new();
 
     private void Awake()
     {
         btnEquip.onClick.AddListener(() => OnBtnSelectClick(0));
         btnPromote.onClick.AddListener(() => OnBtnSelectClick(1));
+    }
+
+    private void OnEnable()
+    {
+        // 로그인 계정 바인딩 (필요시 여기서 갱신)
+        var auth = FireBaseAuthManager.Instance;
+        _acc = auth != null ? auth.CurrentAccount : null;
+
+        if (equipList != null) equipList.BindAccount(_acc);
+        if (promoteList != null) promoteList.BindAccount(_acc);
+
+        OnBtnSelectClick(selectNum); // 현재 탭 유지
     }
 
     private void Start()
@@ -52,18 +59,25 @@ public class DiceInventoryPanelUI : MonoBehaviour
         switch (selectNum)
         {
             case 0:
-                equipTargetPanel.SetActive(true);
+                if (equipTargetPanel != null) equipTargetPanel.SetActive(true);
+                if (equipShowPanel != null) equipShowPanel.SetActive(true);
+                if (equipList != null) equipList.ShowEquipList();
                 break;
             case 1:
-                promoteListPanel.SetActive(true);
+                if (promoteListPanel != null) promoteListPanel.SetActive(true);
+                if (promoteShowPanel != null) promoteShowPanel.SetActive(true);
+                if (promoteList != null) promoteList.ShowPromoteList();
                 break;
         }
     }
 
     void AllDisable()
     {
-        equipTargetPanel.SetActive(false);
-        promoteListPanel.SetActive(false);
+        if (equipTargetPanel != null) equipTargetPanel.SetActive(false);
+        if (promoteListPanel != null) promoteListPanel.SetActive(false);
+
+        if (equipShowPanel != null) equipShowPanel.SetActive(false);
+        if (promoteShowPanel != null) promoteShowPanel.SetActive(false);
     }
 
     void UpdateTitleByTab(int tabIndex)

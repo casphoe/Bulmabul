@@ -8,6 +8,9 @@ public class SliderPanelUI : MonoBehaviour
     [Header("Target Panel")]
     [SerializeField] private RectTransform panel; // 움직일 패널
 
+    [Header("Sub Panel")]
+    [SerializeField] private RectTransform subPanel;
+
     [Header("Buttons")]
     [SerializeField] private Button btnOpen;   // +
     [SerializeField] private Button btnClose;  // -
@@ -23,12 +26,25 @@ public class SliderPanelUI : MonoBehaviour
     [Tooltip("열기 시작할 때 잠깐 잡는 위치(예:-450). 첫 오픈 연출용")]
     [SerializeField] private Vector2 openStartPos = new Vector2(-1170f, 247.5f);
 
+    [Header("Sub Panel Positions")]
+    [Tooltip("패널이 완전히 닫힌 위치(화면 밖 왼쪽)")]
+    [SerializeField] private Vector2 subHiddenPos = new Vector2(-2129f, 247.5f);
+
+    [Tooltip("패널이 열렸을 때 위치(화면 안)")]
+    [SerializeField] private Vector2 subShowPos = new Vector2(-810.5f, 247.5f);
+
+    [Tooltip("열기 시작할 때 잠깐 잡는 위치(예:-450). 첫 오픈 연출용")]
+    [SerializeField] private Vector2 subStartPos = new Vector2(-1829, 247.5f);
+
     [Header("Animation")]
     [Tooltip("초당 이동 속도(px/s). 클수록 빨라짐")]
     [SerializeField] private float moveSpeed = 1800f;
 
     [Tooltip("열리는 동안 입력 잠금")]
     [SerializeField] private bool lockButtonsWhileMoving = true;
+
+    [Header("켜주는 동안 꺼져야할 오브젝트")]
+    [SerializeField] private GameObject memberPanel;
 
     private Coroutine _moveCo;
     private bool _isOpen = false;
@@ -51,8 +67,8 @@ public class SliderPanelUI : MonoBehaviour
     private void Start()
     {
         // 시작은 닫힌 상태로 배치
-        if (panel != null)
-            panel.anchoredPosition = hiddenPos;
+        if (panel != null) panel.anchoredPosition = hiddenPos;
+        if (subPanel != null) subPanel.anchoredPosition = subHiddenPos;
 
         _isOpen = false;
         _isMoving = false;
@@ -71,8 +87,9 @@ public class SliderPanelUI : MonoBehaviour
         ShowPanel(true);
 
         panel.anchoredPosition = openStartPos;
+        subPanel.anchoredPosition = subStartPos;
 
-        StartMove(shownPos, openStateAfterMove: true);
+        StartMove(shownPos, subShowPos, openStateAfterMove: true);
     }
 
     public void ClosePanel()
@@ -81,7 +98,7 @@ public class SliderPanelUI : MonoBehaviour
         if (_isMoving) return;
         if (!_isOpen) return;
 
-        StartMove(hiddenPos, openStateAfterMove: false);
+        StartMove(hiddenPos, subHiddenPos, openStateAfterMove: false);
     }
 
     public void TogglePanel()
@@ -90,31 +107,42 @@ public class SliderPanelUI : MonoBehaviour
         else OpenPanel();
     }
 
-    private void StartMove(Vector2 target, bool openStateAfterMove)
+    private void StartMove(Vector2 panelTarget, Vector2 subTarget, bool openStateAfterMove)
     {
         if (_moveCo != null)
             StopCoroutine(_moveCo);
 
-        _moveCo = StartCoroutine(CoMovePanel(target, openStateAfterMove));
+        _moveCo = StartCoroutine(CoMovePanels(panelTarget, subTarget, openStateAfterMove));
     }
 
-    private IEnumerator CoMovePanel(Vector2 target, bool openStateAfterMove)
+    // 둘 다 같은 속도(moveSpeed)로 MoveTowards
+    private IEnumerator CoMovePanels(Vector2 panelTarget, Vector2 subTarget, bool openStateAfterMove)
     {
         _isMoving = true;
         RefreshButtonState();
 
-        while (Vector2.Distance(panel.anchoredPosition, target) > 0.5f)
+        // 둘 중 하나라도 충분히 멀면 계속 이동
+        while (true)
         {
-            panel.anchoredPosition = Vector2.MoveTowards(
-                panel.anchoredPosition,
-                target,
-                moveSpeed * Time.unscaledDeltaTime // UI는 unscaledDeltaTime 권장(일시정지 영향 적음)
-            );
+            bool panelDone = (panel == null) || Vector2.Distance(panel.anchoredPosition, panelTarget) <= 0.5f;
+            bool subDone = (subPanel == null) || Vector2.Distance(subPanel.anchoredPosition, subTarget) <= 0.5f;
+
+            if (panelDone && subDone)
+                break;
+
+            float step = moveSpeed * Time.unscaledDeltaTime;
+
+            if (panel != null && !panelDone)
+                panel.anchoredPosition = Vector2.MoveTowards(panel.anchoredPosition, panelTarget, step);
+
+            if (subPanel != null && !subDone)
+                subPanel.anchoredPosition = Vector2.MoveTowards(subPanel.anchoredPosition, subTarget, step);
 
             yield return null;
         }
 
-        panel.anchoredPosition = target;
+        if (panel != null) panel.anchoredPosition = panelTarget;
+        if (subPanel != null) subPanel.anchoredPosition = subTarget;
 
         _isOpen = openStateAfterMove;
         _isMoving = false;
@@ -151,11 +179,15 @@ public class SliderPanelUI : MonoBehaviour
         if (panel != null)
             panel.anchoredPosition = open ? shownPos : hiddenPos;
 
+        if (subPanel != null)
+            subPanel.anchoredPosition = open ? subShowPos : subHiddenPos; 
+
         RefreshButtonState();
     }
 
     void ShowPanel(bool isOpen)
     {
         panel.transform.parent.gameObject.SetActive(isOpen);
+        memberPanel.SetActive(!isOpen);
     }
 }

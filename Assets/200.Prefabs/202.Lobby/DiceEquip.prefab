@@ -34,7 +34,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -4}
+  m_AnchoredPosition: {x: 0, y: 1}
   m_SizeDelta: {x: 140, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &3192260548963975888
@@ -91,7 +91,7 @@ GameObject:
   - component: {fileID: 2608497337110791113}
   - component: {fileID: 6439167766494473831}
   m_Layer: 5
-  m_Name: txtStar
+  m_Name: txtInfo
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -113,7 +113,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -40.9}
+  m_AnchoredPosition: {x: 0, y: -32}
   m_SizeDelta: {x: 140, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &2608497337110791113
@@ -192,7 +192,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -79.2}
+  m_AnchoredPosition: {x: 0, y: -66}
   m_SizeDelta: {x: 140, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &5664406663356415027
@@ -246,7 +246,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 5815717214633132438}
-  - component: {fileID: 5924250935630720883}
+  - component: {fileID: 5020407015577792004}
+  - component: {fileID: 1477671282531442281}
   m_Layer: 5
   m_Name: DiceEquip
   m_TagString: Untagged
@@ -277,7 +278,21 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 140, y: 200}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!114 &5924250935630720883
+--- !u!114 &5020407015577792004
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7954534532439406141}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 126649132c5a0734b8092ac4c80c39a0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  autoApplySize: 1
+  slotUI: {fileID: 1477671282531442281}
+--- !u!114 &1477671282531442281
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -289,10 +304,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 112cb2f55127fe944a46f5d43fc42b03, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  btnClick: {fileID: 0}
-  txtName: {fileID: 0}
-  txtInfo: {fileID: 0}
-  txtCount: {fileID: 0}
+  imgDice: {fileID: 1976528579940034671}
+  txtGrade: {fileID: 6538585491974549889}
+  txtInfo: {fileID: 6439167766494473831}
+  txtCount: {fileID: 7700902463430160534}
   txtExtra: {fileID: 0}
   equippedMark: {fileID: 0}
   selectableHighlight: {fileID: 0}

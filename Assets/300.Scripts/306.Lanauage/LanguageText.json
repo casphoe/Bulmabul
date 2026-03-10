@@ -303,6 +303,10 @@
     {
       "key": "txt.DiceEquip",
       "text": "주사위 장착"
+    },
+    {
+      "key": "txt.DicePromte",
+      "text": "주사위 승급"
     }
   ],
   "eng": [
@@ -609,6 +613,10 @@
     {
       "key": "txt.DiceEquip",
       "text": "Dice Equip"
+    },
+    {
+      "key": "txt.DicePromte",
+      "text": "Dice Promote"
     }
   ]
 }
