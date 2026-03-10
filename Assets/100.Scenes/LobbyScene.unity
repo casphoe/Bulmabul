@@ -1383,8 +1383,8 @@ RectTransform:
   - {fileID: 680493678}
   - {fileID: 961691194}
   - {fileID: 1401733845}
-  - {fileID: 1838586812}
   - {fileID: 852062734}
+  - {fileID: 1838586812}
   - {fileID: 1207625637}
   - {fileID: 2122998977}
   - {fileID: 977919553}
@@ -16136,6 +16136,7 @@ MonoBehaviour:
   btnClose: {fileID: 1612072158}
   hiddenPos: {x: -1470, y: 247.5}
   shownPos: {x: -152, y: 247.5}
+  openStartPos: {x: -1170, y: 247.5}
   moveSpeed: 1800
   lockButtonsWhileMoving: 1
 --- !u!1 &1955513488

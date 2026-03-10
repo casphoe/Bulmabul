@@ -15,10 +15,13 @@ public class SliderPanelUI : MonoBehaviour
 
     [Header("Positions (Anchored)")]
     [Tooltip("패널이 완전히 닫힌 위치(화면 밖 왼쪽)")]
-    [SerializeField] private Vector2 hiddenPos = new Vector2(-900f, 0f);
+    [SerializeField] private Vector2 hiddenPos = new Vector2(-1470f, 247.5f);
 
     [Tooltip("패널이 열렸을 때 위치(화면 안)")]
-    [SerializeField] private Vector2 shownPos = new Vector2(0f, 0f);
+    [SerializeField] private Vector2 shownPos = new Vector2(-152f, 247.5f);
+
+    [Tooltip("열기 시작할 때 잠깐 잡는 위치(예:-450). 첫 오픈 연출용")]
+    [SerializeField] private Vector2 openStartPos = new Vector2(-1170f, 247.5f);
 
     [Header("Animation")]
     [Tooltip("초당 이동 속도(px/s). 클수록 빨라짐")]
@@ -65,7 +68,10 @@ public class SliderPanelUI : MonoBehaviour
         if (_isMoving) return; // 움직이는 중 중복 클릭 방지
         if (_isOpen) return;
 
-        ShowPanel(_isOpen);
+        ShowPanel(true);
+
+        panel.anchoredPosition = openStartPos;
+
         StartMove(shownPos, openStateAfterMove: true);
     }
 
@@ -75,7 +81,6 @@ public class SliderPanelUI : MonoBehaviour
         if (_isMoving) return;
         if (!_isOpen) return;
 
-        ShowPanel(_isOpen);
         StartMove(hiddenPos, openStateAfterMove: false);
     }
 
@@ -113,6 +118,8 @@ public class SliderPanelUI : MonoBehaviour
 
         _isOpen = openStateAfterMove;
         _isMoving = false;
+
+        if (!_isOpen) ShowPanel(false);
 
         RefreshButtonState();
         _moveCo = null;
