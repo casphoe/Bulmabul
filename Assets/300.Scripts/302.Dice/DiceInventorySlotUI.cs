@@ -11,23 +11,32 @@ public class DiceInventorySlotUI : MonoBehaviour
     }
 
     [Header("UI")]
+    [SerializeField] private Button btnClick;
     [SerializeField] private Image imgDice;
     [SerializeField] private Text txtGrade;      // 예: Legendary
     [SerializeField] private Text txtInfo;      // 예: ★5 / Lv10
     [SerializeField] private Text txtCount;     // 예: x3
     [SerializeField] private Text txtExtra;     // 예: PromoteExp 5/5 or Shard
     [SerializeField] private GameObject equippedMark; // "장착중" 뱃지
-    [SerializeField] private GameObject selectableHighlight;
 
     RainbowImageEffect _rainbow;
 
     private OwnedDice _dice;
     private SlotMode _mode;
 
+    private Action _onClick;
+
     public void Bind(OwnedDice dice, SlotMode mode, bool isEquipped, Action onClick)
     {
         _dice = dice;
         _mode = mode;
+        _onClick = onClick;
+
+        if (btnClick != null)
+        {
+            btnClick.onClick.RemoveAllListeners();
+            if (_onClick != null) btnClick.onClick.AddListener(() => _onClick.Invoke());
+        }
 
         bool isEng = false;
         if (LaguageManager.Instance != null)
@@ -91,7 +100,6 @@ public class DiceInventorySlotUI : MonoBehaviour
         }
 
         if (equippedMark != null) equippedMark.SetActive(isEquipped);
-        if (selectableHighlight != null) selectableHighlight.SetActive(false);
     }
 
     private string GetGradeText(DiceGrade grade, bool isEng)
@@ -117,10 +125,5 @@ public class DiceInventorySlotUI : MonoBehaviour
             DiceGrade.Legendary => "전설",
             _ => "알 수 없음"
         };
-    }
-
-    public void SetSelected(bool selected)
-    {
-        if (selectableHighlight != null) selectableHighlight.SetActive(selected);
     }
 }

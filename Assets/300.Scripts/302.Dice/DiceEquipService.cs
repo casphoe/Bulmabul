@@ -30,15 +30,17 @@ public static class DiceEquipService
         if (acc == null || target == null) return false;
         if (acc.DiceInventory == null || acc.DiceInventory.Count == 0) return false;
 
+        // 인벤에 존재하는지 확인
         var found = acc.DiceInventory.Find(d =>
             d == target || (d != null && d.Grade == target.Grade && d.Star == target.Star));
 
         if (found == null) return false;
 
+        // 장착 갱신
         acc.EquippedDice = found;
         acc.EquippedDiceKey = MakeEquipKey(found);
 
-        await AccountCloudStore.SaveFullAsync(acc);
+        await AccountCloudStore.SaveEquippedDiceKeyAsync(acc.EquippedDiceKey);
         return true;
     }
 

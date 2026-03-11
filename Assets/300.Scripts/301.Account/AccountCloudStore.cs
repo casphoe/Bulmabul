@@ -44,6 +44,10 @@ public static class AccountCloudStore
     static DatabaseReference LevelRef(string uid) => UserRef(uid).Child("accountLevel");
     static DatabaseReference ExpRef(string uid) => UserRef(uid).Child("accountExp");
 
+    static DatabaseReference EquippedDiceKeyRef(string uid) => UserRef(uid).Child("equippedDiceKey");
+
+    static DatabaseReference DiceInventoryRef(string uid) => UserRef(uid).Child("diceInventory"); // (원하면)
+
 
     /// <summary>
     /// Account 전체 저장:
@@ -209,6 +213,10 @@ public static class AccountCloudStore
         if (expSnap.Exists && expSnap.Value != null)
             acc.AccountExp = Convert.ToInt64(expSnap.Value);
 
+        var eqSnap = await EquippedDiceKeyRef(uid).GetValueAsync();
+        if (eqSnap.Exists && eqSnap.Value != null)
+            acc.EquippedDiceKey = eqSnap.Value.ToString();
+
         return acc;
     }
 
@@ -218,5 +226,11 @@ public static class AccountCloudStore
         if (acc == null)
             throw new Exception("계정 데이터가 없습니다. 회원가입을 진행해 주세요.");
         return acc;
+    }
+
+    public static async Task SaveEquippedDiceKeyAsync(string equippedDiceKey)
+    {
+        string uid = Uid;
+        await EquippedDiceKeyRef(uid).SetValueAsync(equippedDiceKey ?? "");
     }
 }

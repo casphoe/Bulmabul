@@ -13,6 +13,18 @@ public class DiceInventoryListController : MonoBehaviour
     // 현재 선택(선택 하이라이트 갱신용)
     private OwnedDice _selected;
 
+    //주사위 선택 이벤트
+    public event Action<OwnedDice, DiceInventorySlotUI.SlotMode> OnSelectedDiceChanged;
+
+    public OwnedDice Selected => _selected;
+    public DiceInventorySlotUI.SlotMode Mode => _mode;
+
+    public void ClearSelection()
+    {
+        _selected = null;
+        OnSelectedDiceChanged?.Invoke(null, _mode);
+    }
+
     public void BindAccount(Account acc)
     {
         _acc = acc;
@@ -21,12 +33,14 @@ public class DiceInventoryListController : MonoBehaviour
     public void ShowEquipList()
     {
         _mode = DiceInventorySlotUI.SlotMode.Equip;
+        ClearSelection();
         Reload();
     }
 
     public void ShowPromoteList()
     {
         _mode = DiceInventorySlotUI.SlotMode.Promote;
+        ClearSelection();
         Reload();
     }
 
@@ -46,6 +60,8 @@ public class DiceInventoryListController : MonoBehaviour
         {
             var dice = _acc.DiceInventory[i];
             if (dice == null) continue;
+
+            if (dice.Count <= 0) continue;
 
             bool isEquipped = DiceEquipService.MakeEquipKey(dice) == _acc.EquippedDiceKey;
 
@@ -79,9 +95,6 @@ public class DiceInventoryListController : MonoBehaviour
 
             scroll.InsertData(data); // 문서의 InsertData 사용 :contentReference[oaicite:3]{index=3}
         }
-
-        // 선택 해제 상태면 첫 선택(선택 UX 필요 시)
-        // _selected = null;
     }
 
     private void OnClickDice(OwnedDice dice)
@@ -92,7 +105,6 @@ public class DiceInventoryListController : MonoBehaviour
         // (성능 더 신경쓰면 선택된 2개만 업데이트하는 방식도 가능)
         Reload();
 
-        // 여기서 “장착 버튼 활성화”, “승급 버튼 활성화” 같은 UI 연결하면 됨
-        // ex) inventoryPanel.SetSelectedDice(dice);
+        OnSelectedDiceChanged?.Invoke(_selected, _mode);
     }
 }

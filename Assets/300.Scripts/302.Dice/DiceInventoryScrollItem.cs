@@ -27,6 +27,5 @@ public class DiceInventoryScrollItem : InfiniteScrollItem
         }
 
         slotUI?.Bind(d.dice, d.mode, d.isEquipped, d.onClick);
-        slotUI?.SetSelected(d.isSelected);
     }
 }
