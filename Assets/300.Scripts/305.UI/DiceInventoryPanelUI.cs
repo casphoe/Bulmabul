@@ -4,6 +4,7 @@ using UnityEngine.UI;
 
 public class DiceInventoryPanelUI : MonoBehaviour
 {
+    #region 변수
     [Header("Tab Buttons")]
     [SerializeField] private Button btnEquip;      // 탭: 장착
     [SerializeField] private Button btnPromote;    // 탭: 승급
@@ -43,6 +44,7 @@ public class DiceInventoryPanelUI : MonoBehaviour
     // 탭별 선택 주사위
     private OwnedDice _selectedEquipDice;
     private OwnedDice _selectedPromoteDice;
+    #endregion
 
     private void Awake()
     {
@@ -152,10 +154,8 @@ public class DiceInventoryPanelUI : MonoBehaviour
             }
         }
     }
-
-    // =========================
+   
     // 장착
-    // =========================
     public async void OnClickEquipSelectedDice()
     {
         if (_acc == null || _selectedEquipDice == null) return;
@@ -187,9 +187,7 @@ public class DiceInventoryPanelUI : MonoBehaviour
         ToastMessageManager.instance.ShowToast("장착 완료", "Equipped.");
     }
 
-    // =========================
     // 승급
-    // =========================
     public async void OnClickPromoteSelectedDice()
     {
         if (_acc == null || _selectedPromoteDice == null) return;
@@ -246,10 +244,7 @@ public class DiceInventoryPanelUI : MonoBehaviour
         ToastMessageManager.instance.ShowToast("승급 완료", "Promoted.");
     }
 
-    // =========================
     // UI 표시
-    // =========================
-
     private void RefreshEquippedUI()
     {
         if (_acc == null)
@@ -281,7 +276,7 @@ public class DiceInventoryPanelUI : MonoBehaviour
             txtEquipInfo.text = IsEng() ? "No equipped dice" : "장착된 주사위 없음";
     }
 
-    // ✅ 승급 탭 선택 주사위 표시 (Equip 선택은 여기에서 표시하지 않음)
+    // 승급 탭 선택 주사위 표시 (Equip 선택은 여기에서 표시하지 않음)
     private void RefreshPromoteSelectedUI()
     {
         // 승급 탭이 아니면 비움(원하면 숨김 처리도 가능)
@@ -400,7 +395,7 @@ public class DiceInventoryPanelUI : MonoBehaviour
 
             case 1:
                 txtTitle.text = isEng ? "Dice Promotion" : "주사위 승급";
-                if (promoteSub != null) promoteSub.text = isEng ? "Selected Dice" : "선택된 주사위";
+                if (promoteSub != null) promoteSub.text = isEng ? "Upgraded Dice" : "승급된 주사위";
                 break;
 
             default:
