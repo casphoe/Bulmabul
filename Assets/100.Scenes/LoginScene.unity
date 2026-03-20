@@ -934,9 +934,14 @@ MonoBehaviour:
       level: 0
       count: 0
       exp: 0
+      shard: 0
+      promoteExp: 0
+    equippedDiceKey: 
     accountLevel: 1
     accountExp: 0
     photoUrl: 
+    diceTotalPullCount: 0
+    dicePityCount: 0
   presence: {fileID: 1207770332}
 --- !u!114 &1207770329
 MonoBehaviour:
