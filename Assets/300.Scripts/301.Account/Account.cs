@@ -177,7 +177,7 @@ public class OwnedDice
     }
 
     public string EquipKey => $"{Grade}|{Star}";
-    public string Key => $"{Grade}|{Star}|{Level}";
+    public string SaveKey => $"{Grade}|{Star}|{Level}";
 
     [SerializeField] private int promoteExp; // 레벨10 이후 승급용 누적치
     public int PromoteExp { get => promoteExp; set => promoteExp = Mathf.Max(0, value); }

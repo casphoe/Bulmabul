@@ -6,19 +6,12 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 
-
 /// <summary>
 /// Realtime Database에 Account 저장/로드 담당
 /// - accountEnc : Account 전체를 JSON 직렬화 후 CryptoUtil로 암호화(Base64)해서 저장
-/// - money/nick : 자주 쓰는 값 or 최적화/중복체크용으로 별도 평문 저장(규칙으로 본인만 접근)
-///
-/// DB 구조:
-/// /users/{uid}/
-///    accountEnc : "BASE64..."
-///    money      : 123
-///    nick       : "nick"
+/// - cash/nick/nameKey/accountLevel/accountExp/equippedDiceKey/diceInventory : 빠른 조회/보정용 평문 저장
 /// </summary>
-
+/// 
 public static class AccountCloudStore
 {
     static DatabaseReference Root => FirebaseDatabase.DefaultInstance.RootReference;
@@ -58,6 +51,17 @@ public static class AccountCloudStore
     {
         string uid = Uid;
 
+        // null 방어
+        acc.ClaimedAttendanceDays ??= new List<int>();
+        acc.DiceInventory ??= new List<OwnedDice>();
+
+        // 장착키 정합성 보정
+        if (string.IsNullOrWhiteSpace(acc.EquippedDiceKey) && acc.EquippedDice != null)
+        {
+            // 프로젝트 구조상 장착키는 보통 Grade|Star 기준이 더 안전
+            acc.EquippedDiceKey = acc.EquippedDice.EquipKey;
+        }
+
         string json = JsonConvert.SerializeObject(acc);
         string enc = CryptoUtil.EncryptToBase64(json, uid);
 
@@ -68,10 +72,9 @@ public static class AccountCloudStore
         // users/{uid}/diceInventory/{diceKey} = { grade, star, level, count, exp }
         var diceInvMap = BuildDiceInventoryMap(acc);
 
-        // equippedDiceKey: rules length<=64
-        string equippedKey = "";
-        if (acc.EquippedDice != null)
-            equippedKey = acc.EquippedDice.Key; // "Grade|Star|Level" 형태
+        // 여기서 EquippedDice.Key(Grade|Star|Level)가 아니라
+        // acc.EquippedDiceKey를 그대로 저장
+        string equippedKey = acc.EquippedDiceKey ?? "";
 
         long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -118,7 +121,7 @@ public static class AccountCloudStore
 
             // rules에서 $diceKey는 길이 제한이 없지만, 안전하게 너무 길면 패스 가능
             // 여기서는 Key가 "Grade|Star|Level" 이므로 안전
-            string diceKey = od.Key;
+            string diceKey = od.SaveKey;
 
             var node = new Dictionary<string, object>
             {
@@ -169,6 +172,12 @@ public static class AccountCloudStore
         await NickRef(uid).SetValueAsync(nick ?? "");
     }
 
+    public static async Task SaveEquippedDiceKeyAsync(string equippedDiceKey)
+    {
+        string uid = Uid;
+        await EquippedDiceKeyRef(uid).SetValueAsync(equippedDiceKey ?? "");
+    }
+
     public static async Task<Account> LoadAsync()
     {
         var user = FirebaseAuth.DefaultInstance.CurrentUser;
@@ -176,21 +185,29 @@ public static class AccountCloudStore
 
         string uid = user.UserId;
 
+        Account acc = null;
+
         // 1) accountEnc 로드
         var encSnap = await EncRef(uid).GetValueAsync();
-        if (!encSnap.Exists || encSnap.Value == null)
-            return null; // 없으면 null
+        if (encSnap.Exists && encSnap.Value != null)
+        {
+            try
+            {
+                string enc = encSnap.Value.ToString();
+                string json = CryptoUtil.DecryptFromBase64(enc, uid);
+                acc = JsonConvert.DeserializeObject<Account>(json);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[AccountCloudStore] accountEnc 복호화 실패: {e}");
+            }
+        }
 
-        // 2) 복호화 후 Account 복원
-        string enc = encSnap.Value.ToString();
-        string json = CryptoUtil.DecryptFromBase64(enc, uid);
-        var acc = JsonConvert.DeserializeObject<Account>(json);
-
-        // 3) null 방어(컬렉션)
+        // 3) null 방어
         acc.ClaimedAttendanceDays ??= new List<int>();
         acc.DiceInventory ??= new List<OwnedDice>();
 
-        // 4) money/nick 별도 필드가 존재하면 최신값으로 덮기
+        // 4) 별도 평문 필드 최신값 덮기
         var moneySnap = await MoneyRef(uid).GetValueAsync();
         if (moneySnap.Exists && moneySnap.Value != null)
             acc.Cash = Convert.ToSingle(moneySnap.Value);
@@ -199,12 +216,10 @@ public static class AccountCloudStore
         if (nickSnap.Exists && nickSnap.Value != null)
             acc.NickName = nickSnap.Value.ToString();
 
-        //이름도 최신값으로 불러오기
         var nameSnap = await NameKeyRef(uid).GetValueAsync();
         if (nameSnap.Exists && nameSnap.Value != null)
             acc.Name = nameSnap.Value.ToString();
 
-        // level / exp 최신값 덮기
         var lvSnap = await LevelRef(uid).GetValueAsync();
         if (lvSnap.Exists && lvSnap.Value != null)
             acc.AccountLevel = Convert.ToInt32(lvSnap.Value);
@@ -217,6 +232,16 @@ public static class AccountCloudStore
         if (eqSnap.Exists && eqSnap.Value != null)
             acc.EquippedDiceKey = eqSnap.Value.ToString();
 
+        // 5) 평문 diceInventory가 있으면 최신값으로 덮어쓰기
+        var diceSnap = await DiceInventoryRef(uid).GetValueAsync();
+        if (diceSnap.Exists && diceSnap.HasChildren)
+        {
+            acc.DiceInventory = ParseDiceInventory(diceSnap);
+        }
+
+        // 6) equippedDiceKey 기준으로 EquippedDice 다시 연결
+        RelinkEquippedDice(acc);
+
         return acc;
     }
 
@@ -228,9 +253,100 @@ public static class AccountCloudStore
         return acc;
     }
 
-    public static async Task SaveEquippedDiceKeyAsync(string equippedDiceKey)
+    static List<OwnedDice> ParseDiceInventory(DataSnapshot diceSnap)
     {
-        string uid = Uid;
-        await EquippedDiceKeyRef(uid).SetValueAsync(equippedDiceKey ?? "");
+        var list = new List<OwnedDice>();
+
+        foreach (var child in diceSnap.Children)
+        {
+            try
+            {
+                string gradeStr = child.Child("grade")?.Value?.ToString() ?? "Common";
+
+                int star = ToInt(child.Child("star")?.Value, 1);
+                int level = ToInt(child.Child("level")?.Value, 1);
+                int count = ToInt(child.Child("count")?.Value, 1);
+                int exp = ToInt(child.Child("exp")?.Value, 0);
+                int shard = ToInt(child.Child("shard")?.Value, 0);
+                int promoteExp = ToInt(child.Child("promoteExp")?.Value, 0);
+
+                if (!Enum.TryParse(gradeStr, out DiceGrade grade))
+                    grade = DiceGrade.Common;
+
+                var od = new OwnedDice
+                {
+                    Grade = grade,
+                    Star = Mathf.Max(1, star),
+                    Level = Mathf.Max(1, level),
+                    Count = Mathf.Max(1, count),
+                    Exp = Mathf.Max(0, exp),
+                    Shard = Mathf.Max(0, shard),
+                    PromoteExp = Mathf.Max(0, promoteExp)
+                };
+
+                list.Add(od);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[AccountCloudStore] ParseDiceInventory 실패: {e}");
+            }
+        }
+
+        return list;
+    }
+
+    static void RelinkEquippedDice(Account acc)
+    {
+        acc.EquippedDice = null;
+
+        if (acc == null || acc.DiceInventory == null || acc.DiceInventory.Count == 0)
+            return;
+
+        string eqKey = acc.EquippedDiceKey ?? "";
+        if (string.IsNullOrWhiteSpace(eqKey))
+            return;
+
+        // 1차: EquipKey(Grade|Star) 기준
+        for (int i = 0; i < acc.DiceInventory.Count; i++)
+        {
+            var od = acc.DiceInventory[i];
+            if (od == null) continue;
+
+            if (string.Equals(od.EquipKey, eqKey, StringComparison.Ordinal))
+            {
+                acc.EquippedDice = od;
+                return;
+            }
+        }
+
+        // 2차: 혹시 예전 데이터가 Grade|Star|Level 로 저장됐을 경우
+        for (int i = 0; i < acc.DiceInventory.Count; i++)
+        {
+            var od = acc.DiceInventory[i];
+            if (od == null) continue;
+
+            if (string.Equals(od.SaveKey, eqKey, StringComparison.Ordinal))
+            {
+                acc.EquippedDice = od;
+
+                // 이후부터는 EquipKey 기준으로 정규화
+                acc.EquippedDiceKey = od.EquipKey;
+                return;
+            }
+        }
+    }
+
+    static int ToInt(object value, int defaultValue)
+    {
+        if (value == null) return defaultValue;
+
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return defaultValue;
+        }
     }
 }
