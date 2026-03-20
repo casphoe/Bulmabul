@@ -40,7 +40,10 @@ public static class DiceEquipService
         acc.EquippedDice = found;
         acc.EquippedDiceKey = MakeEquipKey(found);
 
-        await AccountCloudStore.SaveEquippedDiceKeyAsync(acc.EquippedDiceKey);
+        // 장착 상태 정합성 보정
+        NormalizeEquippedDice(acc);
+
+        await AccountCloudStore.SaveFullAsync(acc);
         return true;
     }
 

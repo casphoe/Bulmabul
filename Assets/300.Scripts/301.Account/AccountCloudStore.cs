@@ -41,6 +41,13 @@ public static class AccountCloudStore
 
     static DatabaseReference DiceInventoryRef(string uid) => UserRef(uid).Child("diceInventory"); // (원하면)
 
+    #region 토스트 Helper
+    static void ShowToast(string kor, string eng)
+    {
+        if (ToastMessageManager.instance != null)
+            ToastMessageManager.instance.ShowToast(kor, eng);
+    }
+    #endregion
 
     /// <summary>
     /// Account 전체 저장:
@@ -51,60 +58,64 @@ public static class AccountCloudStore
     {
         string uid = Uid;
 
-        // null 방어
-        acc.ClaimedAttendanceDays ??= new List<int>();
-        acc.DiceInventory ??= new List<OwnedDice>();
-
-        // 장착키 정합성 보정
-        if (string.IsNullOrWhiteSpace(acc.EquippedDiceKey) && acc.EquippedDice != null)
-        {
-            // 프로젝트 구조상 장착키는 보통 Grade|Star 기준이 더 안전
-            acc.EquippedDiceKey = acc.EquippedDice.EquipKey;
-        }
-
-        string json = JsonConvert.SerializeObject(acc);
-        string enc = CryptoUtil.EncryptToBase64(json, uid);
-
-        string nickKey = NicknameService.ToNickKey(acc.NickName);
-        string nameKey = NameService.ToNameKey(acc.Name);
-
-        // 3) 주사위 인벤토리(평문)로 변환: rules가 요구하는 구조로
-        // users/{uid}/diceInventory/{diceKey} = { grade, star, level, count, exp }
-        var diceInvMap = BuildDiceInventoryMap(acc);
-
-        // 여기서 EquippedDice.Key(Grade|Star|Level)가 아니라
-        // acc.EquippedDiceKey를 그대로 저장
-        string equippedKey = acc.EquippedDiceKey ?? "";
-
-        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        var updates = new Dictionary<string, object>
-        {
-            [$"users/{uid}/accountEnc"] = enc,
-            [$"users/{uid}/cash"] = acc.Cash,
-            [$"users/{uid}/nick"] = nickKey,        
-            [$"users/{uid}/nameKey"] = nameKey,     
-            [$"users/{uid}/accountLevel"] = acc.AccountLevel,
-            [$"users/{uid}/accountExp"] = acc.AccountExp,
-
-            // 뽑기 관련 메타
-            [$"users/{uid}/diceTotalPullCount"] = acc.DiceTotalPullCount,
-            [$"users/{uid}/dicePityCount"] = Mathf.Clamp(acc.DicePityCount, 0, 49),
-            [$"users/{uid}/lastDicePullAt"] = nowMs,
-            [$"users/{uid}/equippedDiceKey"] = equippedKey,
-
-            // 주사위 인벤토리 평문 저장
-            [$"users/{uid}/diceInventory"] = diceInvMap
-        };
-
+        ShowToast("파이어베이스에 저장중입니다...", "Saving to Firebase...");
 
         try
         {
+            // null 방어
+            acc.ClaimedAttendanceDays ??= new List<int>();
+            acc.DiceInventory ??= new List<OwnedDice>();
+
+            // 장착키 정합성 보정
+            if (string.IsNullOrWhiteSpace(acc.EquippedDiceKey) && acc.EquippedDice != null)
+            {
+                // 프로젝트 구조상 장착키는 보통 Grade|Star 기준이 더 안전
+                acc.EquippedDiceKey = acc.EquippedDice.EquipKey;
+            }
+
+            string json = JsonConvert.SerializeObject(acc);
+            string enc = CryptoUtil.EncryptToBase64(json, uid);
+
+            string nickKey = NicknameService.ToNickKey(acc.NickName);
+            string nameKey = NameService.ToNameKey(acc.Name);
+
+            // 주사위 인벤토리 평문 저장용 변환
+            var diceInvMap = BuildDiceInventoryMap(acc);
+
+            // EquippedDice.Key(Grade|Star|Level)가 아니라
+            // acc.EquippedDiceKey를 그대로 저장
+            string equippedKey = acc.EquippedDiceKey ?? "";
+
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            var updates = new Dictionary<string, object>
+            {
+                [$"users/{uid}/accountEnc"] = enc,
+                [$"users/{uid}/cash"] = acc.Cash,
+                [$"users/{uid}/nick"] = nickKey,
+                [$"users/{uid}/nameKey"] = nameKey,
+                [$"users/{uid}/accountLevel"] = acc.AccountLevel,
+                [$"users/{uid}/accountExp"] = acc.AccountExp,
+
+                // 뽑기 관련 메타
+                [$"users/{uid}/diceTotalPullCount"] = acc.DiceTotalPullCount,
+                [$"users/{uid}/dicePityCount"] = Mathf.Clamp(acc.DicePityCount, 0, 49),
+                [$"users/{uid}/lastDicePullAt"] = nowMs,
+                [$"users/{uid}/equippedDiceKey"] = equippedKey,
+
+                // 주사위 인벤토리 평문 저장
+                [$"users/{uid}/diceInventory"] = diceInvMap
+            };
+
             await Root.UpdateChildrenAsync(updates);
+
+            Debug.Log("[AccountCloudStore] SaveFullAsync 완료");
+            ShowToast("저장 완료되었습니다.", "Save completed.");
         }
         catch (Exception e)
         {
             Debug.LogException(e);
+            ShowToast("저장 실패", "Save failed.");
             throw;
         }
     }
@@ -185,64 +196,79 @@ public static class AccountCloudStore
 
         string uid = user.UserId;
 
+        ShowToast("파이어베이스에서 불러오는 중입니다...", "Loading from Firebase...");
+
         Account acc = null;
 
-        // 1) accountEnc 로드
-        var encSnap = await EncRef(uid).GetValueAsync();
-        if (encSnap.Exists && encSnap.Value != null)
+        try
         {
-            try
+            // 1) accountEnc 로드
+            var encSnap = await EncRef(uid).GetValueAsync();
+            if (encSnap.Exists && encSnap.Value != null)
             {
-                string enc = encSnap.Value.ToString();
-                string json = CryptoUtil.DecryptFromBase64(enc, uid);
-                acc = JsonConvert.DeserializeObject<Account>(json);
+                try
+                {
+                    string enc = encSnap.Value.ToString();
+                    string json = CryptoUtil.DecryptFromBase64(enc, uid);
+                    acc = JsonConvert.DeserializeObject<Account>(json);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[AccountCloudStore] accountEnc 복호화 실패: {e}");
+                }
             }
-            catch (Exception e)
+
+            // accountEnc 실패 시 기본 객체 생성
+            acc ??= new Account();
+
+            // null 방어
+            acc.ClaimedAttendanceDays ??= new List<int>();
+            acc.DiceInventory ??= new List<OwnedDice>();
+
+            // 별도 평문 필드 최신값 덮기
+            var moneySnap = await MoneyRef(uid).GetValueAsync();
+            if (moneySnap.Exists && moneySnap.Value != null)
+                acc.Cash = Convert.ToSingle(moneySnap.Value);
+
+            var nickSnap = await NickRef(uid).GetValueAsync();
+            if (nickSnap.Exists && nickSnap.Value != null)
+                acc.NickName = nickSnap.Value.ToString();
+
+            var nameSnap = await NameKeyRef(uid).GetValueAsync();
+            if (nameSnap.Exists && nameSnap.Value != null)
+                acc.Name = nameSnap.Value.ToString();
+
+            var lvSnap = await LevelRef(uid).GetValueAsync();
+            if (lvSnap.Exists && lvSnap.Value != null)
+                acc.AccountLevel = Convert.ToInt32(lvSnap.Value);
+
+            var expSnap = await ExpRef(uid).GetValueAsync();
+            if (expSnap.Exists && expSnap.Value != null)
+                acc.AccountExp = Convert.ToInt64(expSnap.Value);
+
+            var eqSnap = await EquippedDiceKeyRef(uid).GetValueAsync();
+            if (eqSnap.Exists && eqSnap.Value != null)
+                acc.EquippedDiceKey = eqSnap.Value.ToString();
+
+            // 평문 diceInventory가 있으면 최신값으로 덮어쓰기
+            var diceSnap = await DiceInventoryRef(uid).GetValueAsync();
+            if (diceSnap.Exists && diceSnap.HasChildren)
             {
-                Debug.LogWarning($"[AccountCloudStore] accountEnc 복호화 실패: {e}");
+                acc.DiceInventory = ParseDiceInventory(diceSnap);
             }
+
+            // equippedDiceKey 기준으로 EquippedDice 다시 연결
+            RelinkEquippedDice(acc);
+
+            ShowToast("로드 완료되었습니다.", "Load completed.");
+            return acc;
         }
-
-        // 3) null 방어
-        acc.ClaimedAttendanceDays ??= new List<int>();
-        acc.DiceInventory ??= new List<OwnedDice>();
-
-        // 4) 별도 평문 필드 최신값 덮기
-        var moneySnap = await MoneyRef(uid).GetValueAsync();
-        if (moneySnap.Exists && moneySnap.Value != null)
-            acc.Cash = Convert.ToSingle(moneySnap.Value);
-
-        var nickSnap = await NickRef(uid).GetValueAsync();
-        if (nickSnap.Exists && nickSnap.Value != null)
-            acc.NickName = nickSnap.Value.ToString();
-
-        var nameSnap = await NameKeyRef(uid).GetValueAsync();
-        if (nameSnap.Exists && nameSnap.Value != null)
-            acc.Name = nameSnap.Value.ToString();
-
-        var lvSnap = await LevelRef(uid).GetValueAsync();
-        if (lvSnap.Exists && lvSnap.Value != null)
-            acc.AccountLevel = Convert.ToInt32(lvSnap.Value);
-
-        var expSnap = await ExpRef(uid).GetValueAsync();
-        if (expSnap.Exists && expSnap.Value != null)
-            acc.AccountExp = Convert.ToInt64(expSnap.Value);
-
-        var eqSnap = await EquippedDiceKeyRef(uid).GetValueAsync();
-        if (eqSnap.Exists && eqSnap.Value != null)
-            acc.EquippedDiceKey = eqSnap.Value.ToString();
-
-        // 5) 평문 diceInventory가 있으면 최신값으로 덮어쓰기
-        var diceSnap = await DiceInventoryRef(uid).GetValueAsync();
-        if (diceSnap.Exists && diceSnap.HasChildren)
+        catch (Exception e)
         {
-            acc.DiceInventory = ParseDiceInventory(diceSnap);
+            Debug.LogException(e);
+            ShowToast("로드 실패", "Load failed.");
+            throw;
         }
-
-        // 6) equippedDiceKey 기준으로 EquippedDice 다시 연결
-        RelinkEquippedDice(acc);
-
-        return acc;
     }
 
     public static async Task<Account> LoadOrThrowAsync()
