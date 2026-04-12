@@ -264,8 +264,15 @@ public class FireBaseAuthManager : MonoBehaviour
         // 인벤토리 로드 후 장착 복원
         DiceEquipService.RestoreEquippedDice(CurrentAccount);
 
-        // 로그인 날짜 갱신(원하면)
+        // 로그인 날짜 갱신
         CurrentAccount.LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+        // 자동 출석 + 로비에서 1회 열릴 pending 결과 저장
+        Debug.Log("[Login] Before HandleAfterLoginAsync");
+        await AttendanceLoginSessionBridge.HandleAfterLoginAsync(CurrentAccount);
+        Debug.Log("[Login] After HandleAfterLoginAsync");
+
+        // 로그인 날짜 갱신분 저장
         await AccountCloudStore.SaveFullAsync(CurrentAccount);
 
         if (presence != null)
