@@ -21,7 +21,10 @@ public class AttendancePanelUI : MonoBehaviour
 
     [Header("Auto Close")]
     [SerializeField] private bool autoCloseOnAutoClaim = true;
-    [SerializeField] private float autoCloseDelay = 5.0f;
+    private float autoCloseDelay = 7.0f;
+
+    private AttendanceService.AttendanceClaimResult _lastAutoClaimResult;
+    private bool _toastShownForThisOpen;
 
     [Header("Day Slots (1~31)")]
     [SerializeField] private List<AttendanceDaySlotUI> daySlots = new List<AttendanceDaySlotUI>();
@@ -44,42 +47,71 @@ public class AttendancePanelUI : MonoBehaviour
 
     private void Start()
     {
-        Debug.Log("[AttendancePanelUI] Start called");
-
-        if (FireBaseAuthManager.Instance == null)
-        {
-            Debug.LogWarning("[AttendancePanelUI] FireBaseAuthManager.Instance is null");
+        if (FireBaseAuthManager.Instance == null || FireBaseAuthManager.Instance.CurrentAccount == null)
             return;
-        }
-
-        if (FireBaseAuthManager.Instance.CurrentAccount == null)
-        {
-            Debug.LogWarning("[AttendancePanelUI] CurrentAccount is null");
-            return;
-        }
 
         _account = FireBaseAuthManager.Instance.CurrentAccount;
 
-        Debug.Log("[AttendancePanelUI] RefreshUI start");
         RefreshUI();
 
         if (AttendanceLoginSessionBridge.TryConsumePendingResult(out var autoClaimResult))
         {
-            Debug.Log("[AttendancePanelUI] Pending result consumed -> Open()");
+            _lastAutoClaimResult = autoClaimResult;
+            _toastShownForThisOpen = false;
+
             RefreshUI(autoClaimResult);
             Open();
+
+            StartCoroutine(CoShowToastNextFrame());
 
             if (autoCloseOnAutoClaim)
             {
                 if (_autoCloseCoroutine != null)
                     StopCoroutine(_autoCloseCoroutine);
 
-                _autoCloseCoroutine = StartCoroutine(CoAutoClose(autoCloseDelay));
+                _autoCloseCoroutine = StartCoroutine(CoCloseAfterToastAndDelay(autoCloseDelay));
             }
         }
-        else
+    }
+
+    private IEnumerator CoShowToastNextFrame()
+    {
+        yield return null;
+        ShowAttendanceToastOnOpen();
+    }
+
+    private void ShowAttendanceToastOnOpen()
+    {
+        if (_toastShownForThisOpen)
+            return;
+
+        if (_lastAutoClaimResult == null)
+            return;
+
+        if (ToastMessageManager.instance == null)
+            return;
+
+        var result = _lastAutoClaimResult;
+        _toastShownForThisOpen = true;
+
+        if (result.AlreadyClaimedToday)
         {
-            Debug.LogWarning("[AttendancePanelUI] No pending attendance result");
+            ToastMessageManager.instance.ShowToast(
+                $"오늘은 이미 출석 완료! ({result.AttendanceCountThisMonth}/{result.DaysInMonth})",
+                $"Today's attendance already claimed! ({result.AttendanceCountThisMonth}/{result.DaysInMonth})"
+            );
+            return;
+        }
+
+        if (result.Claimed)
+        {
+            string rewardTextKor = string.Join("\n", result.RewardMessages);
+            string rewardTextEng = ConvertRewardMessages(result.RewardMessages, true);
+
+            ToastMessageManager.instance.ShowToast(
+                $"출석 완료!\n{result.CurrentStreak}일 차 출석\n{rewardTextKor}",
+                $"Attendance complete!\nDay {result.CurrentStreak} check-in\n{rewardTextEng}"
+            );
         }
     }
 
@@ -205,9 +237,19 @@ public class AttendancePanelUI : MonoBehaviour
         return "Cash 100";
     }
 
-    private IEnumerator CoAutoClose(float delay)
+    private IEnumerator CoCloseAfterToastAndDelay(float extraDelayAfterToast)
     {
-        yield return new WaitForSeconds(delay);
+        float toastTotal = 0f;
+
+        if (ToastMessageManager.instance != null)
+        {
+            toastTotal =
+                ToastMessageManager.instance.toastShowSeconds +
+                ToastMessageManager.instance.toastFadeSeconds;
+        }
+
+        yield return new WaitForSecondsRealtime(toastTotal + extraDelayAfterToast);
+
         Close();
         _autoCloseCoroutine = null;
     }

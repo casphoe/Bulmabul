@@ -20,10 +20,7 @@ public class ToastMessageManager : MonoBehaviour
     private void Awake()
     {
         instance = this;
-    }
 
-    private void Start()
-    {
         if (toasstMessage != null)
         {
             var c = toasstMessage.color;
