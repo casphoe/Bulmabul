@@ -165,6 +165,8 @@ public static class FriendService
                 nick = c.Child("nick").Value?.ToString() ?? "",
                 photoUrl = c.Child("photoUrl").Value?.ToString() ?? "",
                 createdAt = TryLong(c.Child("createdAt").Value),
+                accountLevel = TryInt(c.Child("accountLevel").Value, 1),
+                equippedDiceKey = c.Child("equippedDiceKey").Value?.ToString() ?? "",
                 isOnline = false,
                 lastSeenUnix = 0
             };
@@ -407,6 +409,9 @@ public static class FriendService
         // (너 프로젝트의 CurrentAccount.NickName을 쓰면 더 정확)
         string myNick = await GetMyNickPublicAsync();
 
+        int myLevel = Mathf.Max(1, FireBaseAuthManager.Instance.CurrentAccount.AccountLevel);
+        string myEquippedDiceKey = FireBaseAuthManager.Instance.CurrentAccount.EquippedDiceKey ?? "";
+
         // targetNick이 비었으면 userPublic에서 한 번 읽어서 채워도 됨(선택)
         if (string.IsNullOrWhiteSpace(targetNick))
         {
@@ -420,14 +425,18 @@ public static class FriendService
         {
             ["fromUid"] = myUid,
             ["fromNick"] = myNick,
-            ["createdAt"] = now
+            ["createdAt"] = now,
+            ["fromLevel"] = myLevel,
+            ["fromEquippedDiceKey"] = myEquippedDiceKey
         };
 
         updates[$"friendRequestsOut/{myUid}/{targetUid}"] = new Dictionary<string, object>
         {
             ["toUid"] = targetUid,
             ["toNick"] = targetNick ?? "",
-            ["createdAt"] = now
+            ["createdAt"] = now,
+            ["fromLevel"] = myLevel,
+            ["fromEquippedDiceKey"] = myEquippedDiceKey
         };
 
         await Root.UpdateChildrenAsync(updates);
@@ -476,6 +485,12 @@ public static class FriendService
         string frNick = frSnap.Child("nick").Value?.ToString() ?? "";
         string frPhoto = frSnap.Child("photoUrl").Value?.ToString() ?? "";
 
+        int frLevel = TryInt(reqSnap.Child("fromLevel").Value, 1);
+        string frEquippedDiceKey = reqSnap.Child("fromEquippedDiceKey").Value?.ToString() ?? "";
+
+        int myLevel = Mathf.Max(1, FireBaseAuthManager.Instance.CurrentAccount.AccountLevel);
+        string myEquippedDiceKey = FireBaseAuthManager.Instance.CurrentAccount.EquippedDiceKey ?? "";
+
         // 2) 멀티 업데이트 구성
         var updates = new Dictionary<string, object>();
 
@@ -485,7 +500,9 @@ public static class FriendService
             ["uid"] = fromUid,
             ["nick"] = frNick,
             ["photoUrl"] = frPhoto,
-            ["createdAt"] = now
+            ["createdAt"] = now,
+            ["accountLevel"] = frLevel,
+            ["equippedDiceKey"] = frEquippedDiceKey
         };
 
         updates[$"friends/{fromUid}/{myUid}"] = new Dictionary<string, object>
@@ -493,7 +510,9 @@ public static class FriendService
             ["uid"] = myUid,
             ["nick"] = myNick,
             ["photoUrl"] = myPhoto,
-            ["createdAt"] = now
+            ["createdAt"] = now,
+            ["accountLevel"] = myLevel,
+            ["equippedDiceKey"] = myEquippedDiceKey
         };
 
         // 요청 제거
@@ -674,6 +693,101 @@ public static class FriendService
         }
     }
 
+    public static async Task SyncMyProfileToFriendsAsync()
+    {
+        string myUid = MyUid;
+        var fb = FireBaseAuthManager.Instance;
+        if (fb == null || fb.CurrentAccount == null) return;
+
+        string myNick = fb.CurrentAccount.NickName?.Trim() ?? "";
+        string myPhoto = fb.CurrentAccount.PhotoUrl?.Trim() ?? "";
+        int myLevel = Mathf.Max(1, fb.CurrentAccount.AccountLevel);
+        string myEquippedDiceKey = fb.CurrentAccount.EquippedDiceKey ?? "";
+
+        var myFriendsSnap = await FirebaseDatabase.DefaultInstance
+            .GetReference($"friends/{myUid}")
+            .GetValueAsync();
+
+        if (myFriendsSnap == null || !myFriendsSnap.Exists)
+            return;
+
+        var updates = new Dictionary<string, object>();
+
+        foreach (var c in myFriendsSnap.Children)
+        {
+            string friendUid = c.Key;
+            if (string.IsNullOrWhiteSpace(friendUid)) continue;
+
+            updates[$"friends/{friendUid}/{myUid}/uid"] = myUid;
+            updates[$"friends/{friendUid}/{myUid}/nick"] = myNick;
+            updates[$"friends/{friendUid}/{myUid}/photoUrl"] = myPhoto;
+            updates[$"friends/{friendUid}/{myUid}/accountLevel"] = myLevel;
+            updates[$"friends/{friendUid}/{myUid}/equippedDiceKey"] = myEquippedDiceKey;
+
+            // createdAt 없으면 validate 걸릴 수 있으니 유지 보정
+            long createdAt = TryLong(c.Child("createdAt").Value);
+            if (createdAt <= 0)
+                createdAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            updates[$"friends/{friendUid}/{myUid}/createdAt"] = createdAt;
+        }
+
+        if (updates.Count > 0)
+            await Root.UpdateChildrenAsync(updates);
+    }
+
+    public static async Task<FriendProfileData> GetFriendProfileAsync(string friendUid)
+    {
+        string myUid = MyUid;
+        if (string.IsNullOrWhiteSpace(friendUid)) return null;
+
+        var result = new FriendProfileData
+        {
+            uid = friendUid,
+            nick = "",
+            photoUrl = "",
+            accountLevel = 1,
+            equippedDiceKey = "",
+            isOnline = false,
+            lastSeenUnix = 0
+        };
+
+        try
+        {
+            var friendTask = FirebaseDatabase.DefaultInstance
+                .GetReference($"friends/{myUid}/{friendUid}")
+                .GetValueAsync();
+
+            var presenceTask = FirebaseDatabase.DefaultInstance
+                .GetReference($"presence/{friendUid}")
+                .GetValueAsync();
+
+            await Task.WhenAll(friendTask, presenceTask);
+
+            var friendSnap = friendTask.Result;
+            if (friendSnap != null && friendSnap.Exists)
+            {
+                result.nick = friendSnap.Child("nick").Value?.ToString() ?? "";
+                result.photoUrl = friendSnap.Child("photoUrl").Value?.ToString() ?? "";
+                result.accountLevel = TryInt(friendSnap.Child("accountLevel").Value, 1);
+                result.equippedDiceKey = friendSnap.Child("equippedDiceKey").Value?.ToString() ?? "";
+            }
+
+            var presenceSnap = presenceTask.Result;
+            if (presenceSnap != null && presenceSnap.Exists)
+            {
+                result.isOnline = TryBool(presenceSnap.Child("online").Value);
+                result.lastSeenUnix = TryLong(presenceSnap.Child("lastSeen").Value);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[GetFriendProfileAsync] failed: {e.Message}");
+        }
+
+        return result;
+    }
+
     #endregion
 
     #region 프로필 이미지 적용
@@ -718,6 +832,13 @@ public static class FriendService
         if (v == null) return 0;
         if (long.TryParse(v.ToString(), out var n)) return n;
         return 0;
+    }
+
+    static int TryInt(object v, int fallback = 0)
+    {
+        if (v == null) return fallback;
+        if (int.TryParse(v.ToString(), out var n)) return n;
+        return fallback;
     }
 
     #endregion

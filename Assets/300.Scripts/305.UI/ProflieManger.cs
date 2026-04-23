@@ -226,10 +226,13 @@ public class ProflieManger : MonoBehaviour
             // 2) users/{uid}/nick 저장은 key로
             await Root.UpdateChildrenAsync(updates);
 
-            //  3) 로컬도 key로 저장
+            // 3) 로컬도 key로 저장
             fb.CurrentAccount.NickName = newNickKey;
 
-            //  4) 이전 닉 해제(이전 값이 있을 때만)
+            // 4) 친구 목록에 내 최신 프로필 동기화
+            await FriendService.SyncMyProfileToFriendsAsync();
+
+            // 5) 이전 닉 해제(이전 값이 있을 때만)
             if (!string.IsNullOrWhiteSpace(oldNickKey))
                 await NicknameService.ReleaseAsync(uid, oldNickKey);
         }
@@ -321,6 +324,9 @@ public class ProflieManger : MonoBehaviour
 
                 // 로컬 Account 반영
                 fb.CurrentAccount.PhotoUrl = photoUrl;
+
+                // 친구 목록에 내 최신 프로필 동기화
+                await FriendService.SyncMyProfileToFriendsAsync();
 
                 // 대기 데이터 비우기
                 pendingPhotoBytes = null;

@@ -220,10 +220,8 @@ public class FriendListItem : InfiniteScrollItem
         // 1) 옵션 텍스트(언어) 세팅
         BuildDropdownOptions(lang);
 
-        // 2) 오프라인 정책
-        // - 기본: 오프라인이면 드롭다운 클릭 자체 막기
-        // - allowProfileWhenOffline=true면: 프로필만 허용 (선택 후 검사로 막음)
-        actionDropdown.interactable = d.isOnline;
+        // 오프라인이어도 드롭다운은 열리게
+        actionDropdown.interactable = true;
 
         // 3) 이벤트 바인딩(셀 재사용 때문에 항상 리셋)
         actionDropdown.onValueChanged.RemoveAllListeners();
@@ -243,8 +241,8 @@ public class FriendListItem : InfiniteScrollItem
             {
                 if (action == FriendAction.Chat || action == FriendAction.Invite)
                 {
-                    // 오프라인에서 눌렀으면 무시 + 토스트
-                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");          
+                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
+                    actionDropdown.SetValueWithoutNotify(0);
                     return;
                 }
             }

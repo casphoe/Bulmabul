@@ -172,6 +172,14 @@ public static class AccountCloudStore
         };
 
         await Root.UpdateChildrenAsync(updates);
+
+        if (FireBaseAuthManager.Instance?.CurrentAccount != null)
+        {
+            FireBaseAuthManager.Instance.CurrentAccount.AccountLevel = level;
+            FireBaseAuthManager.Instance.CurrentAccount.AccountExp = exp;
+        }
+
+        await FriendService.SyncMyProfileToFriendsAsync();
     }
 
     /// <summary>
@@ -187,6 +195,11 @@ public static class AccountCloudStore
     {
         string uid = Uid;
         await EquippedDiceKeyRef(uid).SetValueAsync(equippedDiceKey ?? "");
+
+        if (FireBaseAuthManager.Instance?.CurrentAccount != null)
+            FireBaseAuthManager.Instance.CurrentAccount.EquippedDiceKey = equippedDiceKey ?? "";
+
+        await FriendService.SyncMyProfileToFriendsAsync();
     }
 
     public static async Task<Account> LoadAsync()

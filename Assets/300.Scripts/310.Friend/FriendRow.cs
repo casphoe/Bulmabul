@@ -12,6 +12,9 @@ public class FriendRow
     public string photoUrl;  // friends/{myUid}/{friendUid}/photoUrl
     public long createdAt;   // friends/{myUid}/{friendUid}/createdAt
 
+    public int accountLevel;
+    public string equippedDiceKey;
+
     public bool isOnline;
     public long lastSeenUnix; // 온라인이면 "최근 ping 시간" 또는 "접속 갱신 시간"
 }

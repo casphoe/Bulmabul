@@ -40,6 +40,9 @@ public class FrinedUiManager : MonoBehaviour
     [Header("Panel")]
     [SerializeField] private GameObject friendPanel;
 
+    [Header("Friend Profile Popup")]
+    [SerializeField] private FriendProfilePopup friendProfilePopup;
+
     [Header("Search Inputs")]
     /// <summary>
     /// "초대" 탭에서 후보 검색 키워드 입력창
@@ -1421,6 +1424,15 @@ public class FrinedUiManager : MonoBehaviour
 
             case 3: // Profile
                 Debug.Log($"[FriendAction] View profile {d.nick} ({d.uid})");
+
+                if (friendProfilePopup != null)
+                    friendProfilePopup.Open(d.uid);
+                else
+                    ToastMessageManager.instance?.ShowToast(
+                        "친구 프로필 팝업이 연결되지 않았습니다.",
+                        "Friend profile popup is not assigned."
+                    );
+
                 break;
         }
     }
