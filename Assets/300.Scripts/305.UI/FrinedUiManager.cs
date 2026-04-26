@@ -1424,17 +1424,34 @@ public class FrinedUiManager : MonoBehaviour
 
             case 3: // Profile
                 Debug.Log($"[FriendAction] View profile {d.nick} ({d.uid})");
-
-                if (friendProfilePopup != null)
-                    friendProfilePopup.Open(d.uid);
-                else
-                    ToastMessageManager.instance?.ShowToast(
-                        "친구 프로필 팝업이 연결되지 않았습니다.",
-                        "Friend profile popup is not assigned."
-                    );
-
                 break;
         }
+    }
+
+    /// <summary>
+    /// 친구 리스트에서 선택한 친구의 프로필 팝업을 연다.
+    /// 
+    /// 역할:
+    /// 1) 전달받은 친구 데이터가 유효한지 확인
+    /// 2) 친구 리스트에 이미 표시 중인 프로필 이미지 텍스처를 팝업에 그대로 전달
+    /// 3) 친구 uid를 기준으로 상세 프로필 정보(닉네임/레벨/마지막 접속일/장착 주사위)를 불러오도록 팝업 Open 호출
+    /// 
+    /// 왜 이렇게 하는가:
+    /// - 친구 리스트에 이미 로드된 프로필 이미지를 재사용하면
+    ///   다시 다운로드하지 않아도 되어 더 빠르고 자연스럽다.
+    /// - 텍스트 정보는 uid 기준으로 별도 조회하고,
+    ///   이미지는 현재 리스트에 보이는 것을 그대로 복사해서 사용한다.
+    /// 
+    /// 매개변수:
+    /// - d : 선택한 친구의 데이터(uid, 닉네임 등 포함)
+    /// - profileTexture : 친구 리스트 아이템에 현재 표시 중인 프로필 이미지 텍스처
+    /// </summary>
+    public void OpenFriendProfile(FriendListItemData d, Texture profileTexture)
+    {
+        if (friendProfilePopup == null || d == null) return;
+
+        friendProfilePopup.SetProfileTexture(profileTexture);
+        friendProfilePopup.Open(d.uid);
     }
 
     /// <summary>

@@ -247,8 +247,18 @@ public class FriendListItem : InfiniteScrollItem
                 }
             }
 
-            // 매니저에게 액션 넘기기
-            FrinedUiManager.instance?.OnFriendActionSelected(d, (int)action);         
+            if (action == FriendAction.Profile)
+            {
+                FrinedUiManager.instance?.OpenFriendProfile(
+                    d,
+                    imgPhoto != null ? imgPhoto.texture : null
+                );
+            }
+            else
+            {
+                FrinedUiManager.instance?.OnFriendActionSelected(d, (int)action);
+            }
+            actionDropdown.SetValueWithoutNotify(0);
         });
     }
 
