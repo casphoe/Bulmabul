@@ -158,8 +158,7 @@ public class FriendListItem : InfiniteScrollItem
     {
         None = 0,
         Chat = 1,
-        Invite = 2,
-        Profile = 3
+        Profile = 2
     }
 
 
@@ -213,38 +212,35 @@ public class FriendListItem : InfiniteScrollItem
     {
         if (actionDropdown == null) return;
 
-        // 초대 후보(InviteCandidate)에서는 액션 드롭다운 숨기고 싶으면:
+        // 친구 행일 때만 액션 드롭다운 표시
         actionDropdown.gameObject.SetActive(isFriendRow);
         if (!isFriendRow) return;
 
-        // 1) 옵션 텍스트(언어) 세팅
+        // 옵션 텍스트 세팅
         BuildDropdownOptions(lang);
 
         // 오프라인이어도 드롭다운은 열리게
         actionDropdown.interactable = true;
 
-        // 3) 이벤트 바인딩(셀 재사용 때문에 항상 리셋)
+        // 셀 재사용 때문에 이벤트는 항상 초기화
         actionDropdown.onValueChanged.RemoveAllListeners();
 
-        // 드롭다운은 “이전 선택값”이 남아있기 쉬워서 항상 0으로 초기화
+        // 기본 선택값으로 초기화
         actionDropdown.SetValueWithoutNotify(0);
 
         actionDropdown.onValueChanged.AddListener((idx) =>
         {
-            // idx: 0=선택, 1=채팅, 2=초대, 3=프로필
+            // idx: 0=선택, 1=채팅, 2=프로필
             if (idx == 0) return;
 
             var action = (FriendAction)idx;
 
-            // 오프라인이면 채팅/초대는 금지 (프로필만 allowProfileWhenOffline이면 허용)
-            if (!d.isOnline)
+            // 오프라인이면 채팅만 막기
+            if (!d.isOnline && action == FriendAction.Chat)
             {
-                if (action == FriendAction.Chat || action == FriendAction.Invite)
-                {
-                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
-                    actionDropdown.SetValueWithoutNotify(0);
-                    return;
-                }
+                ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
+                actionDropdown.SetValueWithoutNotify(0);
+                return;
             }
 
             if (action == FriendAction.Profile)
@@ -258,6 +254,8 @@ public class FriendListItem : InfiniteScrollItem
             {
                 FrinedUiManager.instance?.OnFriendActionSelected(d, (int)action);
             }
+
+            // 실행 후 다시 기본값으로 복귀
             actionDropdown.SetValueWithoutNotify(0);
         });
     }
@@ -266,8 +264,6 @@ public class FriendListItem : InfiniteScrollItem
     {
         if (actionDropdown == null) return;
 
-        // 매 프레임/매 UpdateData마다 중복으로 AddOption하면 옵션이 계속 늘어나니까
-        // 항상 ClearOptions 후 AddOptions
         actionDropdown.ClearOptions();
 
         var opts = new List<string>();

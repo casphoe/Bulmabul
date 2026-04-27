@@ -1401,7 +1401,7 @@ public class FrinedUiManager : MonoBehaviour
     {
         if (d == null) return;
 
-        // 0=None, 1=Chat, 2=Invite, 3=Profile
+        // 0=None, 1=Chat, 2=Profile
         switch (actionInt)
         {
             case 1: // Chat
@@ -1413,17 +1413,8 @@ public class FrinedUiManager : MonoBehaviour
                 OpenFriendChatWindow(d.uid, d.nick);
                 break;
 
-            case 2: // Invite
-                if (!d.isOnline)
-                {
-                    ToastMessageManager.instance?.ShowToast("오프라인 상태입니다.", "User is offline.");
-                    return;
-                }
-                Debug.Log($"[FriendAction] Invite party to {d.nick} ({d.uid})");
-                break;
-
-            case 3: // Profile
-                Debug.Log($"[FriendAction] View profile {d.nick} ({d.uid})");
+            case 2: // Profile
+                Debug.Log($"[FriendAction] View profile {d.nick} ({d.uid})");            
                 break;
         }
     }

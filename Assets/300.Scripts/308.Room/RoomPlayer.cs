@@ -29,6 +29,9 @@ public class RoomPlayerData : InfiniteScrollData
     public string photoUrl;
 
     public TeamSide team;
+
+    public bool canInviteHere;
+    public System.Action<int> onClickInviteEmptySlot;
 }
 
 // ===== URL -> Texture 캐시(스크롤/리프레시로 인한 중복다운로드 방지) =====
@@ -159,6 +162,9 @@ public class RoomPlayer : InfiniteScrollItem
     private RoomPlayerData d;
     private string _boundUrl = ""; //아이템 재활용 대비
 
+    [Header("빈 슬롯 초대 버튼")]
+    public Button btnInviteEmptySlot;
+
     public override void UpdateData(InfiniteScrollData scrollData)
     {
         base.UpdateData(scrollData);
@@ -172,16 +178,62 @@ public class RoomPlayer : InfiniteScrollItem
         // 빈 슬롯 처리
         if (d.isEmpty)
         {
-            if (txtNick != null) txtNick.text = "-";
+            if (txtNick != null) txtNick.text = "";
             if (txtLevel != null) txtLevel.text = "";
             if (txtName != null) txtName.text = "";
             if (txtReady != null) txtReady.text = "";
             SetActiveSafe(leaderIcon, false);
             defaultProfileTexture = _defaultSeed;          //  빈 슬롯은 기본값으로
             if (profileImage != null) profileImage.texture = _defaultSeed; // or null
+
+            if (txtReady != null)
+            {
+                txtReady.text = "";
+                txtReady.gameObject.SetActive(false);
+            }
+
+            if (txtTeam != null)
+            {
+                txtTeam.text = "";
+                txtTeam.gameObject.SetActive(false);
+            }
+
+
+            if (btnMakeLeader != null)
+            {
+                btnMakeLeader.gameObject.SetActive(false);
+                btnMakeLeader.onClick.RemoveAllListeners();
+            }
+
+            if (btnKick != null)
+            {
+                btnKick.gameObject.SetActive(false);
+                btnKick.onClick.RemoveAllListeners();
+            }
+
+            if (btnInviteEmptySlot != null)
+            {
+                btnInviteEmptySlot.gameObject.SetActive(d.canInviteHere);
+                btnInviteEmptySlot.onClick.RemoveAllListeners();
+
+                if (d.canInviteHere)
+                {
+                    int slot = d.slotIndex;
+                    btnInviteEmptySlot.onClick.AddListener(() =>
+                    {
+                        d.onClickInviteEmptySlot?.Invoke(slot);
+                    });
+                }
+            }
+
             return;
         }
-
+        // 플레이어 슬롯에서는 + 버튼 숨김
+        if (btnInviteEmptySlot != null)
+        {
+            btnInviteEmptySlot.gameObject.SetActive(false);
+            btnInviteEmptySlot.onClick.RemoveAllListeners();
+        }
 
         if (txtNick != null)
         {

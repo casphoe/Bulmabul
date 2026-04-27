@@ -68,6 +68,9 @@ public class RoomManager : MonoBehaviour
 
     [SerializeField] int maxSlots = 4;
 
+    [Header("Room Invite")]
+    [SerializeField] private RoomInvitePopup roomInvitePopup;
+
     private bool _localReady;
     private int _lastRevision = -1;
     private float _nextLightTick = 0f;
@@ -351,91 +354,253 @@ public class RoomManager : MonoBehaviour
     #region Players UI
     /// <summary>
     /// 현재 방 참가자 정보를 읽어서 GPM InfiniteScroll에 뿌린다.
-    /// - maxSlots 기준으로 "빈 슬롯도 표시"
+    /// - 현재 선택된 플레이 가능 인원 수(m.MaxPlayers)에 맞춰 슬롯 수를 표시
+    /// - 개인전: m.MaxPlayers 기준으로 2~4개 표시
+    /// - 팀전: 4개 고정 표시
+    /// - 빈 슬롯도 표시해서 방장만 + 초대 버튼을 사용할 수 있게 함
     /// </summary>
     private void RefreshPlayersUI()
     {
+        // 플레이어 목록을 표시할 InfiniteScroll이 없으면 갱신 불가
         if (playerScroll == null) return;
 
+        // 현재 방 멤버 상태 가져오기
         var m = Members;
+
+        // 방 멤버 상태 또는 Fusion Runner가 없으면 갱신 불가
         if (m == null || m.Runner == null) return;
 
+        // 내 PlayerRef
         var me = m.Runner.LocalPlayer;
+
+        // 현재 방장 PlayerRef
         var leader = m.Leader;
 
-        // 1) 데이터 생성 
-        List<RoomMemberInfo> list = new List<RoomMemberInfo>(maxSlots);
-        int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
+        // 내가 방장인지 확인
+        // 방장일 때만 빈 슬롯에 + 초대 버튼을 보여줄 예정
+        bool amLeader = AmILeader();
 
+        // =========================
+        // 표시할 슬롯 수 계산
+        // =========================
+        // 핵심:
+        // maxSlots 전체를 무조건 보여주는 것이 아니라
+        // 현재 방 설정의 최대 플레이어 수(m.MaxPlayers)에 맞춰 보여준다.
+        //
+        // 개인전:
+        // - inputMaxPlayers에서 설정한 2~4명 기준으로 슬롯 표시
+        //
+        // 팀전:
+        // - 팀전은 4명 고정이므로 4칸 표시
+        int displaySlots = (_mode == MatchMode.Team)
+            ? TEAM_FIXED
+            : Mathf.Clamp(m.MaxPlayers, SOLO_MIN, SOLO_MAX);
+
+        // 혹시 maxSlots 또는 RoomMembersState.MaxSlots보다 큰 값이 들어와도 안전하게 제한
+        int n = Mathf.Min(displaySlots, maxSlots, RoomMembersState.MaxSlots);
+
+        // 빈 슬롯까지 포함해서 RoomPlayerData 리스트 생성
+        // 기존 RoomMemberInfo는 빈 슬롯 정보를 담기 애매하므로 RoomPlayerData를 직접 정렬함
+        List<RoomPlayerData> list = new List<RoomPlayerData>(n);
+
+        // 전체 슬롯 순회
+        // n은 현재 플레이 가능 인원 수 기준이므로,
+        // 개인전 2명 방이면 0~1 슬롯까지만 표시된다.
         for (int i = 0; i < n; i++)
         {
+            // i번 슬롯 정보 가져오기
             var s = m.Slots.Get(i);
-            if (s.occupied == 0) continue; // 빈 슬롯은 표시 안 함
 
-            list.Add(new RoomMemberInfo
+            // =========================
+            // 빈 슬롯 처리
+            // =========================
+            if (s.occupied == 0)
             {
-                slotIndex = i, // 필요하면 유지(슬롯 번호를 그대로 보여주고 싶을 때)
+                // 빈 슬롯도 UI에 표시해야 + 버튼을 띄울 수 있음
+                list.Add(new RoomPlayerData
+                {
+                    // 실제 방 슬롯 번호
+                    slotIndex = i,
+
+                    // 빈 슬롯 표시용 플래그
+                    isEmpty = true,
+
+                    // 빈 슬롯이므로 PlayerRef 없음
+                    player = PlayerRef.None,
+
+                    // 빈 슬롯이라 표시할 유저 정보 없음
+                    nickname = "",
+                    name = "",
+                    level = 0,
+
+                    // 빈 슬롯은 리더/준비/나 자신 아님
+                    isLeader = false,
+                    isReady = false,
+                    isMe = false,
+
+                    // 빈 슬롯은 프로필 URL 없음
+                    photoUrl = "",
+
+                    // 팀전일 경우 빈 슬롯도 팀 위치를 보여줄 수 있게 팀 계산
+                    // 개인전이면 TeamSide.None
+                    team = (_mode == MatchMode.Team)
+                        ? GetTeamBySlotIndex(i)
+                        : TeamSide.None,
+
+                    // 방장만 빈 슬롯의 + 버튼을 볼 수 있음
+                    canInviteHere = amLeader,
+
+                    // + 버튼 클릭 시 RoomManager의 초대 팝업 함수 호출
+                    onClickInviteEmptySlot = OnClickInviteEmptySlot
+                });
+
+                // 빈 슬롯 처리가 끝났으므로 다음 슬롯으로 이동
+                continue;
+            }
+
+            // =========================
+            // 실제 플레이어 슬롯 처리
+            // =========================
+            list.Add(new RoomPlayerData
+            {
+                // 실제 방 슬롯 번호
+                slotIndex = i,
+
+                // 플레이어가 있으므로 빈 슬롯 아님
+                isEmpty = false,
+
+                // Fusion PlayerRef
                 player = s.player,
+
+                // 네트워크 슬롯에 저장된 유저 정보
                 nickname = s.nickname.ToString(),
                 name = s.name.ToString(),
                 level = s.level,
+
+                // 현재 슬롯의 플레이어가 방장인지 확인
                 isLeader = (leader != PlayerRef.None && s.player == leader),
+
+                // 준비 상태
                 isReady = s.ready,
-                isMe = (s.player != PlayerRef.None && s.player == me)
+
+                // 이 슬롯의 플레이어가 나인지 확인
+                isMe = (s.player != PlayerRef.None && s.player == me),
+
+                // 프로필 이미지 URL
+                photoUrl = s.photoUrl.ToString(),
+
+                // 팀전이면 슬롯 기준으로 팀 계산
+                // 개인전이면 팀 없음
+                team = (_mode == MatchMode.Team)
+                    ? GetTeamBySlotIndex(i)
+                    : TeamSide.None,
+
+                // 실제 플레이어 슬롯에는 + 초대 버튼을 보여주면 안 됨
+                canInviteHere = false,
+                onClickInviteEmptySlot = null
             });
         }
 
-        // 2) UI 정렬 규칙
-        // - Team: 자리 고정(슬롯 인덱스 순) => 리더가 바뀌어도 위치 절대 안 바뀜
-        // - Solo: 리더를 항상 0번째로 올림
+        // =========================
+        // UI 정렬 규칙
+        // =========================
         list.Sort((a, b) =>
         {
             if (_mode == MatchMode.Team)
             {
-                //  팀전: 무조건 슬롯 순서 유지 (0,1,2,3)
+                // 팀전은 자리 고정이 중요함
+                // 리더가 바뀌어도 0,1,2,3 슬롯 순서를 그대로 유지
                 return a.slotIndex.CompareTo(b.slotIndex);
             }
             else
             {
-                //  개인전: 리더가 항상 맨 위(0번째)
+                // 개인전은 방장을 항상 위로 올림
+                // true가 false보다 앞으로 오도록 b와 a를 비교
                 int leaderCmp = b.isLeader.CompareTo(a.isLeader);
                 if (leaderCmp != 0) return leaderCmp;
 
-                // 그 다음은 슬롯 인덱스
+                // 그 다음은 실제 플레이어를 빈 슬롯보다 먼저 표시
+                // isEmpty false가 true보다 먼저 오게 됨
+                int emptyCmp = a.isEmpty.CompareTo(b.isEmpty);
+                if (emptyCmp != 0) return emptyCmp;
+
+                // 나머지는 슬롯 번호 순서 유지
                 return a.slotIndex.CompareTo(b.slotIndex);
             }
         });
 
+        // =========================
+        // InfiniteScroll 갱신
+        // =========================
 
-        // 3) InfiniteScroll 갱신
+        // 기존 플레이어 UI 제거
         RoomInfiniteScrollUtil.ClearAll(playerScroll);
 
+        // 정렬된 순서대로 UI에 삽입
         for (int i = 0; i < list.Count; i++)
         {
-            var mm = list[i];
-            var s = m.Slots.Get(mm.slotIndex);
-
-            var data = new RoomPlayerData
-            {
-                slotIndex = mm.slotIndex,
-                isEmpty = false,
-                player = mm.player,
-                nickname = mm.nickname,
-                name = mm.name,
-                level = mm.level,
-                isLeader = mm.isLeader,
-                isReady = mm.isReady,
-                isMe = mm.isMe,
-                photoUrl = s.photoUrl.ToString(),
-
-                team = (_mode == MatchMode.Team) ? GetTeamBySlotIndex(mm.slotIndex) : TeamSide.None
-            };
-
-            // i번째에 넣기(정렬 순서 유지)
-            RoomInfiniteScrollUtil.Insert(playerScroll, data, i);
+            RoomInfiniteScrollUtil.Insert(playerScroll, list[i], i);
         }
 
+        // InfiniteScroll 화면 갱신
         RoomInfiniteScrollUtil.UpdateAll(playerScroll);
+    }
+
+    // 빈 슬롯의 + 버튼을 눌렀을 때 실행되는 함수
+    // slotIndex는 몇 번째 빈 슬롯을 눌렀는지 알려주는 값
+    private void OnClickInviteEmptySlot(int slotIndex)
+    {
+        // 방장이 아니면 친구 초대 불가
+        if (!AmILeader())
+        {
+            ToastMessageManager.instance?.ShowToast(
+                "방장만 친구를 초대할 수 있습니다.",
+                "Only the leader can invite friends."
+            );
+            return;
+        }
+
+        // 현재 방 멤버 정보 확인
+        var m = Members;
+        if (m == null || m.Runner == null)
+            return;
+
+        // 현재 인원 수 확인
+        int currentPlayers = GetCurrentPlayersCount();
+
+        // 최대 인원 수 확인
+        int max = Mathf.Clamp(m.MaxPlayers, 1, RoomMembersState.MaxSlots);
+
+        // 방이 가득 찼으면 초대 불가
+        if (currentPlayers >= max)
+        {
+            ToastMessageManager.instance?.ShowToast(
+                "방이 가득 찼습니다.",
+                "The room is full."
+            );
+            return;
+        }
+
+        // 초대 팝업이 연결되지 않았으면 중단
+        if (roomInvitePopup == null)
+        {
+            Debug.LogWarning("[RoomManager] roomInvitePopup is not assigned.");
+            return;
+        }
+
+        // 현재 Photon/Fusion 방 이름 가져오기
+        string roomName = m.Runner.SessionInfo.IsValid
+            ? m.Runner.SessionInfo.Name
+            : "";
+
+        // 친구 초대 팝업 열기
+        // 이 팝업 안에서 온라인 친구만 보여주고 초대 버튼을 누르게 됨
+        roomInvitePopup.Open(
+            roomName,
+            m.Mode,
+            m.Map,
+            m.MaxPlayers
+        );
     }
     #endregion
 

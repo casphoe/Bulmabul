@@ -406,6 +406,26 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         StartGame(GameMode.Shared, sessionName, mode);
     }
+
+    public void JoinRoomFromInvite(string sessionName, MatchMode mode)
+    {
+        if (string.IsNullOrWhiteSpace(sessionName))
+        {
+            Debug.LogWarning("[Fusion] Invite room name is empty.");
+            return;
+        }
+
+        if (_starting)
+        {
+            Debug.LogWarning("[Fusion] Already starting.");
+            return;
+        }
+
+        currentMode = mode;
+        roomName = sessionName;
+
+        StartGame(GameMode.Shared, sessionName, mode);
+    }
     #endregion
 
     #region 방이 가득 찼는지 판단(가득 찬 방 숨김)
