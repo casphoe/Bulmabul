@@ -270,15 +270,13 @@ public class FriendListItem : InfiniteScrollItem
         if (lang == Lauaguage.Kor)
         {
             opts.Add("선택");
-            opts.Add("채팅하기");
-            opts.Add("친구초대");
+            opts.Add("채팅하기");           
             opts.Add("프로필 보기");
         }
         else
         {
             opts.Add("Select");
-            opts.Add("Chat");
-            opts.Add("Invite");
+            opts.Add("Chat");      
             opts.Add("View Profile");
         }
 
