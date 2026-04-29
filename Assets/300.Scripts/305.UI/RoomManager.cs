@@ -568,8 +568,12 @@ public class RoomManager : MonoBehaviour
         // 현재 인원 수 확인
         int currentPlayers = GetCurrentPlayersCount();
 
-        // 최대 인원 수 확인
-        int max = Mathf.Clamp(m.MaxPlayers, 1, RoomMembersState.MaxSlots);
+        // 현재 모드 기준 최대 인원 계산
+        // 팀전은 4명 고정
+        // 개인전은 m.MaxPlayers 기준
+        int max = (m.Mode == MatchMode.Team)
+            ? TEAM_FIXED
+            : Mathf.Clamp(m.MaxPlayers, SOLO_MIN, SOLO_MAX);
 
         // 방이 가득 찼으면 초대 불가
         if (currentPlayers >= max)

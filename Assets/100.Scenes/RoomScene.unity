@@ -1771,7 +1771,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &583447133
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2010,7 +2010,7 @@ MonoBehaviour:
   emptyParent: {fileID: 1128319520}
   txtTitle: {fileID: 2033792597}
   txtEmpty: {fileID: 2063721580}
-  friendScroll: {fileID: 0}
+  friendScroll: {fileID: 65811908}
 --- !u!1 &717806324
 GameObject:
   m_ObjectHideFlags: 0

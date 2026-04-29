@@ -84,6 +84,11 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
     public IReadOnlyList<SessionInfo> CachedSessions => _cachedSessions;
 
+    // 초대 수락 검사 전용 전체 방 목록
+    // _cachedSessions는 UI 표시용이라 가득 찬 방을 제외하지만,
+    // 초대 수락 시에는 "가득 찼는지" 판단해야 하므로 전체 세션을 따로 보관한다.
+    private readonly List<SessionInfo> _allSessionsForInvite = new List<SessionInfo>();
+
     /// <summary>
     /// 방 리스트가 갱신되면 UI가 다시 로드할 수 있도록 이벤트 발생
     /// LobbyUIManager.OnEnable에서 구독해서 roomLoad() 호출하는 구조
@@ -425,6 +430,65 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         roomName = sessionName;
 
         StartGame(GameMode.Shared, sessionName, mode);
+    }
+
+    /// <summary>
+    /// 초대 수락 전에 해당 방에 입장 가능한지 검사한다.
+    /// 
+    /// 반환:
+    /// true  = 입장 가능
+    /// false = 방이 없거나, 닫혔거나, 가득 참
+    /// 
+    /// 중요:
+    /// - _cachedSessions는 가득 찬 방을 제외한 UI용 목록이다.
+    /// - 그래서 초대 수락 검사는 _allSessionsForInvite를 사용해야 한다.
+    /// </summary>
+    public bool CanJoinRoomFromInvite(string sessionName, out string failKor, out string failEng)
+    {
+        failKor = "";
+        failEng = "";
+
+        if (string.IsNullOrWhiteSpace(sessionName))
+        {
+            failKor = "방 이름이 올바르지 않습니다.";
+            failEng = "Invalid room name.";
+            return false;
+        }
+
+        // 초대 수락 검사용 전체 세션 목록에서 찾기
+        for (int i = 0; i < _allSessionsForInvite.Count; i++)
+        {
+            var session = _allSessionsForInvite[i];
+            if (session == null) continue;
+            if (!session.IsValid) continue;
+
+            if (session.Name != sessionName)
+                continue;
+
+            // 방이 닫혔으면 입장 불가
+            if (!session.IsOpen)
+            {
+                failKor = "이미 입장할 수 없는 방입니다.";
+                failEng = "This room is no longer available.";
+                return false;
+            }
+
+            // 방이 가득 찼으면 입장 불가
+            if (IsSessionFull(session))
+            {
+                failKor = "방이 가득 찼습니다.";
+                failEng = "The room is full.";
+                return false;
+            }
+
+            // 여기까지 오면 입장 가능
+            return true;
+        }
+
+        // 방 목록에서 찾지 못한 경우
+        failKor = "방을 찾을 수 없습니다.";
+        failEng = "Room not found.";
+        return false;
     }
     #endregion
 
@@ -807,32 +871,56 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     }
 
     /// <summary>
-    /// 로비에서 방 리스트가 갱신될 때 호출됨 (매우 중요)
-    /// - 여기서 _cachedSessions를 새로 구성하고
-    /// - 가득 찬 방은 숨기고
-    /// - 정렬을 적용하고
-    /// - OnRoomsUpdated 이벤트를 쏴서 UI 갱신
+    /// 로비에서 방 리스트가 갱신될 때 호출됨.
+    /// 
+    /// _allSessionsForInvite:
+    /// - 초대 수락 검사 전용 전체 방 목록
+    /// - 화면에 표시하지 않음
+    /// - 가득 찬 방인지 판단할 때만 사용
+    /// 
+    /// _cachedSessions:
+    /// - 로비 UI 표시용 방 목록
+    /// - 가득 찬 방은 제외
+    /// - 실제 방 목록 UI는 이 리스트만 사용
     /// </summary>
     public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
     {
+        // 초대 수락 검사 전용 전체 방 목록
+        // 이 리스트는 UI에 표시하지 않는다.
+        _allSessionsForInvite.Clear();
+
+        // 로비 UI 표시용 방 목록
+        // 이 리스트는 가득 찬 방을 제외한다.
         _cachedSessions.Clear();
 
-        // 유효한 것만 담기(선택)
-        foreach (var s in sessionList)
+        if (sessionList != null)
         {
-            if (!s.IsValid) continue;
-            //가득찬 방은 숨김
-            if (IsSessionFull(s)) continue;
+            foreach (var s in sessionList)
+            {
+                if (!s.IsValid) continue;
 
-            _cachedSessions.Add(s);
+                // 초대 수락 검사 전용으로 전체 방을 저장
+                // 가득 찬 방도 여기에만 저장한다.
+                _allSessionsForInvite.Add(s);
+
+                // 여기서부터는 UI 표시용 처리
+                // 가득 찬 방은 로비 목록에 보여주면 안 되므로 제외
+                if (IsSessionFull(s)) continue;
+
+                // 가득 차지 않은 방만 로비 목록에 표시
+                _cachedSessions.Add(s);
+            }
         }
 
+        // UI 표시용 목록만 정렬
         ApplyRoomSort();
 
+        // UI 표시용 프리팹 리스트 재구성
         RebuildRoomPrefabList();
 
-        Debug.Log($"[Fusion] Lobby Rooms: {_cachedSessions.Count}");
-        // UI 갱신 이벤트
+        Debug.Log($"[Fusion] Lobby Rooms Visible: {_cachedSessions.Count} / Invite Check Rooms: {_allSessionsForInvite.Count}");
+
+        // UI에는 _cachedSessions만 전달하므로 가득 찬 방은 보이지 않음
         OnRoomsUpdated?.Invoke(_cachedSessions);
     }
 

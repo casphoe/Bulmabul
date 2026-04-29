@@ -11,17 +11,23 @@ using UnityEngine;
 /// - 하루 1회만 출석 가능
 /// - 매일 출석 기본 보상: Cash +100
 /// - 7일 연속 출석: Cash +1000
-/// - 14일 연속 출석: Rare 주사위 (Lv1, Star1)
+/// - 14일 연속 출석: Rare 주사위 1개 지급
 /// - 21일 연속 출석: Cash +3000
-/// - 해당 월의 모든 날짜를 연속 출석: Epic 주사위 (Lv1, Star1)  <-- SR 대체
+/// - 해당 월의 모든 날짜를 연속 출석: Epic 주사위 1개 지급
 ///
 /// 기준 시간:
-/// - DateTime.Now.Date (현재 컴퓨터 날짜)
+/// - 한국 시간 UTC+9 기준 날짜 사용
+/// - DateTime.UtcNow.AddHours(9).Date 사용
+/// - PC 로컬 시간, 윈도우 시간대, Unity Editor 실행 환경의 영향을 줄이기 위함
 ///
 /// 주의:
-/// - 연속 출석은 "현재 달 안에서" 계산
-/// - 달이 바뀌면 출석 목록/카운트 초기화
-/// - 예: 2월은 28일이면 28일 모두 출석 시 한달 연속으로 인정
+/// - 현재 코드는 "한국 시간 자정 00:00" 기준으로 날짜가 바뀜
+/// - 예: 한국 시간 2026-04-29 23:59 => 4월 29일 출석
+/// - 예: 한국 시간 2026-04-30 00:00 => 4월 30일 출석 가능
+///
+/// 참고:
+/// - "아침 9시에 출석 날짜가 바뀌게" 하고 싶은 경우에는 GetTodayKst()가 아니라
+///   별도의 오전 9시 기준 날짜 계산 함수가 필요함
 /// </summary>
 public static class AttendanceService
 {
@@ -68,30 +74,26 @@ public static class AttendanceService
 
         /// <summary>
         /// 이번 달 누적 출석 횟수
-        /// 중복 제거된 claimedAttendanceDays 개수와 동일한 의미
+        /// 중복 제거된 ClaimedAttendanceDays 개수와 동일한 의미
         /// </summary>
         public int AttendanceCountThisMonth;
 
         /// <summary>
         /// 오늘을 기준으로 역산했을 때의 연속 출석 일수
-        /// 예: 1,2,3,4,5일 연속 출석했고 오늘이 5일이면 5
-        /// 중간에 하루라도 비면 그 전까지만 계산됨
+        /// 예:
+        /// claimed=[1,2,3,4,5], today=5 => 5
+        /// claimed=[1,2,3,5], today=5 => 1
         /// </summary>
         public int CurrentStreak;
 
         /// <summary>
         /// 이번 출석 처리로 지급된 보상 메시지 목록
-        /// 예:
-        /// - "일일 출석 보상: Cash +100"
-        /// - "7일 연속 출석 보상: Cash +1000"
-        /// - "14일 연속 출석 보상: Rare 주사위 1개 지급 (Lv1, Star1)"
         /// UI 팝업이나 토스트에 그대로 활용 가능
         /// </summary>
         public List<string> RewardMessages = new List<string>();
 
         /// <summary>
         /// 디버그 로그 출력용 요약 문자열
-        /// 출석 성공 여부, 오늘 날짜, 이번 달 출석 수, 연속 출석 수를 한 줄로 보여줌
         /// </summary>
         public string DebugSummary =>
             $"Claimed={Claimed}, Already={AlreadyClaimedToday}, Today={TodayString}, " +
@@ -133,7 +135,7 @@ public static class AttendanceService
 
         /// <summary>
         /// 오늘 기준 연속 출석 일수
-        /// 출석 보상 단계(7일/14일/21일/월간)를 표시할 때 사용
+        /// 출석 보상 단계 표시용
         /// </summary>
         public int CurrentStreak;
 
@@ -152,17 +154,27 @@ public static class AttendanceService
         public List<int> ClaimedDays = new List<int>();
     }
 
-
     /// <summary>
     /// 오늘 출석 처리 시도
-    /// - 하루 1회만 가능
-    /// - 보상 지급 후 saveImmediately가 true면 즉시 Firebase 저장
+    ///
+    /// 처리 순서:
+    /// 1. 한국 시간 기준 오늘 날짜 계산
+    /// 2. 출석 데이터 컬렉션 보정
+    /// 3. 월이 바뀌었으면 월간 출석 데이터 초기화
+    /// 4. 오늘 이미 출석했는지 검사
+    /// 5. 오늘 출석 등록
+    /// 6. 일일 보상 지급
+    /// 7. 연속 출석 보상 지급
+    /// 8. saveImmediately가 true면 Firebase 전체 저장
     /// </summary>
     public static async Task<AttendanceClaimResult> TryClaimTodayAsync(Account acc, bool saveImmediately = true)
     {
-        if (acc == null) throw new Exception("Account is null.");
+        if (acc == null)
+            throw new Exception("Account is null.");
 
-        DateTime today = DateTime.Now.Date;
+        // 한국 시간 UTC+9 기준 오늘 날짜
+        DateTime today = GetTodayKst();
+
         string todayStr = today.ToString("yyyy-MM-dd");
         string monthKey = today.ToString("yyyy-MM");
         int todayDay = today.Day;
@@ -180,19 +192,33 @@ public static class AttendanceService
             CurrentStreak = CalculateCurrentMonthStreak(acc, todayDay)
         };
 
-        // 이미 오늘 출석했는지 검사
+        // 디버그용: 출석 처리 전 상태 확인
+        Debug.Log(
+            $"[AttendanceService] TryClaim Before / " +
+            $"KST Today={todayStr}, " +
+            $"MonthKey={monthKey}, " +
+            $"LastAttendanceDate={acc.LastAttendanceDate}, " +
+            $"AccountMonthKey={acc.AttendanceMonthKey}, " +
+            $"ClaimedDays=[{string.Join(",", acc.ClaimedAttendanceDays)}], " +
+            $"Cash={acc.Cash}"
+        );
+
+        // 이미 오늘 출석했으면 중복 보상 지급 없이 종료
         if (IsClaimedToday(acc, today))
         {
             result.Claimed = false;
             result.AlreadyClaimedToday = true;
             result.AttendanceCountThisMonth = acc.AttendanceCountThisMonth;
             result.CurrentStreak = CalculateCurrentMonthStreak(acc, todayDay);
+
+            Debug.Log($"[AttendanceService] Already claimed today. {result.DebugSummary}");
             return result;
         }
 
-        // 오늘 출석 등록
+        // 오늘 날짜를 출석 목록에 추가
         AddClaimedDay(acc, todayDay);
 
+        // 마지막 출석일 및 월 정보 갱신
         acc.LastAttendanceDate = todayStr;
         acc.AttendanceMonthKey = monthKey;
         acc.AttendanceCountThisMonth = acc.ClaimedAttendanceDays.Count;
@@ -202,120 +228,189 @@ public static class AttendanceService
         result.AttendanceCountThisMonth = acc.AttendanceCountThisMonth;
         result.CurrentStreak = CalculateCurrentMonthStreak(acc, todayDay);
 
-        // 1) 기본 보상
+        // 1. 기본 일일 보상
         acc.Cash += DAILY_CASH_REWARD;
         result.RewardMessages.Add($"일일 출석 보상: Cash +{DAILY_CASH_REWARD:0}");
 
-        // 2) 연속 출석 보상
+        // 2. 7일 연속 출석 보상
         if (result.CurrentStreak == 7)
         {
             acc.Cash += STREAK_7_CASH_REWARD;
             result.RewardMessages.Add($"7일 연속 출석 보상: Cash +{STREAK_7_CASH_REWARD:0}");
         }
 
+        // 3. 14일 연속 출석 보상
         if (result.CurrentStreak == 14)
         {
             GrantRewardDice(acc, DiceGrade.Rare, 1, 1);
             result.RewardMessages.Add("14일 연속 출석 보상: Rare 주사위 1개 지급 (Lv1, Star1)");
         }
 
+        // 4. 21일 연속 출석 보상
         if (result.CurrentStreak == 21)
         {
             acc.Cash += STREAK_21_CASH_REWARD;
             result.RewardMessages.Add($"21일 연속 출석 보상: Cash +{STREAK_21_CASH_REWARD:0}");
         }
 
-        // 3) 한 달 연속 출석 보상
-        // 해당 달 마지막 날에, 그 달 1일부터 오늘까지 전부 연속 출석이면 지급
+        // 5. 한 달 전체 연속 출석 보상
+        // 해당 달 마지막 날에, 1일부터 마지막 날까지 전부 출석했을 때 지급
         if (todayDay == daysInMonth && result.CurrentStreak == daysInMonth)
         {
             GrantRewardDice(acc, DiceGrade.Epic, 1, 1);
             result.RewardMessages.Add("한 달 연속 출석 보상: Epic 주사위 1개 지급 (Lv1, Star1)");
         }
 
+        // Firebase 저장
         if (saveImmediately)
+        {
             await AccountCloudStore.SaveFullAsync(acc);
+        }
 
-        Debug.Log($"[AttendanceService] {result.DebugSummary}");
+        Debug.Log(
+            $"[AttendanceService] TryClaim Success / {result.DebugSummary}, " +
+            $"RewardCount={result.RewardMessages.Count}, " +
+            $"Cash={acc.Cash}"
+        );
+
         return result;
     }
 
     /// <summary>
     /// 현재 출석 상태 조회용
+    ///
+    /// 중요:
+    /// - 출석 처리와 동일하게 한국 시간 UTC+9 기준을 사용해야 함
+    /// - 여기서 DateTime.Now.Date를 사용하면 TryClaimTodayAsync와 날짜 기준이 달라질 수 있음
     /// </summary>
     public static AttendanceStatus GetStatus(Account acc)
     {
-        if (acc == null) return null;
+        if (acc == null)
+            return null;
 
-        DateTime today = DateTime.Now.Date;
+        // 한국 시간 UTC+9 기준 오늘 날짜
+        DateTime today = GetTodayKst();
+
         EnsureAttendanceCollections(acc);
         NormalizeMonth(acc, today);
 
-        return new AttendanceStatus
+        string todayStr = today.ToString("yyyy-MM-dd");
+        string monthKey = today.ToString("yyyy-MM");
+        int todayDay = today.Day;
+        int daysInMonth = DateTime.DaysInMonth(today.Year, today.Month);
+
+        var status = new AttendanceStatus
         {
-            TodayString = today.ToString("yyyy-MM-dd"),
-            MonthKey = today.ToString("yyyy-MM"),
-            TodayDay = today.Day,
-            DaysInMonth = DateTime.DaysInMonth(today.Year, today.Month),
+            TodayString = todayStr,
+            MonthKey = monthKey,
+            TodayDay = todayDay,
+            DaysInMonth = daysInMonth,
             AttendanceCountThisMonth = acc.AttendanceCountThisMonth,
-            CurrentStreak = CalculateCurrentMonthStreak(acc, today.Day),
+            CurrentStreak = CalculateCurrentMonthStreak(acc, todayDay),
             IsClaimedToday = IsClaimedToday(acc, today),
             ClaimedDays = new List<int>(acc.ClaimedAttendanceDays.OrderBy(x => x))
         };
+
+        Debug.Log(
+            $"[AttendanceService] GetStatus / " +
+            $"KST Today={status.TodayString}, " +
+            $"MonthKey={status.MonthKey}, " +
+            $"TodayDay={status.TodayDay}, " +
+            $"IsClaimedToday={status.IsClaimedToday}, " +
+            $"Count={status.AttendanceCountThisMonth}, " +
+            $"Streak={status.CurrentStreak}, " +
+            $"ClaimedDays=[{string.Join(",", status.ClaimedDays)}]"
+        );
+
+        return status;
     }
 
     /// <summary>
     /// 달이 바뀌면 월간 출석 데이터 초기화
+    ///
+    /// 예:
+    /// - acc.AttendanceMonthKey = "2026-04"
+    /// - 오늘 한국 시간 기준 monthKey = "2026-05"
+    /// => 5월이 되었으므로 4월 출석 기록 초기화
     /// </summary>
     private static void NormalizeMonth(Account acc, DateTime today)
     {
+        EnsureAttendanceCollections(acc);
+
         string currentMonthKey = today.ToString("yyyy-MM");
 
+        // 기존 월 키가 없으면 현재 월로 초기화
         if (string.IsNullOrWhiteSpace(acc.AttendanceMonthKey))
         {
             acc.AttendanceMonthKey = currentMonthKey;
         }
 
+        // 저장된 월과 현재 월이 다르면 월간 출석 정보 초기화
         if (!string.Equals(acc.AttendanceMonthKey, currentMonthKey, StringComparison.Ordinal))
         {
+            Debug.Log(
+                $"[AttendanceService] Month changed. " +
+                $"OldMonth={acc.AttendanceMonthKey}, NewMonth={currentMonthKey}. " +
+                $"Reset attendance data."
+            );
+
             acc.AttendanceMonthKey = currentMonthKey;
             acc.AttendanceCountThisMonth = 0;
             acc.ClaimedAttendanceDays.Clear();
             acc.LastAttendanceDate = "";
         }
 
-        // 방어: 중복 제거 + 정렬 보정
+        // 현재 달의 실제 일수
+        int daysInMonth = DateTime.DaysInMonth(today.Year, today.Month);
+
+        // 방어 처리:
+        // - 1보다 작은 날짜 제거
+        // - 현재 달의 마지막 일보다 큰 날짜 제거
+        // - 중복 제거
+        // - 오름차순 정렬
         acc.ClaimedAttendanceDays = acc.ClaimedAttendanceDays
-            .Where(day => day >= 1 && day <= DateTime.DaysInMonth(today.Year, today.Month))
+            .Where(day => day >= 1 && day <= daysInMonth)
             .Distinct()
             .OrderBy(day => day)
             .ToList();
 
+        // 출석 횟수는 실제 출석 날짜 목록 개수로 보정
         acc.AttendanceCountThisMonth = acc.ClaimedAttendanceDays.Count;
     }
 
     /// <summary>
-    /// 오늘 출석 여부
+    /// 오늘 이미 출석했는지 검사
+    ///
+    /// 검사 기준:
+    /// 1. LastAttendanceDate가 오늘 날짜 문자열과 같은지 확인
+    /// 2. ClaimedAttendanceDays에 오늘 day 값이 있는지 확인
+    ///
+    /// 둘 중 하나라도 만족하면 오늘 출석한 것으로 판단
     /// </summary>
     private static bool IsClaimedToday(Account acc, DateTime today)
     {
         EnsureAttendanceCollections(acc);
 
         string todayStr = today.ToString("yyyy-MM-dd");
+
+        // 마지막 출석 날짜 문자열로 1차 검사
         if (!string.IsNullOrWhiteSpace(acc.LastAttendanceDate) &&
-            acc.LastAttendanceDate == todayStr)
+            string.Equals(acc.LastAttendanceDate, todayStr, StringComparison.Ordinal))
         {
             return true;
         }
 
+        // 이번 달 출석 날짜 목록으로 2차 검사
         return acc.ClaimedAttendanceDays.Contains(today.Day);
     }
 
     /// <summary>
     /// 현재 달 기준 "오늘까지 몇 일 연속 출석했는지" 계산
+    ///
     /// 예:
     /// claimed=[1,2,3,5,6,7], today=7 => 3
     /// claimed=[1,2,3,4,5,6,7], today=7 => 7
+    /// claimed=[1,3,4,5], today=5 => 3
     /// </summary>
     private static int CalculateCurrentMonthStreak(Account acc, int todayDay)
     {
@@ -327,9 +422,13 @@ public static class AttendanceService
         for (int day = todayDay; day >= 1; day--)
         {
             if (set.Contains(day))
+            {
                 streak++;
+            }
             else
+            {
                 break;
+            }
         }
 
         return streak;
@@ -337,13 +436,17 @@ public static class AttendanceService
 
     /// <summary>
     /// 오늘 날짜를 출석 목록에 추가
+    ///
+    /// 중복으로 같은 날짜가 들어가지 않도록 방어 처리
     /// </summary>
     private static void AddClaimedDay(Account acc, int day)
     {
         EnsureAttendanceCollections(acc);
 
         if (!acc.ClaimedAttendanceDays.Contains(day))
+        {
             acc.ClaimedAttendanceDays.Add(day);
+        }
 
         acc.ClaimedAttendanceDays = acc.ClaimedAttendanceDays
             .Distinct()
@@ -353,18 +456,31 @@ public static class AttendanceService
 
     /// <summary>
     /// 보상 주사위 지급
-    /// - 같은 Grade+Star가 이미 있으면 Count +1
-    /// - 없으면 새로 추가
     ///
-    /// 현재 프로젝트 인벤토리 구조와 맞추기 위해
-    /// Level=1, Count=1, Exp=0, Shard=0, PromoteExp=0 으로 생성
+    /// 처리 방식:
+    /// - 같은 Grade + Star 주사위가 이미 있으면 Count +1
+    /// - 없으면 새 OwnedDice 생성 후 인벤토리에 추가
+    ///
+    /// 현재 프로젝트 인벤토리 구조와 맞추기 위해:
+    /// - Level=1
+    /// - Count=1
+    /// - Exp=0
+    /// - Shard=0
+    /// - PromoteExp=0
+    /// 으로 생성
     /// </summary>
     private static void GrantRewardDice(Account acc, DiceGrade grade, int star, int level)
     {
         if (acc.DiceInventory == null)
+        {
             acc.DiceInventory = new List<OwnedDice>();
+        }
 
-        var found = acc.DiceInventory.Find(d => d != null && d.Grade == grade && d.Star == star);
+        var found = acc.DiceInventory.Find(d =>
+            d != null &&
+            d.Grade == grade &&
+            d.Star == star
+        );
 
         if (found != null)
         {
@@ -386,9 +502,33 @@ public static class AttendanceService
         acc.DiceInventory.Add(rewardDice);
     }
 
+    /// <summary>
+    /// 출석 서비스에서 사용하는 컬렉션 null 방어
+    ///
+    /// Account를 새로 만들었거나,
+    /// 예전 저장 데이터에서 리스트가 null로 로드되는 경우를 방지
+    /// </summary>
     private static void EnsureAttendanceCollections(Account acc)
     {
         acc.ClaimedAttendanceDays ??= new List<int>();
         acc.DiceInventory ??= new List<OwnedDice>();
+    }
+
+    /// <summary>
+    /// 한국 시간 UTC+9 기준 오늘 날짜를 반환
+    ///
+    /// 중요:
+    /// - DateTime.Now를 직접 사용하지 않음
+    /// - UTC 기준 시간에 9시간을 더해서 한국 날짜를 계산
+    /// - 반환값은 시간 정보가 제거된 Date 값
+    ///
+    /// 예:
+    /// - UTC 2026-04-28 15:00
+    /// - KST 2026-04-29 00:00
+    /// - 반환: 2026-04-29 00:00:00
+    /// </summary>
+    private static DateTime GetTodayKst()
+    {
+        return DateTime.UtcNow.AddHours(9).Date;
     }
 }

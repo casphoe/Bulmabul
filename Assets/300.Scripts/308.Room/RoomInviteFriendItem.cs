@@ -15,6 +15,9 @@ public class RoomInviteFriendData : InfiniteScrollData
 
     // 초대 버튼 클릭 콜백
     public Action<FriendRow, RoomInviteFriendItem> onClickInvite;
+
+    // InfiniteScroll 아이템이 생성/갱신될 때 Popup 쪽에 자신을 등록하기 위한 콜백
+    public Action<FriendRow, RoomInviteFriendItem> onBindItem;
 }
 
 /// <summary>
@@ -52,6 +55,9 @@ public class RoomInviteFriendItem : InfiniteScrollItem
         }
 
         _row = _data.friend;
+
+        // Popup 쪽에서 UID별 아이템을 찾을 수 있도록 등록
+        _data.onBindItem?.Invoke(_row, this);
 
         // 현재 언어 가져오기
         var lang = LaguageManager.Instance != null
@@ -101,7 +107,22 @@ public class RoomInviteFriendItem : InfiniteScrollItem
     {
         if (btnInvite == null) return;
 
-        btnInvite.interactable = false;      
+        btnInvite.interactable = false;
+        btnInvite.onClick.RemoveAllListeners();
+    }
+
+    public void SetInviteAvailable()
+    {
+        if (btnInvite == null) return;
+
+        btnInvite.interactable = true;
+        btnInvite.onClick.RemoveAllListeners();
+
+        btnInvite.onClick.AddListener(() =>
+        {
+            if (_data != null && _row != null)
+                _data.onClickInvite?.Invoke(_row, this);
+        });
     }
 
     /// <summary>
