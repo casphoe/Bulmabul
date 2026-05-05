@@ -380,6 +380,131 @@ public class RoomMembersState : NetworkBehaviour
         BumpRevision();
     }
 
+    /// <summary>
+    /// 방장이 게임 시작 버튼을 눌렀을 때 호출된다.
+    /// 실제 검사는 StateAuthority 쪽에서 다시 한다.
+    /// </summary>
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestStartGame(RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority) return;
+
+        PlayerRef requester = info.Source;
+
+        // 요청자가 방장이 아니면 무시
+        if (requester != Leader)
+        {
+            Debug.LogWarning($"[RoomMembersState] StartGame denied. Requester is not leader. requester={requester}, leader={Leader}");
+            return;
+        }
+
+        // 리더 제외 모든 참가자가 Ready인지 최종 검사
+        if (!CanStartGameByReadyState())
+        {
+            Debug.LogWarning("[RoomMembersState] StartGame denied. Not all members are ready.");
+            return;
+        }
+
+        Debug.Log("[RoomMembersState] StartGame approved. Loading gameplay scene.");
+
+        if (NetWorkLauncher.instance != null)
+        {
+            NetWorkLauncher.instance.StartGameFromRoom();
+        }
+        else
+        {
+            Debug.LogWarning("[RoomMembersState] NetWorkLauncher.instance is null.");
+        }
+    }
+
+    /// <summary>
+    /// 게임 시작 가능 여부 최종 검사.
+    /// 실제 게임 시작 직전에 StateAuthority 쪽에서 검사한다.
+    ///
+    /// 공통 조건:
+    /// - 리더가 있어야 함
+    /// - 방에 최소 2명 이상 있어야 함
+    /// - 리더 제외 모든 참가자가 Ready 상태여야 함
+    ///
+    /// 팀 모드 조건:
+    /// - Red 팀에 최소 1명 이상 있어야 함
+    /// - Blue 팀에 최소 1명 이상 있어야 함
+    /// </summary>
+    private bool CanStartGameByReadyState()
+    {
+        if (Leader == PlayerRef.None)
+            return false;
+
+        int totalPlayerCount = 0;
+        int nonLeaderCount = 0;
+
+        int redCount = 0;
+        int blueCount = 0;
+
+        for (int i = 0; i < MaxSlots; i++)
+        {
+            var s = Slots.Get(i);
+
+            if (s.occupied == 0)
+                continue;
+
+            totalPlayerCount++;
+
+            // 팀 모드에서는 슬롯 인덱스로 팀을 판단한다.
+            // 현재 구조: 0, 2번 슬롯 = Red / 1, 3번 슬롯 = Blue
+            if (ModeInt == (int)MatchMode.Team)
+            {
+                TeamSide team = GetTeamBySlotIndex(i);
+
+                if (team == TeamSide.Red)
+                    redCount++;
+                else if (team == TeamSide.Blue)
+                    blueCount++;
+            }
+
+            // 리더는 Ready 검사 제외
+            if (s.player == Leader)
+                continue;
+
+            nonLeaderCount++;
+
+            // 리더 제외 인원 중 한 명이라도 준비 안 했으면 시작 불가
+            if (!s.ready)
+                return false;
+        }
+
+        // 방에 1명만 있으면 시작 불가
+        if (totalPlayerCount <= 1)
+            return false;
+
+        // 리더 제외 인원이 없으면 시작 불가
+        if (nonLeaderCount <= 0)
+            return false;
+
+        // 팀 모드에서는 Red / Blue 양쪽 팀에 최소 1명씩 있어야 하고,
+        // 양 팀 인원 수가 반드시 같아야 시작 가능
+        if (ModeInt == (int)MatchMode.Team)
+        {
+            if (redCount <= 0 || blueCount <= 0)
+            {
+                Debug.LogWarning(
+                    $"[RoomMembersState] Start denied. Team mode requires both teams. Red={redCount}, Blue={blueCount}"
+                );
+                return false;
+            }
+
+            if (redCount != blueCount)
+            {
+                Debug.LogWarning(
+                    $"[RoomMembersState] Start denied. Team count mismatch. Red={redCount}, Blue={blueCount}"
+                );
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // ===== 룸 설정 변경 (리더만) =====
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestChangeRoomSettings(int newModeInt, int newMap, int soloMaxPlayers, RpcInfo info = default)

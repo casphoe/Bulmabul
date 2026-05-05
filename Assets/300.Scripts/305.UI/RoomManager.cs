@@ -309,20 +309,40 @@ public class RoomManager : MonoBehaviour
         // 리더만 시작 가능
         if (!AmILeader()) return;
 
-        // 버튼이 true일 때만 시작
+        // 버튼 조건 검사
         if (!CanLeaderStartGame()) return;
 
-        // 전원 Ready 검사(occupied만)
+        var leader = m.Leader;
+        if (leader == PlayerRef.None) return;
+
+        // 리더 제외 전원 Ready 검사
         int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
+
         for (int i = 0; i < n; i++)
         {
             var s = m.Slots.Get(i);
+
             if (s.occupied == 0) continue;
-            if (!s.ready) return;
+
+            // 방장은 Ready 검사 제외
+            if (s.player == leader) continue;
+
+            // 일반 참가자가 준비 안 했으면 시작 불가
+            if (!s.ready)
+            {
+                Debug.LogWarning("[RoomManager] Cannot start. Not all members are ready.");
+                return;
+            }
         }
 
-        // TODO: 실제 게임 시작 로직
-        // NetWorkLauncher.instance.StartGameFromRoom();
+        // 중복 클릭 방지
+        if (btnGameStart != null)
+            btnGameStart.interactable = false;
+
+        Debug.Log("[RoomManager] Request start game.");
+
+        // StateAuthority 쪽에 게임 시작 요청
+        m.RPC_RequestStartGame();
     }
 
     private async void OnClickLeave()
@@ -953,31 +973,80 @@ public class RoomManager : MonoBehaviour
         var m = Members;
         if (m == null || m.Runner == null) return false;
 
-        // 리더만 시작 가능
+        // 방장만 시작 가능
         if (!AmILeader()) return false;
 
         var leader = m.Leader;
         if (leader == PlayerRef.None) return false;
 
+        int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
+
+        int totalPlayerCount = 0;
         int nonLeaderCount = 0;
 
-        int n = Mathf.Min(maxSlots, RoomMembersState.MaxSlots);
+        int redCount = 0;
+        int blueCount = 0;
+
         for (int i = 0; i < n; i++)
         {
             var s = m.Slots.Get(i);
+
             if (s.occupied == 0) continue;
 
-            // 리더는 Ready 검사 제외
-            if (s.player == leader) continue;
+            totalPlayerCount++;
+
+            // 팀 모드일 때만 슬롯 인덱스 기준으로 팀 인원 체크
+            // 현재 구조에서는 s.team이 없음
+            // 0, 2번 슬롯 = Red / 1, 3번 슬롯 = Blue
+            if (m.ModeInt == (int)MatchMode.Team)
+            {
+                TeamSide team = m.GetTeamBySlotIndex(i);
+
+                if (team == TeamSide.Red)
+                    redCount++;
+                else if (team == TeamSide.Blue)
+                    blueCount++;
+            }
+
+            // 방장은 Ready 검사 제외
+            if (s.player == leader)
+                continue;
 
             nonLeaderCount++;
 
-            // 리더 제외 인원 중 한명이라도 ready=false면 시작 불가
-            if (!s.ready) return false;
+            // 방장 제외 인원 중 한 명이라도 준비 안 했으면 시작 불가
+            if (!s.ready)
+                return false;
         }
 
-        // (선택) 리더 혼자면 시작 불가
-        if (nonLeaderCount == 0) return false;
+        // 방에 1명만 있으면 시작 불가
+        if (totalPlayerCount <= 1)
+            return false;
+
+        // 방장 제외 인원이 없으면 시작 불가
+        if (nonLeaderCount <= 0)
+            return false;
+
+        // 팀 모드일 경우 Red / Blue 양쪽 팀에 최소 1명씩 있어야 하고,
+        // 팀 인원 수도 반드시 같아야 시작 가능
+        if (m.ModeInt == (int)MatchMode.Team)
+        {
+            if (redCount <= 0 || blueCount <= 0)
+            {
+                Debug.LogWarning(
+                    $"[RoomManager] Cannot start. Team mode requires both teams. Red={redCount}, Blue={blueCount}"
+                );
+                return false;
+            }
+
+            if (redCount != blueCount)
+            {
+                Debug.LogWarning(
+                    $"[RoomManager] Cannot start. Team count mismatch. Red={redCount}, Blue={blueCount}"
+                );
+                return false;
+            }
+        }
 
         return true;
     }

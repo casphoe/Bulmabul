@@ -6002,8 +6002,10 @@ MonoBehaviour:
   currentMode: 0
   selectindex: 0
   sortMode: 0
-  gameScene:
+  roomScene:
     RawValue: 3
+  gameplayScene:
+    RawValue: 4
   lobbySceneName: LobbyScene
   lobby: 2
   selectedMap: 0

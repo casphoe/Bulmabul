@@ -58,8 +58,13 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
     [Header("방 정렬 모드")]
     public RoomSortMode sortMode = RoomSortMode.Alpha;
 
-    [Header("Game Scene (Fusion 네트워크 로드용)")]
-    [SerializeField] private SceneRef gameScene;
+    [Header("Room Scene")]
+    [SerializeField] private SceneRef roomScene;      // 방 생성/참가 시 들어가는 현재 방 씬
+
+    [Header("Gameplay Scene")]
+    [SerializeField] private SceneRef gameplayScene;  // 게임 시작 시 이동할 실제 게임 씬
+
+    private bool _loadingGameplayScene = false;
 
     [Header("Lobby Scene Name (언로드용)")]
     [SerializeField] private string lobbySceneName = "LobbyScene"; // 너 로비씬 이름으로
@@ -791,7 +796,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         {
             GameMode = mode,
             SessionName = sessionName,
-            Scene = gameScene,
+            Scene = roomScene, // 방 생성/참가 시에는 방 씬으로 입장
             SceneManager = _sceneManager,
             PlayerCount = forcedMaxPlayers,        //  최대 인원 강제 적용
             SessionProperties = props,
@@ -922,6 +927,39 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         // UI에는 _cachedSessions만 전달하므로 가득 찬 방은 보이지 않음
         OnRoomsUpdated?.Invoke(_cachedSessions);
+    }
+
+    /// <summary>
+    /// 방장이 게임 시작을 눌렀을 때 호출된다.
+    /// 현재 방 씬에 있는 모든 플레이어를 실제 게임 씬으로 이동시킨다.
+    /// </summary>
+    public void StartGameFromRoom()
+    {
+        if (_runner == null)
+        {
+            Debug.LogWarning("[Fusion] Runner is null. Cannot start gameplay scene.");
+            return;
+        }
+
+        if (!_runner.IsRunning)
+        {
+            Debug.LogWarning("[Fusion] Runner is not running. Cannot start gameplay scene.");
+            return;
+        }
+
+        if (_loadingGameplayScene)
+        {
+            Debug.LogWarning("[Fusion] Gameplay scene is already loading.");
+            return;
+        }
+
+        _loadingGameplayScene = true;
+
+        Debug.Log("[Fusion] Loading gameplay scene from room...");
+
+        // Fusion 네트워크 씬 로드
+        // 방에 있는 모든 플레이어가 같이 gameplayScene으로 이동한다.
+        _runner.LoadScene(gameplayScene, LoadSceneMode.Single);
     }
 
     public void OnInput(NetworkRunner runner, NetworkInput input) { }
