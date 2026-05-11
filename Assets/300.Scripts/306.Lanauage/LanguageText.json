@@ -307,6 +307,10 @@
     {
       "key": "txt.DicePromte",
       "text": "주사위 승급"
+    },
+    {
+      "key": "txt.GameTitle",
+      "text": "부루마불 게임"
     }
   ],
   "eng": [
@@ -617,6 +621,10 @@
     {
       "key": "txt.DicePromte",
       "text": "Dice Promote"
+    },
+    {
+      "key": "txt.GameTitle",
+      "text": "Blue Marble game"
     }
   ]
 }

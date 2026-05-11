@@ -524,12 +524,16 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
     #region 방 맵 선택
 
-    [Header("방 맵 선택 (0=Korea, 1=USA)")]
-    public int selectedMap = 0;
+    [SerializeField] private int selectedMapIndex = 0;
 
-    public void SetSelectedMap(int map)
+    /// <summary>
+    /// 0 = 한국맵, 1 = 미국맵
+    /// </summary>
+    public int SelectedMapIndex => selectedMapIndex;
+
+    public void SetSelectedMap(int mapIndex)
     {
-        selectedMap = Mathf.Clamp(map, 0, 1);
+        selectedMapIndex = Mathf.Clamp(mapIndex, 0, 1);
     }
 
     #endregion
@@ -789,7 +793,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
             { "mode", (int)modeValue },           // 0=Solo, 1=Team
             { "max",  forcedMaxPlayers },         // 참고용
             { "createdAt", (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
-            { "map", selectedMap },
+            { "map", selectedMapIndex },
         };
 
         return _runner.StartGame(new StartGameArgs
@@ -1092,7 +1096,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         playerCount = 0;
         currentMode = MatchMode.Solo;
         selectindex = -1;
-        selectedMap = 0;
+        selectedMapIndex = 0;
     }
 
     private async void ForceReturnToLobby()

@@ -407,6 +407,9 @@ public class RoomMembersState : NetworkBehaviour
 
         Debug.Log("[RoomMembersState] StartGame approved. Loading gameplay scene.");
 
+        // GameScene으로 넘어가기 전에 현재 방 참가자 정보 저장
+        BulmabulGameStartCache.CaptureFromRoom(this);
+
         if (NetWorkLauncher.instance != null)
         {
             NetWorkLauncher.instance.StartGameFromRoom();

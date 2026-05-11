@@ -1,0 +1,175 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &2421205818071784457
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8087960852428965950}
+  - component: {fileID: 8174927343734149224}
+  - component: {fileID: 4824806498393361706}
+  - component: {fileID: 7946728068395600674}
+  m_Layer: 0
+  m_Name: TaxCell
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8087960852428965950
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2421205818071784457}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 6, y: 6, z: 6}
+  m_ConstrainProportionsScale: 1
+  m_Children:
+  - {fileID: 7079762249311357442}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!33 &8174927343734149224
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2421205818071784457}
+  m_Mesh: {fileID: 4300244, guid: 87b751928235ced49a4a5bee39a873cc, type: 3}
+--- !u!23 &4824806498393361706
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2421205818071784457}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: e4684a765ffa43d4caa4ec942f89f91d, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &7946728068395600674
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2421205818071784457}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2b67f967f4fd39b48bfd6586ee2ee02a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cellIndex: 0
+  cellData:
+    cellName: 
+    cellType: 0
+    point: {fileID: 0}
+    buyCost: 0
+    tollCost: 0
+    smallHouseBuildCost: 0
+    houseBuildCost: 0
+    bigHouseBuildCost: 0
+    hotelBuildCost: 0
+    smallHouseToll: 0
+    houseToll: 0
+    bigHouseToll: 0
+    hotelToll: 0
+    taxCost: 0
+    bonusMinAmount: 10000
+    bonusMaxAmount: 50000
+    travelCost: 100000
+    lineId: -1
+    isLandmark: 0
+  autoCreate3DTexts: 1
+  useHorizontalTextOnBoard: 1
+  labelRoot: {fileID: 7079762249311357442}
+  labelRootName: LabelRoot
+  textHeight: 0.65
+  lineGap: 0.6
+  textScale: 0.08
+  labelSide: 0
+  cellsPerSide: 40
+  extraXOffset: 0
+  extraZOffset: 0
+  defaultFontAsset: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  nameFontAsset: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  priceFontAsset: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  nameFontSize: 18
+  priceFontSize: 15
+  nameColor: {r: 0, g: 0, b: 0, a: 1}
+  priceColor: {r: 0, g: 0, b: 0, a: 1}
+  nameTextWidth: 8
+  nameTextHeight: 2
+  priceTextWidth: 8
+  priceTextHeight: 2
+  txtName: {fileID: 0}
+  txtPrice: {fileID: 0}
+--- !u!1 &3892906927566062118
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7079762249311357442}
+  m_Layer: 0
+  m_Name: LabelRoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7079762249311357442
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3892906927566062118}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8087960852428965950}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
