@@ -141,6 +141,9 @@ public class BulmabulBoardCellView : MonoBehaviour
 
     private void Awake()
     {
+        if (!Application.isPlaying)
+            return;
+
         EnsureLabelRoot();
         Ensure3DTexts();
         ApplyAllTextStyle();
@@ -150,6 +153,9 @@ public class BulmabulBoardCellView : MonoBehaviour
 #if UNITY_EDITOR
     private void OnValidate()
     {
+        if (!Application.isPlaying)
+            return;
+
         EnsureLabelRoot();
         ApplyAllTextStyle();
         RefreshTextLayout();
@@ -162,6 +168,12 @@ public class BulmabulBoardCellView : MonoBehaviour
     /// </summary>
     private void EnsureLabelRoot()
     {
+
+        // 에디터에서 Prefab Asset 자체를 검사하는 중에는
+        // 자식 생성/부모 변경을 하면 Unity가 에러를 낸다.
+        if (!Application.isPlaying)
+            return;
+
         if (labelRoot != null)
         {
             labelRoot.SetParent(transform, false);
@@ -198,6 +210,9 @@ public class BulmabulBoardCellView : MonoBehaviour
         if (!autoCreate3DTexts)
             return;
 
+        if (!Application.isPlaying)
+            return;
+
         EnsureLabelRoot();
 
         if (txtName == null)
@@ -209,6 +224,9 @@ public class BulmabulBoardCellView : MonoBehaviour
 
     private TMP_Text Create3DText(string objectName)
     {
+        if (!Application.isPlaying)
+            return null;
+
         EnsureLabelRoot();
 
         Transform existing = labelRoot.Find(objectName);

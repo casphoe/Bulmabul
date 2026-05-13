@@ -168,6 +168,25 @@ public static class BulmabulLandSystem
         return false;
     }
 
+    /// <summary>
+    /// 재화 조건을 제외하고 건설 규칙만 검사한다.
+    /// 재화가 부족한지 토스트로 알려주기 위해 사용한다.
+    /// </summary>
+    public static bool CanBuildIgnoringCash(
+        BulmabulCellData cell,
+        int currentFlags,
+        BulmabulBuildPart part,
+        bool initialBuildAfterBuy)
+    {
+        return CanBuild(
+            cell,
+            currentFlags,
+            int.MaxValue,
+            part,
+            initialBuildAfterBuy
+        );
+    }
+
     public static bool CanBuildAny(
         BulmabulCellData cell,
         int currentFlags,
@@ -178,5 +197,40 @@ public static class BulmabulLandSystem
                CanBuild(cell, currentFlags, playerCash, BulmabulBuildPart.House, initialBuildAfterBuy) ||
                CanBuild(cell, currentFlags, playerCash, BulmabulBuildPart.BigHouse, initialBuildAfterBuy) ||
                CanBuild(cell, currentFlags, playerCash, BulmabulBuildPart.Hotel, initialBuildAfterBuy);
+    }
+
+    /// <summary>
+    /// 인수 비용 계산.
+    /// 땅 가격 + 현재 지어진 건물 가격 합산.
+    /// 호텔이 있으면 인수 불가이므로 이 함수는 호텔 없는 상태에서만 쓰는 것을 권장한다.
+    /// </summary>
+    public static int CalculateTakeOverCost(BulmabulCellData cell, int buildFlags)
+    {
+        if (cell == null)
+            return 0;
+
+        int cost = Mathf.Max(0, cell.buyCost);
+
+        if (BulmabulBuildFlags.Has(buildFlags, BulmabulBuildFlags.SmallHouse))
+            cost += Mathf.Max(0, cell.smallHouseBuildCost);
+
+        if (BulmabulBuildFlags.Has(buildFlags, BulmabulBuildFlags.House))
+            cost += Mathf.Max(0, cell.houseBuildCost);
+
+        if (BulmabulBuildFlags.Has(buildFlags, BulmabulBuildFlags.BigHouse))
+            cost += Mathf.Max(0, cell.bigHouseBuildCost);
+
+        if (BulmabulBuildFlags.Has(buildFlags, BulmabulBuildFlags.Hotel))
+            cost += Mathf.Max(0, cell.hotelBuildCost);
+
+        return cost;
+    }
+
+    /// <summary>
+    /// 호텔이 없는 땅만 인수 가능.
+    /// </summary>
+    public static bool CanTakeOver(int buildFlags)
+    {
+        return !BulmabulBuildFlags.Has(buildFlags, BulmabulBuildFlags.Hotel);
     }
 }

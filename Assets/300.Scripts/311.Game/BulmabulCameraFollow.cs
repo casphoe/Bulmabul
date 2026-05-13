@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 
 /// <summary>
 /// 부루마불 게임용 카메라.
@@ -94,6 +95,13 @@ public class BulmabulCameraFollow : MonoBehaviour
     public bool IsFullMapView => _isFullMapView;
 
     /// <summary>
+    /// 전체 맵 보기 상태가 바뀔 때 호출된다.
+    /// true  = 전체 맵 보기
+    /// false = Pawn 따라가기 보기
+    /// </summary>
+    public event Action<bool> OnFullMapViewChanged;
+
+    /// <summary>
     /// Pawn 따라가기 카메라 오프셋.
     /// </summary>
     public Vector3 Offset
@@ -163,6 +171,9 @@ public class BulmabulCameraFollow : MonoBehaviour
         if (!useFullMapView)
             return;
 
+        if (_isFullMapView == active)
+            return;
+
         _isFullMapView = active;
 
         if (_isFullMapView)
@@ -175,6 +186,8 @@ public class BulmabulCameraFollow : MonoBehaviour
             if (instant)
                 SnapToTarget();
         }
+
+        OnFullMapViewChanged?.Invoke(_isFullMapView);
     }
 
     /// <summary>
@@ -183,10 +196,15 @@ public class BulmabulCameraFollow : MonoBehaviour
     /// </summary>
     public void ForceFollowView(bool instant)
     {
+        if (!_isFullMapView)
+            return;
+
         _isFullMapView = false;
 
         if (instant)
             SnapToTarget();
+
+        OnFullMapViewChanged?.Invoke(_isFullMapView);
     }
 
     /// <summary>

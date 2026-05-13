@@ -43,6 +43,8 @@ GameObject:
   - component: {fileID: 2968723302799818883}
   - component: {fileID: 6791712838327581454}
   - component: {fileID: 1858653911378576000}
+  - component: {fileID: -2642721994921950323}
+  - component: {fileID: 5208648123649122417}
   m_Layer: 0
   m_Name: JallCell
   m_TagString: Untagged
@@ -173,3 +175,131 @@ MonoBehaviour:
   priceTextHeight: 2
   txtName: {fileID: 0}
   txtPrice: {fileID: 0}
+--- !u!114 &-2642721994921950323
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7056653399971679316}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e69f3d802c075e42b1700e287677638, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cellIndex: -1
+  cellData:
+    cellName: 
+    cellType: 0
+    point: {fileID: 0}
+    buyCost: 0
+    tollCost: 0
+    smallHouseBuildCost: 0
+    houseBuildCost: 0
+    bigHouseBuildCost: 0
+    hotelBuildCost: 0
+    smallHouseToll: 0
+    houseToll: 0
+    bigHouseToll: 0
+    hotelToll: 0
+    taxCost: 0
+    bonusMinAmount: 10000
+    bonusMaxAmount: 50000
+    travelCost: 100000
+    lineId: -1
+    isLandmark: 0
+  autoCreate: 1
+  rootName: MapInfoRoot
+  backgroundName: MapInfoBackground
+  textName: TxtMapInfo
+  root: {fileID: 0}
+  background: {fileID: 0}
+  txtInfo: {fileID: 0}
+  height: 0.82
+  distanceFromCenter: 0.15
+  extraXOffset: 0
+  extraZOffset: 0
+  horizontalOnBoard: 1
+  infoSide: 0
+  cellsPerSide: 40
+  defaultFontAsset: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  fontSize: 10
+  textScale: 0.075
+  textWidth: 8.5
+  textHeight: 4.5
+  useBackground: 1
+  backgroundSize: {x: 0.85, y: 0.48}
+  noOwnerBackgroundColor: {r: 1, g: 1, b: 1, a: 0.78}
+  ownerBackgroundColors:
+  - {r: 1, g: 0.25, b: 0.25, a: 0.82}
+  - {r: 0.25, g: 0.45, b: 1, a: 0.82}
+  - {r: 0.25, g: 1, b: 0.35, a: 0.82}
+  - {r: 1, g: 0.82, b: 0.2, a: 0.82}
+  noOwnerTextColor: {r: 0, g: 0, b: 0, a: 1}
+  ownerTextColor: {r: 1, g: 1, b: 1, a: 1}
+  showNoOwnerLand: 1
+  compactNoOwnerText: 1
+--- !u!114 &5208648123649122417
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7056653399971679316}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e69f3d802c075e42b1700e287677638, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cellIndex: -1
+  cellData:
+    cellName: 
+    cellType: 0
+    point: {fileID: 0}
+    buyCost: 0
+    tollCost: 0
+    smallHouseBuildCost: 0
+    houseBuildCost: 0
+    bigHouseBuildCost: 0
+    hotelBuildCost: 0
+    smallHouseToll: 0
+    houseToll: 0
+    bigHouseToll: 0
+    hotelToll: 0
+    taxCost: 0
+    bonusMinAmount: 10000
+    bonusMaxAmount: 50000
+    travelCost: 100000
+    lineId: -1
+    isLandmark: 0
+  autoCreate: 1
+  rootName: MapInfoRoot
+  backgroundName: MapInfoBackground
+  textName: TxtMapInfo
+  root: {fileID: 0}
+  background: {fileID: 0}
+  txtInfo: {fileID: 0}
+  height: 0.82
+  distanceFromCenter: 0.15
+  extraXOffset: 0
+  extraZOffset: 0
+  horizontalOnBoard: 1
+  infoSide: 0
+  cellsPerSide: 40
+  defaultFontAsset: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  fontSize: 10
+  textScale: 0.075
+  textWidth: 8.5
+  textHeight: 4.5
+  useBackground: 1
+  backgroundSize: {x: 0.85, y: 0.48}
+  noOwnerBackgroundColor: {r: 1, g: 1, b: 1, a: 0.78}
+  ownerBackgroundColors:
+  - {r: 1, g: 0.25, b: 0.25, a: 0.82}
+  - {r: 0.25, g: 0.45, b: 1, a: 0.82}
+  - {r: 0.25, g: 1, b: 0.35, a: 0.82}
+  - {r: 1, g: 0.82, b: 0.2, a: 0.82}
+  noOwnerTextColor: {r: 0, g: 0, b: 0, a: 1}
+  ownerTextColor: {r: 1, g: 1, b: 1, a: 1}
+  showNoOwnerLand: 1
+  compactNoOwnerText: 1

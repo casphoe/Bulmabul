@@ -86,8 +86,19 @@ public class BulmabulGameUI : MonoBehaviour
     [SerializeField] private GameObject buyPanel;
 
     [SerializeField] private TMP_Text txtBuyInfo;
+
+    [Tooltip("땅 구매 버튼")]
     [SerializeField] private Button btnBuyLand;
+
+    [Tooltip("구매 스킵 버튼")]
     [SerializeField] private Button btnSkipBuyLand;
+
+    [Header("Land Purchase Button Texts")]
+    [Tooltip("Buy Land 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtBuyLandButton;
+
+    [Tooltip("Buy Skip 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtSkipBuyLandButton;
 
     [Header("Build UI")]
     [Tooltip("건물 건설 선택 패널")]
@@ -110,6 +121,23 @@ public class BulmabulGameUI : MonoBehaviour
     [Tooltip("건설하지 않고 넘기기 버튼")]
     [SerializeField] private Button btnSkipBuild;
 
+    [Header("Build Button Texts")]
+    [Tooltip("작은집 건설 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtBuildSmallHouseButton;
+
+    [Tooltip("집 건설 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtBuildHouseButton;
+
+    [Tooltip("큰집 건설 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtBuildBigHouseButton;
+
+    [Tooltip("호텔 건설 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtBuildHotelButton;
+
+    [Tooltip("건설 스킵 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtSkipBuildButton;
+
+    [Header("시작지점 도착 후 건설할 ")]
     [Tooltip("시작지점 도착 후 건설할 내 땅 선택 버튼들. 배열 인덱스 = 칸 인덱스")]
     [SerializeField] private Button[] btnBuildTargets;
 
@@ -122,6 +150,25 @@ public class BulmabulGameUI : MonoBehaviour
 
     [Tooltip("목적지 선택 버튼들. 배열 인덱스 = 칸 인덱스")]
     [SerializeField] private Button[] btnTravelTargets;
+
+    [Header("Take Over UI")]
+    [Tooltip("상대 땅 인수 선택 패널")]
+    [SerializeField] private GameObject takeOverPanel;
+
+    [SerializeField] private TMP_Text txtTakeOverInfo;
+
+    [Tooltip("인수하기 버튼")]
+    [SerializeField] private Button btnTakeOverLand;
+
+    [Tooltip("인수하지 않고 넘기기 버튼")]
+    [SerializeField] private Button btnSkipTakeOverLand;
+
+    [Header("Take Over Button Texts")]
+    [Tooltip("인수하기 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtTakeOverLandButton;
+
+    [Tooltip("인수 스킵 버튼의 첫 번째 자식 TextMeshPro")]
+    [SerializeField] private TMP_Text txtSkipTakeOverLandButton;
 
     [Header("Pause UI")]
     [SerializeField] private Button btnPauseResume;
@@ -153,6 +200,9 @@ public class BulmabulGameUI : MonoBehaviour
 
     private void Awake()
     {
+        AutoBindBuyButtonTexts();
+        AutoBindBuildButtonTexts();
+        AutoBindTakeOverButtonTexts();
         BindButtons();
         CloseAllPopupPanels();
     }
@@ -168,6 +218,71 @@ public class BulmabulGameUI : MonoBehaviour
         if (_diceGaugeHolding && Input.GetMouseButtonUp(0))
         {
             OnDiceConfirmPointerUp();
+        }
+    }
+
+    /// <summary>
+    /// 땅 구매 / 스킵 버튼 안의 첫 번째 자식 TextMeshPro를 자동으로 찾는다.
+    /// 인스펙터에 직접 연결하지 않아도 작동하게 하기 위한 보정 함수.
+    /// </summary>
+    private void AutoBindBuyButtonTexts()
+    {
+        if (txtBuyLandButton == null && btnBuyLand != null && btnBuyLand.transform.childCount > 0)
+        {
+            txtBuyLandButton = btnBuyLand.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+
+        if (txtSkipBuyLandButton == null && btnSkipBuyLand != null && btnSkipBuyLand.transform.childCount > 0)
+        {
+            txtSkipBuyLandButton = btnSkipBuyLand.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+    }
+
+    /// <summary>
+    /// 건물 건설 버튼 안의 첫 번째 자식 TextMeshPro를 자동으로 찾는다.
+    /// 인스펙터에 직접 연결하지 않아도 작동하게 하기 위한 보정 함수.
+    /// </summary>
+    private void AutoBindBuildButtonTexts()
+    {
+        if (txtBuildSmallHouseButton == null && btnBuildSmallHouse != null && btnBuildSmallHouse.transform.childCount > 0)
+        {
+            txtBuildSmallHouseButton = btnBuildSmallHouse.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+
+        if (txtBuildHouseButton == null && btnBuildHouse != null && btnBuildHouse.transform.childCount > 0)
+        {
+            txtBuildHouseButton = btnBuildHouse.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+
+        if (txtBuildBigHouseButton == null && btnBuildBigHouse != null && btnBuildBigHouse.transform.childCount > 0)
+        {
+            txtBuildBigHouseButton = btnBuildBigHouse.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+
+        if (txtBuildHotelButton == null && btnBuildHotel != null && btnBuildHotel.transform.childCount > 0)
+        {
+            txtBuildHotelButton = btnBuildHotel.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+
+        if (txtSkipBuildButton == null && btnSkipBuild != null && btnSkipBuild.transform.childCount > 0)
+        {
+            txtSkipBuildButton = btnSkipBuild.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+    }
+
+    /// <summary>
+    /// 인수 / 인수 스킵 버튼 안의 첫 번째 자식 TextMeshPro를 자동으로 찾는다.
+    /// </summary>
+    private void AutoBindTakeOverButtonTexts()
+    {
+        if (txtTakeOverLandButton == null && btnTakeOverLand != null && btnTakeOverLand.transform.childCount > 0)
+        {
+            txtTakeOverLandButton = btnTakeOverLand.transform.GetChild(0).GetComponent<TMP_Text>();
+        }
+
+        if (txtSkipTakeOverLandButton == null && btnSkipTakeOverLand != null && btnSkipTakeOverLand.transform.childCount > 0)
+        {
+            txtSkipTakeOverLandButton = btnSkipTakeOverLand.transform.GetChild(0).GetComponent<TMP_Text>();
         }
     }
 
@@ -272,6 +387,18 @@ public class BulmabulGameUI : MonoBehaviour
         {
             btnExitNo.onClick.RemoveListener(OnClickExitNo);
             btnExitNo.onClick.AddListener(OnClickExitNo);
+        }
+
+        if (btnTakeOverLand != null)
+        {
+            btnTakeOverLand.onClick.RemoveListener(OnClickTakeOverLand);
+            btnTakeOverLand.onClick.AddListener(OnClickTakeOverLand);
+        }
+
+        if (btnSkipTakeOverLand != null)
+        {
+            btnSkipTakeOverLand.onClick.RemoveListener(OnClickSkipTakeOverLand);
+            btnSkipTakeOverLand.onClick.AddListener(OnClickSkipTakeOverLand);
         }
 
         BindTravelTargetButtons();
@@ -391,6 +518,9 @@ public class BulmabulGameUI : MonoBehaviour
 
         if (exitConfirmPanel != null)
             exitConfirmPanel.SetActive(false);
+
+        if (takeOverPanel != null)
+            takeOverPanel.SetActive(false);
     }
 
     /// <summary>
@@ -414,6 +544,7 @@ public class BulmabulGameUI : MonoBehaviour
         RefreshBuyPanel(state);
         RefreshBuildPanel(state);
         RefreshTravelUI(state);
+        RefreshTakeOverPanel(state);
         RefreshPauseUI(state);
         RefreshLog(state);
     }
@@ -427,7 +558,12 @@ public class BulmabulGameUI : MonoBehaviour
             txtTurnInfo.text = "게임 상태 준비 중...";
 
         if (txtTurnTimer != null)
-            txtTurnTimer.text = "00";
+        {
+            txtTurnTimer.text = GetByLanguage(
+                "턴 시간: --초",
+                "Turn Time: --s"
+            );
+        }
 
         if (txtPauseCount != null)
             txtPauseCount.text = "일시정지 남은 횟수: -";
@@ -481,9 +617,112 @@ public class BulmabulGameUI : MonoBehaviour
 
         if (txtTurnTimer != null)
         {
-            int remain = Mathf.CeilToInt(state.GetRemainTurnSeconds());
-            txtTurnTimer.text = remain.ToString("00");
+            txtTurnTimer.text = GetTurnTimerText(state);
         }
+    }
+
+    /// <summary>
+    /// 턴 타이머에 표시할 문구를 만든다.
+    /// 숫자만 보여주지 않고, 현재 상태와 남은 시간을 같이 표시한다.
+    /// </summary>
+    private string GetTurnTimerText(BulmabulGameState state)
+    {
+        if (state == null)
+            return GetByLanguage("턴 시간: --초", "Turn Time: --s");
+
+        int remain = Mathf.CeilToInt(state.GetRemainTurnSeconds());
+        remain = Mathf.Max(0, remain);
+
+        if (state.IsPaused)
+            return GetByLanguage($"일시정지 중 | {remain:00}초", $"Paused | {remain:00}s");
+
+        if (!state.HasValidCurrentTurn())
+            return GetByLanguage("턴 정보 없음 | --초", "No Turn | --s");
+
+        if (state.IsMyTurn())
+            return GetByLanguage($"내 턴 | {remain:00}초", $"My Turn | {remain:00}s");
+
+        string currentName = state.GetCurrentTurnPlayerName();
+
+        return GetByLanguage(
+            $"{currentName}님 턴 | {remain:00}초",
+            $"{currentName}'s Turn | {remain:00}s"
+        );
+    }
+
+    /// <summary>
+    /// 상대 땅 인수 패널 갱신.
+    /// 통행료 지급 후 호텔이 없는 상대 땅이면 표시된다.
+    /// </summary>
+    private void RefreshTakeOverPanel(BulmabulGameState state)
+    {
+        if (takeOverPanel == null)
+            return;
+
+        bool show = state.ShouldShowTakeOverPanelForLocalPlayer();
+        takeOverPanel.SetActive(show);
+
+        if (!show)
+            return;
+
+        RefreshTakeOverButtonTexts();
+
+        if (txtTakeOverInfo != null)
+            txtTakeOverInfo.text = state.GetPendingTakeOverInfoText();
+
+        if (btnTakeOverLand != null)
+            btnTakeOverLand.interactable = true;
+
+        if (btnSkipTakeOverLand != null)
+            btnSkipTakeOverLand.interactable = true;
+    }
+
+    /// <summary>
+    /// 인수 패널 버튼 문구를 현재 언어에 맞게 표시한다.
+    /// </summary>
+    private void RefreshTakeOverButtonTexts()
+    {
+        if (txtTakeOverLandButton != null)
+        {
+            txtTakeOverLandButton.text = GetByLanguage(
+                "인수하기",
+                "Take Over"
+            );
+        }
+
+        if (txtSkipTakeOverLandButton != null)
+        {
+            txtSkipTakeOverLandButton.text = GetByLanguage(
+                "스킵",
+                "Skip"
+            );
+        }
+    }
+
+    private void OnClickTakeOverLand()
+    {
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null)
+            return;
+
+        if (state.TryGetPendingTakeOverLackAmount(out int lackAmount))
+        {
+            ShowLackMoneyToast(lackAmount);
+            return;
+        }
+
+        state.RequestTakeOverLandLocal();
+    }
+
+    private void OnClickSkipTakeOverLand()
+    {
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null)
+            return;
+
+        state.RequestSkipTakeOverLandLocal();
     }
 
     /// <summary>
@@ -567,6 +806,7 @@ public class BulmabulGameUI : MonoBehaviour
 
     /// <summary>
     /// 빈 땅 구매 패널 갱신.
+    /// 땅 구매 / 스킵 버튼 텍스트도 현재 언어에 맞게 갱신한다.
     /// </summary>
     private void RefreshBuyPanel(BulmabulGameState state)
     {
@@ -579,6 +819,8 @@ public class BulmabulGameUI : MonoBehaviour
         if (!show)
             return;
 
+        RefreshBuyButtonTexts();
+
         if (txtBuyInfo != null)
             txtBuyInfo.text = state.GetPendingBuyInfoText();
 
@@ -587,6 +829,30 @@ public class BulmabulGameUI : MonoBehaviour
 
         if (btnSkipBuyLand != null)
             btnSkipBuyLand.interactable = true;
+    }
+
+    /// <summary>
+    /// 땅 구매 패널 버튼 문구를 현재 언어에 맞게 표시한다.
+    /// 한국어: 땅 구매 / 스킵
+    /// 영어: Buy Land / Skip
+    /// </summary>
+    private void RefreshBuyButtonTexts()
+    {
+        if (txtBuyLandButton != null)
+        {
+            txtBuyLandButton.text = GetByLanguage(
+                "땅 구매",
+                "Buy Land"
+            );
+        }
+
+        if (txtSkipBuyLandButton != null)
+        {
+            txtSkipBuyLandButton.text = GetByLanguage(
+                "스킵",
+                "Skip"
+            );
+        }
     }
 
     /// <summary>
@@ -605,23 +871,73 @@ public class BulmabulGameUI : MonoBehaviour
         if (!show)
             return;
 
+        RefreshBuildButtonTexts();
+
         if (txtBuildInfo != null)
             txtBuildInfo.text = state.GetPendingBuildInfoText();
 
         if (btnBuildSmallHouse != null)
-            btnBuildSmallHouse.interactable = state.CanLocalBuild(BulmabulBuildPart.SmallHouse);
+            btnBuildSmallHouse.interactable = state.CanLocalBuildButtonClick(BulmabulBuildPart.SmallHouse);
 
         if (btnBuildHouse != null)
-            btnBuildHouse.interactable = state.CanLocalBuild(BulmabulBuildPart.House);
+            btnBuildHouse.interactable = state.CanLocalBuildButtonClick(BulmabulBuildPart.House);
 
         if (btnBuildBigHouse != null)
-            btnBuildBigHouse.interactable = state.CanLocalBuild(BulmabulBuildPart.BigHouse);
+            btnBuildBigHouse.interactable = state.CanLocalBuildButtonClick(BulmabulBuildPart.BigHouse);
 
         if (btnBuildHotel != null)
-            btnBuildHotel.interactable = state.CanLocalBuild(BulmabulBuildPart.Hotel);
+            btnBuildHotel.interactable = state.CanLocalBuildButtonClick(BulmabulBuildPart.Hotel);
 
         if (btnSkipBuild != null)
             btnSkipBuild.interactable = true;
+    }
+
+    /// <summary>
+    /// 건물 건설 패널 버튼 문구를 현재 언어에 맞게 표시한다.
+    /// 버튼 이미지는 글자 없는 PNG를 사용하고,
+    /// 실제 문구는 버튼 첫 번째 자식 TextMeshPro에 표시한다.
+    /// </summary>
+    private void RefreshBuildButtonTexts()
+    {
+        if (txtBuildSmallHouseButton != null)
+        {
+            txtBuildSmallHouseButton.text = GetByLanguage(
+                "작은집",
+                "Small House"
+            );
+        }
+
+        if (txtBuildHouseButton != null)
+        {
+            txtBuildHouseButton.text = GetByLanguage(
+                "집",
+                "House"
+            );
+        }
+
+        if (txtBuildBigHouseButton != null)
+        {
+            txtBuildBigHouseButton.text = GetByLanguage(
+                "큰집",
+                "Big House"
+            );
+        }
+
+        if (txtBuildHotelButton != null)
+        {
+            txtBuildHotelButton.text = GetByLanguage(
+                "호텔",
+                "Hotel"
+            );
+        }
+
+        if (txtSkipBuildButton != null)
+        {
+            txtSkipBuildButton.text = GetByLanguage(
+                "스킵",
+                "Skip"
+            );
+        }
     }
 
     /// <summary>
@@ -1182,7 +1498,27 @@ public class BulmabulGameUI : MonoBehaviour
         BulmabulGameState state = BulmabulGameState.Instance;
         if (state == null) return;
 
+        if (state.TryGetPendingBuyLackAmount(out int lackAmount))
+        {
+            ShowLackMoneyToast(lackAmount);
+            return;
+        }
+
         state.RequestBuyLandLocal();
+    }
+
+    /// <summary>
+    /// 재화 부족 토스트 출력.
+    /// </summary>
+    private void ShowLackMoneyToast(int lackAmount)
+    {
+        if (ToastMessageManager.instance == null)
+            return;
+
+        ToastMessageManager.instance.ShowToast(
+            $"재화가 {lackAmount:N0} 부족합니다.",
+            $"Not enough money. Need {lackAmount:N0} more."
+        );
     }
 
     private void OnClickSkipBuyLand()
@@ -1216,7 +1552,14 @@ public class BulmabulGameUI : MonoBehaviour
     private void RequestBuild(BulmabulBuildPart part)
     {
         BulmabulGameState state = BulmabulGameState.Instance;
-        if (state == null) return;
+        if (state == null)
+            return;
+
+        if (state.TryGetPendingBuildLackAmount(part, out int lackAmount))
+        {
+            ShowLackMoneyToast(lackAmount);
+            return;
+        }
 
         state.RequestBuildLocal(part);
     }

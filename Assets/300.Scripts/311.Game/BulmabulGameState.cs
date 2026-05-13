@@ -98,6 +98,9 @@ public class BulmabulGameState : NetworkBehaviour
 
         /// <summary>RoomScene 슬롯 번호</summary>
         public int roomSlotIndex;
+
+        /// <summary>시작지점을 통과한 횟수</summary>
+        public int lapCount;
     }
 
     /// <summary>
@@ -108,7 +111,8 @@ public class BulmabulGameState : NetworkBehaviour
         None = 0,
         BuyLand = 1,
         InitialBuildAfterBuy = 2,
-        BuildFromStart = 3
+        BuildFromStart = 3,
+        TakeOverLand = 4
     }
 
     [Header("Rule")]
@@ -136,7 +140,7 @@ public class BulmabulGameState : NetworkBehaviour
     [SerializeField] private BulmabulCameraFollow cameraFollow;
 
     [Header("Turn Settings")]
-    [SerializeField] private float turnSeconds = 60f;
+    [SerializeField] private float turnSeconds = 300f;
 
     [Header("Pause Settings")]
     [SerializeField] private int maxPauseCountPerPlayer = 5;
@@ -823,6 +827,11 @@ public class BulmabulGameState : NetworkBehaviour
         if (!ShouldShowBuyPanelForLocalPlayer())
             return;
 
+        // 클라이언트에서 한 번 막고,
+        // 서버 RPC 안의 TryBuyLand에서도 다시 막는다.
+        if (TryGetPendingBuyLackAmount(out _))
+            return;
+
         RPC_RequestBuyLand();
     }
 
@@ -845,6 +854,9 @@ public class BulmabulGameState : NetworkBehaviour
     public void RequestBuildLocal(BulmabulBuildPart part)
     {
         if (!CanLocalBuild(part))
+            return;
+
+        if (TryGetPendingBuildLackAmount(part, out _))
             return;
 
         RPC_RequestBuild((int)part);
@@ -996,6 +1008,7 @@ public class BulmabulGameState : NetworkBehaviour
             PlayerGameSlot actor = Players.Get(playerIndex);
             int salary = ClampLongToInt(rule.SalaryOnStart) * passStartCount;
             actor.cash += salary;
+            actor.lapCount += passStartCount;
             Players.Set(playerIndex, actor);
 
             LogServer($"{playerIndex}번 플레이어가 시작 지점을 {passStartCount}회 통과하여 {salary:N0} 획득");
@@ -1136,12 +1149,8 @@ public class BulmabulGameState : NetworkBehaviour
                 return false;
             }
 
-            if (actor.cash < Mathf.Max(0, cell.buyCost))
-            {
-                LogServer($"{playerIndex}번 플레이어가 {cell.cellName} 구매 실패. 재화 부족");
-                return false;
-            }
-
+            // 재화가 부족해도 구매 패널은 열어준다.
+            // 실제 구매 버튼 클릭 시 부족 금액을 토스트로 안내한다.
             PendingAction = PendingActionType.BuyLand;
             PendingPlayerIndex = playerIndex;
             PendingCellIndex = cellIndex;
@@ -1167,7 +1176,17 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
         }
 
-        PayToll(playerIndex, ownerIndex, cellIndex, cell);
+        bool canContinue = PayToll(playerIndex, ownerIndex, cellIndex, cell);
+
+        if (!canContinue)
+            return false;
+
+        // 통행료를 낸 뒤, 호텔이 없는 상대 땅이면 인수 선택 패널을 연다.
+        if (CanOpenTakeOverPending(playerIndex, ownerIndex, cellIndex, cell))
+        {
+            OpenTakeOverPending(playerIndex, cellIndex);
+            return true;
+        }
         return false;
     }
 
@@ -1194,7 +1213,7 @@ public class BulmabulGameState : NetworkBehaviour
         return true;
     }
 
-    private void PayToll(int payerIndex, int ownerIndex, int cellIndex, BulmabulCellData cell)
+    private bool PayToll(int payerIndex, int ownerIndex, int cellIndex, BulmabulCellData cell)
     {
         PlayerGameSlot payer = Players.Get(payerIndex);
         PlayerGameSlot owner = Players.Get(ownerIndex);
@@ -1209,17 +1228,63 @@ public class BulmabulGameState : NetworkBehaviour
         {
             payer.cash = 0;
             payer.bankrupt = true;
+
+            Players.Set(payerIndex, payer);
+            Players.Set(ownerIndex, owner);
+
             ReleaseAllOwnedLands(payerIndex);
 
-            LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어의 땅 {cell.cellName}에서 통행료 {toll:N0} 지불 후 파산했습니다.");
-        }
-        else
-        {
-            LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어에게 통행료 {toll:N0} 지불");
+            LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어에게 통행료 {toll:N0} 지불 후 파산했습니다.");
+
+            BumpRevision();
+            return false;
         }
 
         Players.Set(payerIndex, payer);
         Players.Set(ownerIndex, owner);
+
+        LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어에게 통행료 {toll:N0} 지불");
+
+        BumpRevision();
+        return true;
+    }
+
+    private bool CanOpenTakeOverPending(int buyerIndex, int ownerIndex, int cellIndex, BulmabulCellData cell)
+    {
+        if (!IsValidAlivePlayer(buyerIndex))
+            return false;
+
+        if (!IsValidAlivePlayer(ownerIndex))
+            return false;
+
+        if (cell == null || cell.cellType != BulmabulCellType.Land)
+            return false;
+
+        if (buyerIndex == ownerIndex)
+            return false;
+
+        int flags = LandBuildingFlagsByCell.Get(cellIndex);
+
+        // 호텔이 있으면 인수 불가
+        if (!BulmabulLandSystem.CanTakeOver(flags))
+            return false;
+
+        int cost = BulmabulLandSystem.CalculateTakeOverCost(cell, flags);
+
+        return cost > 0;
+    }
+
+    private void OpenTakeOverPending(int buyerIndex, int cellIndex)
+    {
+        PendingAction = PendingActionType.TakeOverLand;
+        PendingPlayerIndex = buyerIndex;
+        PendingCellIndex = cellIndex;
+
+        BulmabulCellData cell = board.GetCell(cellIndex);
+        int flags = LandBuildingFlagsByCell.Get(cellIndex);
+        int cost = BulmabulLandSystem.CalculateTakeOverCost(cell, flags);
+
+        LogServer($"{buyerIndex}번 플레이어가 {cell.cellName} 인수를 선택할 수 있습니다. 인수 비용 {cost:N0}");
 
         BumpRevision();
     }
@@ -1456,6 +1521,11 @@ public class BulmabulGameState : NetworkBehaviour
 
     private bool TryOpenStartBuildPending(int playerIndex)
     {
+        PlayerGameSlot player = Players.Get(playerIndex);
+
+        if (player.lapCount <= 0)
+            return false;
+
         if (!HasAnyBuildableOwnedLand(playerIndex))
             return false;
 
@@ -1605,6 +1675,29 @@ public class BulmabulGameState : NetworkBehaviour
         LogServer($"{PendingPlayerIndex}번 플레이어가 {cell.cellName}에 {BulmabulLandSystem.GetBuildName(part)} 건설. 비용 {cost:N0}");
 
         int finishedPlayer = PendingPlayerIndex;
+        int builtCellIndex = PendingCellIndex;
+
+        /*
+         * 중요:
+         * 건물 하나 짓고 바로 턴을 넘기면 안 된다.
+         *
+         * 구매 직후:
+         * - 작은집 / 집 둘 다 가능하면 계속 패널 유지
+         *
+         * 시작지점 건설:
+         * - 작은집 / 집 / 큰집까지 가능하면 계속 패널 유지
+         * - 작은집 + 집 + 큰집이 모두 있으면 호텔까지 가능
+         */
+        if (CanBuildAnyOnCell(finishedPlayer, builtCellIndex))
+        {
+            PendingPlayerIndex = finishedPlayer;
+            PendingCellIndex = builtCellIndex;
+
+            LogServer($"{finishedPlayer}번 플레이어가 {cell.cellName}에 추가 건설을 할 수 있습니다.");
+
+            BumpRevision();
+            return;
+        }
 
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
@@ -1837,6 +1930,117 @@ public class BulmabulGameState : NetworkBehaviour
 
     #region UI 공개 API
 
+
+    /// <summary>
+    /// 현재 구매 대기 중인 땅을 살 때 부족한 재화가 있는지 확인한다.
+    /// 부족하면 true와 부족 금액을 반환한다.
+    /// </summary>
+    public bool TryGetPendingBuyLackAmount(out int lackAmount)
+    {
+        lackAmount = 0;
+
+        if (!ShouldShowBuyPanelForLocalPlayer())
+            return false;
+
+        if (board == null)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount || PendingCellIndex >= MaxCells)
+            return false;
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return false;
+
+        if (cell.cellType != BulmabulCellType.Land)
+            return false;
+
+        if (LandOwnerByCell.Get(PendingCellIndex) >= 0)
+            return false;
+
+        PlayerGameSlot player = Players.Get(PendingPlayerIndex);
+
+        int cost = Mathf.Max(0, cell.buyCost);
+
+        if (player.cash >= cost)
+            return false;
+
+        lackAmount = cost - player.cash;
+        return true;
+    }
+
+    /// <summary>
+    /// 현재 건설 대기 중인 땅에 특정 건물을 지을 때 부족한 재화가 있는지 확인한다.
+    /// 건설 규칙은 만족하지만 재화만 부족한 경우 true와 부족 금액을 반환한다.
+    /// </summary>
+    public bool TryGetPendingBuildLackAmount(BulmabulBuildPart part, out int lackAmount)
+    {
+        lackAmount = 0;
+
+        if (!ShouldShowBuildPanelForLocalPlayer())
+            return false;
+
+        if (board == null)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount || PendingCellIndex >= MaxCells)
+            return false;
+
+        if (LandOwnerByCell.Get(PendingCellIndex) != PendingPlayerIndex)
+            return false;
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return false;
+
+        int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+
+        bool initial = PendingAction == PendingActionType.InitialBuildAfterBuy;
+
+        // 재화 조건을 제외한 건설 규칙부터 검사한다.
+        // 예: 호텔은 작은집+집+큰집이 있어야 가능.
+        bool ruleOk = BulmabulLandSystem.CanBuildIgnoringCash(
+            cell,
+            flags,
+            part,
+            initial
+        );
+
+        if (!ruleOk)
+            return false;
+
+        PlayerGameSlot player = Players.Get(PendingPlayerIndex);
+
+        int cost = BulmabulLandSystem.GetBuildCost(cell, part);
+
+        if (player.cash >= cost)
+            return false;
+
+        lackAmount = cost - player.cash;
+        return true;
+    }
+
+    /// <summary>
+    /// 현재 건설 버튼을 클릭 가능하게 둘지 판단한다.
+    /// 실제 건설 가능하거나, 건설 규칙은 맞지만 재화만 부족한 경우 true.
+    /// 재화 부족 토스트를 띄우기 위해 사용한다.
+    /// </summary>
+    public bool CanLocalBuildButtonClick(BulmabulBuildPart part)
+    {
+        if (CanLocalBuild(part))
+            return true;
+
+        return TryGetPendingBuildLackAmount(part, out _);
+    }
+
     public bool HasValidCurrentTurn()
     {
         return IsValidAlivePlayer(CurrentTurnIndex);
@@ -1963,7 +2167,7 @@ public class BulmabulGameState : NetworkBehaviour
                 $"구매한 땅에 건물을 지을 수 있습니다.\n" +
                 $"작은집 비용: {cell.smallHouseBuildCost:N0}\n" +
                 $"집 비용: {cell.houseBuildCost:N0}\n" +
-                $"둘 중 하나를 선택하세요.";
+                $"작은집과 집을 건설할 수 있습니다.";
         }
 
         if (PendingAction == PendingActionType.BuildFromStart)
@@ -2084,6 +2288,226 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
 
         return PauseOwner == Runner.LocalPlayer;
+    }
+
+
+    public void RequestTakeOverLandLocal()
+    {
+        if (!ShouldShowTakeOverPanelForLocalPlayer())
+            return;
+
+        if (TryGetPendingTakeOverLackAmount(out _))
+            return;
+
+        RPC_RequestTakeOverLand();
+    }
+
+    public void RequestSkipTakeOverLandLocal()
+    {
+        if (!ShouldShowTakeOverPanelForLocalPlayer())
+            return;
+
+        RPC_RequestSkipTakeOverLand();
+    }
+
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestTakeOverLand(RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (PendingAction != PendingActionType.TakeOverLand)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot buyer = Players.Get(PendingPlayerIndex);
+
+        if (info.Source != buyer.player)
+            return;
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= MaxCells)
+            return;
+
+        int oldOwnerIndex = LandOwnerByCell.Get(PendingCellIndex);
+
+        if (!IsValidAlivePlayer(oldOwnerIndex))
+            return;
+
+        if (oldOwnerIndex == PendingPlayerIndex)
+            return;
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return;
+
+        int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+
+        // 호텔이 있으면 인수 불가
+        if (!BulmabulLandSystem.CanTakeOver(flags))
+            return;
+
+        int cost = BulmabulLandSystem.CalculateTakeOverCost(cell, flags);
+
+        if (buyer.cash < cost)
+        {
+            LogServer($"{PendingPlayerIndex}번 플레이어가 {cell.cellName} 인수 실패. 재화 부족");
+            return;
+        }
+
+        PlayerGameSlot oldOwner = Players.Get(oldOwnerIndex);
+
+        // 인수하는 사람은 인수 비용 지불
+        buyer.cash -= cost;
+
+        // 기존 소유자는 인수 비용 획득
+        oldOwner.cash += cost;
+
+        Players.Set(PendingPlayerIndex, buyer);
+        Players.Set(oldOwnerIndex, oldOwner);
+
+        /*
+         * 중요:
+         * 건물은 그대로 유지한다.
+         * LandBuildingFlagsByCell은 건드리지 않는다.
+         */
+        LandOwnerByCell.Set(PendingCellIndex, PendingPlayerIndex);
+
+        LogServer(
+            $"{PendingPlayerIndex}번 플레이어가 {oldOwnerIndex}번 플레이어의 {cell.cellName} 인수 완료. 인수 비용 {cost:N0}"
+        );
+
+        int finishedPlayer = PendingPlayerIndex;
+        bool wasDouble = PendingWasDouble;
+
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+
+        /*
+         * 더블이면 같은 플레이어 턴 유지,
+         * 더블이 아니면 다음 플레이어 턴으로 이동.
+         * 실제 분기는 FinishTurnAfterAction 내부에서 처리.
+         */
+        FinishTurnAfterAction(finishedPlayer, wasDouble);
+
+        // Flag 색상 변경 / 재화 변경 / 소유권 변경 화면 반영
+        BumpRevision();
+    }
+
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestSkipTakeOverLand(RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (PendingAction != PendingActionType.TakeOverLand)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot player = Players.Get(PendingPlayerIndex);
+
+        if (info.Source != player.player)
+            return;
+
+        int finishedPlayer = PendingPlayerIndex;
+        bool wasDouble = PendingWasDouble;
+
+        LogServer($"{finishedPlayer}번 플레이어가 인수하지 않고 턴을 넘겼습니다.");
+
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+
+        /*
+         * 더블이면 같은 플레이어 턴 유지,
+         * 더블이 아니면 다음 플레이어 턴으로 이동.
+         */
+        FinishTurnAfterAction(finishedPlayer, wasDouble);
+
+        BumpRevision();
+    }
+
+    public bool ShouldShowTakeOverPanelForLocalPlayer()
+    {
+        if (Runner == null)
+            return false;
+
+        if (PendingAction != PendingActionType.TakeOverLand)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+        return slot.player == Runner.LocalPlayer;
+    }
+
+    public string GetPendingTakeOverInfoText()
+    {
+        if (board == null)
+            return GetByLanguageForState("인수하시겠습니까?", "Take over this land?");
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount)
+            return GetByLanguageForState("인수하시겠습니까?", "Take over this land?");
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return GetByLanguageForState("인수하시겠습니까?", "Take over this land?");
+
+        int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+        int cost = BulmabulLandSystem.CalculateTakeOverCost(cell, flags);
+
+        return GetByLanguageForState(
+            $"{cell.cellName}\n인수 비용: {cost:N0}\n이 땅을 인수하시겠습니까?",
+            $"{cell.cellName}\nTake Over Cost: {cost:N0}\nDo you want to take over this land?"
+        );
+    }
+
+    public bool TryGetPendingTakeOverLackAmount(out int lackAmount)
+    {
+        lackAmount = 0;
+
+        if (!ShouldShowTakeOverPanelForLocalPlayer())
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        if (board == null)
+            return false;
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount)
+            return false;
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return false;
+
+        int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+        int cost = BulmabulLandSystem.CalculateTakeOverCost(cell, flags);
+
+        PlayerGameSlot buyer = Players.Get(PendingPlayerIndex);
+
+        if (buyer.cash >= cost)
+            return false;
+
+        lackAmount = cost - buyer.cash;
+        return true;
+    }
+
+    private string GetByLanguageForState(string kor, string eng)
+    {
+        if (LaguageManager.Instance == null)
+            return kor;
+
+        return LaguageManager.Instance.currentLang == Lauaguage.Eng ? eng : kor;
     }
 
     /// <summary>
