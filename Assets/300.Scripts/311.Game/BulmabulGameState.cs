@@ -101,6 +101,16 @@ public class BulmabulGameState : NetworkBehaviour
 
         /// <summary>시작지점을 통과한 횟수</summary>
         public int lapCount;
+
+        /// <summary>게임 도중 나갔는지 여부. 일반 파산과 구분하기 위한 값</summary>
+        public NetworkBool leftGame;
+
+        /// <summary>나간 사유. 0=None, 1=ExitButton, 2=Disconnected</summary>
+        public int leaveReasonInt;
+
+        // 추가: Firebase UID
+        public NetworkString<_128> uid;
+
     }
 
     /// <summary>
@@ -209,6 +219,13 @@ public class BulmabulGameState : NetworkBehaviour
 
     /// <summary>모든 클라이언트에 표시할 마지막 로그 메시지</summary>
     [Networked] public NetworkString<_256> LastLogMessage { get; set; }
+
+
+    /// <summary>게임 종료 여부</summary>
+    [Networked] public NetworkBool GameFinished { get; set; }
+
+    /// <summary>승리한 플레이어 인덱스</summary>
+    [Networked] public int WinnerIndex { get; set; }
 
     string controlText = "";
 
@@ -436,10 +453,14 @@ public class BulmabulGameState : NetworkBehaviour
 
     public override void FixedUpdateNetwork()
     {
+
         if (!Object.HasStateAuthority)
             return;
 
         if (Runner == null)
+            return;
+
+        if (GameFinished)
             return;
 
         if (IsPaused)
@@ -521,6 +542,7 @@ public class BulmabulGameState : NetworkBehaviour
                 cash = ClampLongToInt(rule.StartCash),
                 pauseUsed = 0,
 
+                uid = "",
                 nickname = "",
                 photoUrl = "",
                 level = 1,
@@ -535,7 +557,9 @@ public class BulmabulGameState : NetworkBehaviour
 
                 bankrupt = false,
                 hasTravelTicket = false,
-                travelCost = 0
+                travelCost = 0,
+                leftGame = false,
+                leaveReasonInt = 0
             };
 
             if (i < orderedPlayers.Count)
@@ -548,6 +572,7 @@ public class BulmabulGameState : NetworkBehaviour
 
                 if (BulmabulGameStartCache.TryGetByPlayer(player, out var cached))
                 {
+                    slot.uid = cached.uid;
                     slot.nickname = cached.nickname;
                     slot.photoUrl = cached.photoUrl;
                     slot.level = Mathf.Max(1, cached.level);
@@ -597,6 +622,8 @@ public class BulmabulGameState : NetworkBehaviour
         PauseOwner = PlayerRef.None;
         PausedRemainSeconds = 0f;
         TurnBusy = false;
+        GameFinished = false;
+        WinnerIndex = -1;
 
         LastDiceLeft = 0;
         LastDiceRight = 0;
@@ -1823,64 +1850,135 @@ public class BulmabulGameState : NetworkBehaviour
 
     #region 일시정지
 
+    /// <summary>
+    /// 게임 일시정지 요청 RPC.
+    /// 
+    /// 호출 대상:
+    /// - 모든 클라이언트에서 요청 가능
+    /// - 실제 처리는 StateAuthority 서버/호스트만 수행
+    /// 
+    /// 처리 내용:
+    /// 1. 이미 일시정지 중이면 무시
+    /// 2. 요청한 플레이어를 찾음
+    /// 3. 플레이어별 일시정지 사용 횟수 제한 검사
+    /// 4. 현재 턴 타이머의 남은 시간을 저장
+    /// 5. 일시정지 사용 횟수 증가
+    /// 6. 게임 상태를 일시정지로 변경
+    /// 7. 일시정지한 플레이어를 PauseOwner로 저장
+    /// 8. 로그 출력 및 UI 갱신용 Revision 증가
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestPause(RpcInfo info = default)
     {
+        // StateAuthority가 아닌 클라이언트에서는 실제 상태를 변경하지 않는다.
+        // 네트워크 게임 상태는 반드시 StateAuthority에서만 변경해야 한다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 이미 일시정지 중이면 중복 일시정지를 막는다.
         if (IsPaused)
             return;
 
+        // RPC를 보낸 플레이어가 게임 참가자 목록에서 몇 번째 플레이어인지 찾는다.
         int idx = FindPlayerIndex(info.Source);
 
+        // 참가자가 아니거나 찾을 수 없으면 무시한다.
         if (idx < 0)
             return;
 
+        // 해당 플레이어의 게임 슬롯 정보를 가져온다.
         PlayerGameSlot s = Players.Get(idx);
 
+        // 플레이어별 일시정지 사용 횟수를 초과했으면 일시정지를 허용하지 않는다.
         if (s.pauseUsed >= maxPauseCountPerPlayer)
             return;
 
+        // 현재 턴 타이머의 남은 시간을 가져온다.
+        // 일시정지 해제 시 이 남은 시간부터 다시 시작하기 위해 저장한다.
         float? remain = TurnTimer.RemainingTime(Runner);
+
+        // 남은 시간이 있으면 최소 1초 이상으로 보정해서 저장한다.
+        // 남은 시간을 가져오지 못한 경우 기본 턴 시간으로 저장한다.
         PausedRemainSeconds = remain.HasValue ? Mathf.Max(1f, remain.Value) : turnSeconds;
 
+        // 이 플레이어의 일시정지 사용 횟수를 1 증가시킨다.
         s.pauseUsed++;
+
+        // 수정된 플레이어 슬롯 정보를 Networked 배열에 다시 저장한다.
         Players.Set(idx, s);
 
+        // 게임을 일시정지 상태로 변경한다.
         IsPaused = true;
+
+        // 누가 일시정지했는지 저장한다.
+        // 이후 재개는 이 PauseOwner만 가능하게 한다.
         PauseOwner = info.Source;
 
+        // 로그에 표시할 닉네임을 가져온다.
         string pauseNick = s.nickname.ToString();
 
+        // 닉네임이 비어 있으면 현재 언어에 맞는 기본 플레이어 이름을 사용한다.
         if (string.IsNullOrWhiteSpace(pauseNick))
             pauseNick = GetByLanguage($"플레이어 {idx + 1}", $"Player {idx + 1}");
 
+        // 일시정지 로그 출력.
         LogServer($"{pauseNick}님이 일시정지했습니다. 사용 횟수 {s.pauseUsed}/{maxPauseCountPerPlayer}");
 
+        // UI 갱신용 Revision 증가.
+        // 각 클라이언트 UI가 IsPaused, PauseOwner, pauseUsed 변화를 감지하도록 한다.
         BumpRevision();
     }
 
+    /// <summary>
+    /// 게임 재개 요청 RPC.
+    /// 
+    /// 호출 대상:
+    /// - 모든 클라이언트에서 요청 가능
+    /// - 실제 처리는 StateAuthority 서버/호스트만 수행
+    /// 
+    /// 처리 내용:
+    /// 1. 일시정지 상태가 아니면 무시
+    /// 2. 일시정지한 플레이어가 아니면 재개 불가
+    /// 3. 저장해 둔 남은 시간으로 턴 타이머 재시작
+    /// 4. 일시정지 상태 해제
+    /// 5. 로그 출력 및 UI 갱신용 Revision 증가
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestResume(RpcInfo info = default)
     {
+        // StateAuthority가 아닌 클라이언트에서는 실제 상태를 변경하지 않는다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 일시정지 상태가 아니면 재개할 필요가 없으므로 무시한다.
         if (!IsPaused)
             return;
 
+        // 일시정지를 건 플레이어만 게임을 재개할 수 있다.
+        // 다른 플레이어가 재개 버튼을 눌러도 무시된다.
         if (info.Source != PauseOwner)
             return;
 
+        // 게임 일시정지 상태를 해제한다.
         IsPaused = false;
+
+        // 일시정지 소유자를 초기화한다.
         PauseOwner = PlayerRef.None;
 
+        // 저장해 둔 남은 시간을 최소 1초 이상으로 보정한다.
         float resumeSeconds = Mathf.Max(1f, PausedRemainSeconds);
+
+        // 일시정지 전 남아 있던 시간부터 턴 타이머를 다시 시작한다.
         TurnTimer = TickTimer.CreateFromSeconds(Runner, resumeSeconds);
+
+        // 저장된 일시정지 남은 시간을 초기화한다.
         PausedRemainSeconds = 0f;
 
+        // 재개 로그 출력.
         LogServer("게임이 재개되었습니다.");
+
+        // UI 갱신용 Revision 증가.
+        // 각 클라이언트 UI가 일시정지 해제 상태를 반영하도록 한다.
         BumpRevision();
     }
 
@@ -2762,98 +2860,182 @@ public class BulmabulGameState : NetworkBehaviour
     }
     #endregion
 
-    #region 플레이어 나가기
+    /// <summary>
+    /// 로컬 플레이어가 현재 게임의 승자인지 확인한다.
+    /// UI에서 승리 보상 지급 / 자동 퇴장 처리에 사용한다.
+    /// </summary>
+    public bool IsLocalPlayerWinner()
+    {
+        if (!IsSpawnReady)
+            return false;
+
+        if (Runner == null)
+            return false;
+
+        if (!GameFinished)
+            return false;
+
+        int localIndex = FindPlayerIndex(Runner.LocalPlayer);
+
+        return localIndex >= 0 && localIndex == WinnerIndex;
+    }
+
+    /// <summary>
+    /// 현재 승리자 닉네임 반환.
+    /// </summary>
+    public string GetWinnerNickname()
+    {
+        if (WinnerIndex < 0 || WinnerIndex >= MaxPlayers)
+            return GetByLanguage("승리자", "Winner");
+
+        PlayerGameSlot winner = Players.Get(WinnerIndex);
+
+        string nick = winner.nickname.ToString();
+
+        if (string.IsNullOrWhiteSpace(nick))
+            nick = $"Player {WinnerIndex + 1}";
+
+        return nick;
+    }
+
+    #region 플레이어 나가기 / 강제 종료 / 승자 판정
+
+    public enum LeaveReasonType
+    {
+        None = 0,
+        ExitButton = 1,
+        Disconnected = 2
+    }
+
     /// <summary>
     /// 로컬 플레이어가 게임 나가기를 확정했을 때 호출.
+    /// Exit 버튼으로 나가는 경우.
     /// </summary>
     public void RequestLeaveGameLocal()
     {
         if (Runner == null)
             return;
 
-        // Host/Server에게 내가 나간다고 알림
-        RPC_RequestLeaveGame(Runner.LocalPlayer);
+        RPC_RequestLeaveGame(Runner.LocalPlayer, (int)LeaveReasonType.ExitButton);
     }
 
+    /// <summary>
+    /// 클라이언트가 "나가겠다"고 서버에게 요청.
+    /// 실제 처리는 StateAuthority에서만 한다.
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    private void RPC_RequestLeaveGame(PlayerRef leaver)
+    private void RPC_RequestLeaveGame(PlayerRef leaver, int reasonInt, RpcInfo info = default)
     {
         if (!Object.HasStateAuthority)
             return;
 
-        ForcePlayerDefeatByPlayerRef(leaver, "LeaveGame");
+        // 다른 사람이 남을 강제로 나가게 요청하지 못하게 방어
+        if (info.Source != leaver)
+            return;
+
+        ForcePlayerLeaveDefeat(leaver, (LeaveReasonType)reasonInt);
     }
 
     /// <summary>
-    /// 특정 플레이어를 패배 처리한다.
-    /// 게임 나가기, 접속 끊김 등에 사용한다.
+    /// NetWorkLauncher.OnPlayerLeft에서 호출할 함수.
+    /// Alt+F4, 에디터 Stop, 네트워크 끊김 등으로 실제 연결이 끊겼을 때 사용.
     /// </summary>
-    private void ForcePlayerDefeatByPlayerRef(PlayerRef playerRef, string reason)
+    public void Server_HandlePlayerDisconnected(PlayerRef leaver)
     {
-        int playerIndex = GetPlayerIndexByPlayerRef(playerRef);
+        if (!Object.HasStateAuthority)
+            return;
+
+        ForcePlayerLeaveDefeat(leaver, LeaveReasonType.Disconnected);
+    }
+
+    /// <summary>
+    /// 플레이어를 "중도 이탈 패배"로 처리한다.
+    /// 일반 파산 패배와 구분된다.
+    /// </summary>
+    private void ForcePlayerLeaveDefeat(PlayerRef leaver, LeaveReasonType reason)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (GameFinished)
+            return;
+
+        int playerIndex = FindPlayerIndex(leaver);
 
         if (playerIndex < 0)
             return;
 
-        // 이미 패배한 플레이어면 중복 처리 방지
-        if (IsPlayerDefeated(playerIndex))
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        // 이미 파산/패배 처리된 플레이어면 중복 처리 방지
+        if (slot.bankrupt)
             return;
 
-        SetPlayerDefeated(playerIndex, true);
+        slot.bankrupt = true;
+        slot.leftGame = true;
+        slot.leaveReasonInt = (int)reason;
+        slot.hasTravelTicket = false;
+        slot.travelCost = 0;
 
-        LastLogMessage = $"{GetPlayerNickname(playerIndex)} 플레이어가 게임을 나가 패배했습니다.";
+        Players.Set(playerIndex, slot);
 
+        // 이탈자가 선택 대기 중이었다면 대기 상태 제거
+        if (PendingPlayerIndex == playerIndex)
+        {
+            PendingAction = PendingActionType.None;
+            PendingPlayerIndex = -1;
+            PendingCellIndex = -1;
+            PendingWasDouble = false;
+        }
+
+        string nick = slot.nickname.ToString();
+
+        if (string.IsNullOrWhiteSpace(nick))
+            nick = $"Player {playerIndex + 1}";
+
+        if (reason == LeaveReasonType.ExitButton)
+        {
+            LastLogMessage = $"{nick}님이 게임을 나가 이탈 패배 처리되었습니다.";
+        }
+        else
+        {
+            LastLogMessage = $"{nick}님의 연결이 끊겨 이탈 패배 처리되었습니다.";
+        }
+
+        Debug.Log($"[BulmabulGameState] Leave defeat. player={leaver}, index={playerIndex}, reason={reason}");
+
+        // 현재 턴 플레이어가 나간 경우 턴 진행 막고 다음 생존자에게 넘김
+        if (CurrentTurnIndex == playerIndex)
+        {
+            TurnBusy = false;
+
+            if (GetAlivePlayerCount() > 1)
+                AdvanceTurn();
+        }
+
+        // 남은 플레이어가 1명이면 승리 처리
         CheckWinnerByRemainingPlayers();
-    }
 
-    private int GetPlayerIndexByPlayerRef(PlayerRef playerRef)
-    {
-        // 예시:
-        // PlayerRefs 배열 또는 PlayerData 배열에서 playerRef와 같은 인덱스 찾기
-        // return index;
-
-        return -1;
-    }
-
-    private bool IsPlayerDefeated(int playerIndex)
-    {
-        // 예시:
-        // return players[playerIndex].IsDefeated;
-
-        return false;
-    }
-
-    private void SetPlayerDefeated(int playerIndex, bool defeated)
-    {
-        // 예시:
-        // players[playerIndex].IsDefeated = defeated;
-    }
-
-    private string GetPlayerNickname(int playerIndex)
-    {
-        // 예시:
-        // return players[playerIndex].Nickname.ToString();
-
-        return $"Player {playerIndex + 1}";
+        BumpRevision();
     }
 
     /// <summary>
-    /// 패배하지 않고 방에 남아있는 플레이어가 1명 이하인지 검사한다.
-    /// 1명만 남으면 그 플레이어가 승리한다.
+    /// 살아있는 플레이어가 1명만 남으면 그 플레이어 승리.
     /// </summary>
     private void CheckWinnerByRemainingPlayers()
     {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (GameFinished)
+            return;
+
         int aliveCount = 0;
         int winnerIndex = -1;
 
-        int playerCount = GetCurrentPlayerCount();
-
-        for (int i = 0; i < playerCount; i++)
+        for (int i = 0; i < MaxPlayers; i++)
         {
-            if (IsPlayerDefeated(i))
-                continue;
-
-            if (!IsPlayerInRoom(i))
+            if (!IsValidAlivePlayer(i))
                 continue;
 
             aliveCount++;
@@ -2866,29 +3048,40 @@ public class BulmabulGameState : NetworkBehaviour
         }
     }
 
-    private int GetCurrentPlayerCount()
-    {
-        // 예시:
-        // return playerCount;
-        return 4;
-    }
-
-    private bool IsPlayerInRoom(int playerIndex)
-    {
-        // 접속이 끊겼거나 나간 플레이어는 false
-        // 플레이어 데이터가 아직 존재하고 패배만 된 상태라면 true로 둬도 됨.
-        // 단, "나간 플레이어 제외" 기준이면 false 처리.
-        return true;
-    }
-
+    /// <summary>
+    /// 게임 종료 및 승자 확정.
+    /// </summary>
     private void FinishGameByWinner(int winnerIndex)
     {
-        LastLogMessage = $"{GetPlayerNickname(winnerIndex)} 플레이어가 승리했습니다.";
+        if (!Object.HasStateAuthority)
+            return;
 
-        // TODO:
-        // 1. GameOver 상태로 변경
-        // 2. 승자 UI 표시
-        // 3. 더 이상 턴 진행 막기
+        if (GameFinished)
+            return;
+
+        GameFinished = true;
+        WinnerIndex = winnerIndex;
+
+        TurnBusy = true;
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+        PendingWasDouble = false;
+        IsPaused = false;
+
+        PlayerGameSlot winner = Players.Get(winnerIndex);
+
+        string winnerNick = winner.nickname.ToString();
+
+        if (string.IsNullOrWhiteSpace(winnerNick))
+            winnerNick = $"Player {winnerIndex + 1}";
+
+        LastLogMessage = $"{winnerNick}님이 승리했습니다.";
+
+        Debug.Log($"[BulmabulGameState] Game Finished. WinnerIndex={winnerIndex}, Winner={winnerNick}");
+
+        BumpRevision();
     }
+
     #endregion
 }

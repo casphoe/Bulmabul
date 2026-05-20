@@ -36,6 +36,9 @@ public class RoomMembersState : NetworkBehaviour
         //프로필 URL
         public NetworkString<_256> photoUrl;
 
+        // 추가: Firebase UID
+        public NetworkString<_128> uid;
+
         public byte occupied; // 1=사용, 0=비어있음
     }
     // ===== 멤버 슬롯 =====
@@ -202,10 +205,12 @@ public class RoomMembersState : NetworkBehaviour
         string name = "-";
         int level = 1;
         string photoUrl = "";
+        string uid = "";
 
         var fb = FireBaseAuthManager.Instance;
         if (fb != null && fb.IsReady && fb.CurrentAccount != null)
         {
+            uid = fb.CurrentUser.UserId;
             nick = fb.CurrentAccount.NickName;
             name = fb.CurrentAccount.Name;
             level = fb.CurrentAccount.AccountLevel;
@@ -219,7 +224,7 @@ public class RoomMembersState : NetworkBehaviour
             return;
         }
 
-        RPC_SubmitProfile(Runner.LocalPlayer, nick, name, level, photoUrl);
+        RPC_SubmitProfile(Runner.LocalPlayer, uid, nick, name, level, photoUrl);
         _profileSubmitted = true;
     }
 
@@ -240,7 +245,7 @@ public class RoomMembersState : NetworkBehaviour
     /// - 문자열은 NetworkString 용량 제한이 있으므로 길이 제한을 걸어 안전하게 저장.
     /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    public void RPC_SubmitProfile(PlayerRef who, string nick, string name, int level, string photoUrl, RpcInfo info = default)
+    public void RPC_SubmitProfile(PlayerRef who, string uid, string nick, string name, int level, string photoUrl, RpcInfo info = default)
     {
         // 안전장치: 이 RPC는 "StateAuthority(=마스터)"에서만 실제로 반영해야 함
         // 모든 클라가 동시에 Slots를 만지면 데이터 경합/설정 튐이 발생할 수 있음
@@ -274,6 +279,7 @@ public class RoomMembersState : NetworkBehaviour
         // - Slots는 네트워크로 동기화되는 참가자 데이터 목록/배열(추정)
         // - Get/Set으로 구조체(또는 데이터)를 꺼내 수정 후 다시 저장하는 패턴
         var s = Slots.Get(idx);
+        s.uid = uid;
         s.nickname = nick;
         s.name = name;
         s.level = level;
@@ -703,6 +709,7 @@ public class RoomMembersState : NetworkBehaviour
                 s.level = 1;
                 s.ready = false;
                 s.photoUrl = default;
+                s.uid = default;
                 Slots.Set(i, s);
                 return i;
             }
@@ -737,6 +744,7 @@ public class RoomMembersState : NetworkBehaviour
             s.level = 1;
             s.ready = false;
             s.photoUrl = default;
+            s.uid = default;
             Slots.Set(idx, s);
             changed = true;
         }
@@ -860,6 +868,7 @@ public class RoomMembersState : NetworkBehaviour
                 s.level = 1;
                 s.ready = false;
                 s.photoUrl = default;
+                s.uid = default;
                 Slots.Set(i, s);
                 changed = true;
             }

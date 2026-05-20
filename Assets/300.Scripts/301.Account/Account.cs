@@ -128,6 +128,56 @@ public class Account
     [SerializeField] private int dicePityCount; // SR/레어 보장 카운트
     public int DicePityCount { get => dicePityCount; set => dicePityCount = Mathf.Max(0, value); }
 
+    [Header("부루마불 전적")]
+    [SerializeField] private int bulmabulWinCount;
+    public int BulmabulWinCount
+    {
+        get => bulmabulWinCount;
+        set => bulmabulWinCount = Mathf.Max(0, value);
+    }
+
+    [SerializeField] private int bulmabulLoseCount;
+    public int BulmabulLoseCount
+    {
+        get => bulmabulLoseCount;
+        set => bulmabulLoseCount = Mathf.Max(0, value);
+    }
+
+    [SerializeField] private int bulmabulLeaveCount;
+    public int BulmabulLeaveCount
+    {
+        get => bulmabulLeaveCount;
+        set => bulmabulLeaveCount = Mathf.Max(0, value);
+    }
+
+    [SerializeField] private string bulmabulPenaltyUntil;
+    public string BulmabulPenaltyUntil
+    {
+        get => bulmabulPenaltyUntil;
+        set => bulmabulPenaltyUntil = value;
+    }
+
+    [SerializeField] private string bulmabulLeaveDateKey;
+    public string BulmabulLeaveDateKey
+    {
+        get => bulmabulLeaveDateKey ?? "";
+        set => bulmabulLeaveDateKey = value ?? "";
+    }
+
+    [SerializeField] private int bulmabulTodayLeaveCount;
+    public int BulmabulTodayLeaveCount
+    {
+        get => bulmabulTodayLeaveCount;
+        set => bulmabulTodayLeaveCount = Mathf.Max(0, value);
+    }
+
+    [SerializeField] private long bulmabulLastLeaveAt;
+    public long BulmabulLastLeaveAt
+    {
+        get => bulmabulLastLeaveAt;
+        set => bulmabulLastLeaveAt = Math.Max(0, value);
+    }
+
 }
 
 [Serializable]

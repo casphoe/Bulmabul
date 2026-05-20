@@ -79,6 +79,12 @@ public class LobbyUIManager : MonoBehaviour
     [Header("레벨 및 플레이어 데이터 UI")]
     [SerializeField] Text[] txtPlayerData;
 
+    [Header("플레이어 경험치 UI")]
+    [SerializeField]
+    Image progressExpImage;
+
+    [SerializeField] TextMeshProUGUI txtExpValue;
+
     #region 프로필 설정
     [Header("프로필 UI Panel")]
     public GameObject profilePanel;
@@ -646,6 +652,70 @@ public class LobbyUIManager : MonoBehaviour
         }
     }
 
+    void RefreshExpUI()
+    {
+        var auth = FireBaseAuthManager.Instance;
+
+        if (auth == null || auth.CurrentAccount == null)
+            return;
+
+        Account acc = auth.CurrentAccount;
+
+        int currentExp = Mathf.Max(0, Convert.ToInt32(acc.AccountExp));
+        int needExp = GetNeedExpForCurrentLevel(acc.AccountLevel);
+
+        if (needExp <= 0)
+        {
+            if (progressExpImage != null)
+                progressExpImage.fillAmount = 1f;
+
+            if (txtExpValue != null)
+            {
+                txtExpValue.text = GetByLang(
+                    "MAX / MAX",
+                    "MAX / MAX"
+                );
+            }
+
+            return;
+        }
+
+        float rate = Mathf.Clamp01((float)currentExp / needExp);
+
+        if (progressExpImage != null)
+            progressExpImage.fillAmount = rate;
+
+        if (txtExpValue != null)
+        {
+            txtExpValue.text = GetByLang(
+                $"{currentExp:N0} / {needExp:N0}",
+                $"{currentExp:N0} / {needExp:N0}"
+            );
+        }
+    }
+
+    int GetNeedExpForCurrentLevel(int level)
+    {
+        AccountLevelExpTable table = AccountLevelExpTable.Instance;
+
+        if (table == null || !table.IsLoaded || table.Table == null)
+            return 0;
+
+        if (table.Table.TryGetValue(level, out LevelExpRow row) && row != null)
+            return Mathf.Max(0, row.NeedExp);
+
+        return 0;
+    }
+
+    string GetByLang(string kor, string eng)
+    {
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        return lang == Lauaguage.Eng ? eng : kor;
+    }
+
     async Task RefreshProfileImageAsync()
     {
         if (_loadingProfile) return;
@@ -710,6 +780,7 @@ public class LobbyUIManager : MonoBehaviour
     public void RefreshPlayerUI()
     {
         OnPlayerDataUI();
+        RefreshExpUI();
         _ = RefreshProfileImageAsync();
     }
     #endregion

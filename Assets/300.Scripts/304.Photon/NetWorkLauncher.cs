@@ -854,10 +854,19 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         // 서버(Host)가 "실제 연결 끊김"을 받았을 때 무조건 슬롯 정리
         if (runner.IsServer)
         {
+            // RoomScene 상태 정리
             var members = RoomMembersState.Instance;
             if (members != null)
             {
                 members.Server_RemovePlayer(player);   // 내부에서 HasStateAuthority 체크
+            }
+
+
+            // GameScene 상태 정리
+            var gameState = BulmabulGameState.Instance;
+            if (gameState != null)
+            {
+                gameState.Server_HandlePlayerDisconnected(player);
             }
         }
     }

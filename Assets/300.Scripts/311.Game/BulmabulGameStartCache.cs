@@ -17,6 +17,7 @@ public static class BulmabulGameStartCache
     public struct CachedPlayer
     {
         public int playerId;
+        public string uid;
         public string nickname;
         public int level;
         public bool isLeader;
@@ -86,6 +87,7 @@ public static class BulmabulGameStartCache
             _players.Add(new CachedPlayer
             {
                 playerId = slot.player.PlayerId,
+                uid = slot.uid.ToString(),
                 nickname = nick.Trim(),
                 level = Mathf.Max(1, slot.level),
                 isLeader = slot.player == room.Leader,

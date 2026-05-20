@@ -37,6 +37,14 @@ public static class AccountCloudStore
     static DatabaseReference LevelRef(string uid) => UserRef(uid).Child("accountLevel");
     static DatabaseReference ExpRef(string uid) => UserRef(uid).Child("accountExp");
 
+    static DatabaseReference BulmabulWinCountRef(string uid) => UserRef(uid).Child("bulmabulWinCount");
+    static DatabaseReference BulmabulLoseCountRef(string uid) => UserRef(uid).Child("bulmabulLoseCount");
+    static DatabaseReference BulmabulLeaveCountRef(string uid) => UserRef(uid).Child("bulmabulLeaveCount");
+    static DatabaseReference BulmabulPenaltyUntilRef(string uid) => UserRef(uid).Child("bulmabulPenaltyUntil");
+    static DatabaseReference BulmabulLeaveDateKeyRef(string uid) => UserRef(uid).Child("bulmabulLeaveDateKey");
+    static DatabaseReference BulmabulTodayLeaveCountRef(string uid) => UserRef(uid).Child("bulmabulTodayLeaveCount");
+    static DatabaseReference BulmabulLastLeaveAtRef(string uid) => UserRef(uid).Child("bulmabulLastLeaveAt");
+
     static DatabaseReference EquippedDiceKeyRef(string uid) => UserRef(uid).Child("equippedDiceKey");
 
     static DatabaseReference DiceInventoryRef(string uid) => UserRef(uid).Child("diceInventory"); // (원하면)
@@ -96,6 +104,15 @@ public static class AccountCloudStore
                 [$"users/{uid}/nameKey"] = nameKey,
                 [$"users/{uid}/accountLevel"] = acc.AccountLevel,
                 [$"users/{uid}/accountExp"] = acc.AccountExp,
+
+                // 부루마불 전적 / 패널티
+                [$"users/{uid}/bulmabulWinCount"] = acc.BulmabulWinCount,
+                [$"users/{uid}/bulmabulLoseCount"] = acc.BulmabulLoseCount,
+                [$"users/{uid}/bulmabulLeaveCount"] = acc.BulmabulLeaveCount,
+                [$"users/{uid}/bulmabulPenaltyUntil"] = acc.BulmabulPenaltyUntil ?? "",
+                [$"users/{uid}/bulmabulLeaveDateKey"] = acc.BulmabulLeaveDateKey ?? "",
+                [$"users/{uid}/bulmabulTodayLeaveCount"] = acc.BulmabulTodayLeaveCount,
+                [$"users/{uid}/bulmabulLastLeaveAt"] = acc.BulmabulLastLeaveAt,
 
                 // 뽑기 관련 메타
                 [$"users/{uid}/diceTotalPullCount"] = acc.DiceTotalPullCount,
@@ -258,6 +275,34 @@ public static class AccountCloudStore
             var expSnap = await ExpRef(uid).GetValueAsync();
             if (expSnap.Exists && expSnap.Value != null)
                 acc.AccountExp = Convert.ToInt64(expSnap.Value);
+
+            var winSnap = await BulmabulWinCountRef(uid).GetValueAsync();
+            if (winSnap.Exists && winSnap.Value != null)
+                acc.BulmabulWinCount = Convert.ToInt32(winSnap.Value);
+
+            var loseSnap = await BulmabulLoseCountRef(uid).GetValueAsync();
+            if (loseSnap.Exists && loseSnap.Value != null)
+                acc.BulmabulLoseCount = Convert.ToInt32(loseSnap.Value);
+
+            var leaveSnap = await BulmabulLeaveCountRef(uid).GetValueAsync();
+            if (leaveSnap.Exists && leaveSnap.Value != null)
+                acc.BulmabulLeaveCount = Convert.ToInt32(leaveSnap.Value);
+
+            var penaltySnap = await BulmabulPenaltyUntilRef(uid).GetValueAsync();
+            if (penaltySnap.Exists && penaltySnap.Value != null)
+                acc.BulmabulPenaltyUntil = penaltySnap.Value.ToString();
+
+            var leaveDateSnap = await BulmabulLeaveDateKeyRef(uid).GetValueAsync();
+            if (leaveDateSnap.Exists && leaveDateSnap.Value != null)
+                acc.BulmabulLeaveDateKey = leaveDateSnap.Value.ToString();
+
+            var todayLeaveSnap = await BulmabulTodayLeaveCountRef(uid).GetValueAsync();
+            if (todayLeaveSnap.Exists && todayLeaveSnap.Value != null)
+                acc.BulmabulTodayLeaveCount = Convert.ToInt32(todayLeaveSnap.Value);
+
+            var lastLeaveSnap = await BulmabulLastLeaveAtRef(uid).GetValueAsync();
+            if (lastLeaveSnap.Exists && lastLeaveSnap.Value != null)
+                acc.BulmabulLastLeaveAt = Convert.ToInt64(lastLeaveSnap.Value);
 
             var eqSnap = await EquippedDiceKeyRef(uid).GetValueAsync();
             if (eqSnap.Exists && eqSnap.Value != null)

@@ -1,9 +1,10 @@
-﻿using TMPro;
+﻿using System.Collections;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 
 /// <summary>
 /// 부루마불 게임 씬의 UI 전담 스크립트.
@@ -190,6 +191,9 @@ public class BulmabulGameUI : MonoBehaviour
     private bool _lastPausedState = false;
     private bool _lastPauseOwnerWasLocal = false;
 
+    //방에 나갔는지 확인하는 변수
+    private bool _leavingGame = false;
+
     [Header("Dice Rolling Result UI")]
     [SerializeField] private DiceRollingUI diceRollingUI;
 
@@ -197,6 +201,19 @@ public class BulmabulGameUI : MonoBehaviour
     private int _lastHandledRollVersion = -1;
 
     private readonly Dictionary<int, string> _loadedProfileUrls = new Dictionary<int, string>();
+
+    [Header("Result Panel")]
+    [SerializeField] private GameObject resultPanel;
+
+    [Header("Win Result Texts")]
+    [SerializeField] private TMP_Text txtWinResult;
+
+    [Header("Result Settings")]
+    [SerializeField] private float resultLeaveDelay = 1.5f;
+
+
+    private bool _handledGameFinished = false;
+    private bool _savingGameResult = false;
 
     private void Awake()
     {
@@ -213,6 +230,8 @@ public class BulmabulGameUI : MonoBehaviour
         RefreshDiceControlGauge();
         RefreshDiceRollResult();
         RefreshMapViewButtonText();
+
+        HandleGameFinishedAndShowWinResult();
 
         // PC에서 버튼을 누른 채 밖으로 드래그한 뒤 마우스를 떼도 굴림 처리되도록 보정
         if (_diceGaugeHolding && Input.GetMouseButtonUp(0))
@@ -284,6 +303,157 @@ public class BulmabulGameUI : MonoBehaviour
         {
             txtSkipTakeOverLandButton = btnSkipTakeOverLand.transform.GetChild(0).GetComponent<TMP_Text>();
         }
+    }
+
+    /// <summary>
+    /// 게임 종료를 감지해서 승리한 로컬 유저에게 보상 지급 후 자동으로 방에서 나가게 한다.
+    /// </summary>
+    private void HandleGameFinishedAndShowWinResult()
+    {
+        if (_handledGameFinished || _savingGameResult)
+            return;
+
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null)
+            return;
+
+        // 중요:
+        // Fusion Spawned()가 끝나기 전에는 Networked Property 접근 금지.
+        // GameFinished, WinnerIndex, Players 같은 Networked 값은
+        // IsSpawnReady == true 이후에만 읽어야 한다.
+        if (!state.IsSpawnReady)
+            return;
+
+        if (!state.GameFinished)
+            return;
+
+        if (!state.IsLocalPlayerWinner())
+            return;
+
+        _handledGameFinished = true;
+        StartCoroutine(CoShowWinResultRewardAndLeave());
+    }
+
+    /// <summary>
+    /// 승리 보상 저장 → ResultPanel/Win에 결과 표시 → 일정 시간 후 로비 이동.
+    /// </summary>
+    private IEnumerator CoShowWinResultRewardAndLeave()
+    {
+        _savingGameResult = true;
+
+        Task<BulmabulRewardResult> rewardTask = BulmabulRewardService.ApplyLocalWinRewardAsync();
+
+        while (rewardTask != null && !rewardTask.IsCompleted)
+            yield return null;
+
+        if (rewardTask != null && rewardTask.IsFaulted)
+        {
+            Debug.LogException(rewardTask.Exception);
+
+            ShowWinResultPanel(
+                "승리했습니다!\n\n상대 플레이어가 게임을 나갔습니다.\n하지만 보상 저장 중 오류가 발생했습니다.\n\n잠시 후 로비로 이동합니다.",
+                "You won!\n\nThe other player left the game.\nHowever, failed to save rewards.\n\nReturning to the lobby shortly."
+            );
+        }
+        else
+        {
+            BulmabulRewardResult result = rewardTask != null ? rewardTask.Result : null;
+
+            if (result != null)
+            {
+                ShowWinResultPanel(
+                    BuildWinRewardResultTextKor(result),
+                    BuildWinRewardResultTextEng(result)
+                );
+            }
+            else
+            {
+                ShowWinResultPanel(
+                    "승리했습니다!\n\n상대 플레이어가 게임을 나갔습니다.\n승리 보상을 획득했습니다!\n\n잠시 후 로비로 이동합니다.",
+                    "You won!\n\nThe other player left the game.\nYou received victory rewards!\n\nReturning to the lobby shortly."
+                );
+            }
+        }
+
+        float delay = Mathf.Max(3.5f, resultLeaveDelay);
+        yield return new WaitForSeconds(delay);
+
+        if (NetWorkLauncher.instance != null)
+        {
+            _ = NetWorkLauncher.instance.LeaveRoomToLobby(1);
+        }
+        else
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene("LobbyScene");
+        }
+
+        _savingGameResult = false;
+    }
+
+    private void ShowWinResultPanel(string kor, string eng)
+    {
+        string msg = GetByLanguage(kor, eng);
+
+        if (resultPanel != null)
+            resultPanel.SetActive(true);
+
+        if (txtWinResult != null)
+            txtWinResult.text = msg;
+    }
+
+    private string BuildWinRewardResultTextKor(BulmabulRewardResult result)
+    {
+        if (result == null)
+            return "승리했습니다!\n\n상대 플레이어가 게임을 나갔습니다.\n승리 보상을 획득했습니다!\n\n잠시 후 로비로 이동합니다.";
+
+        string msg =
+            $"승리했습니다!\n\n" +
+            $"상대 플레이어가 게임을 나갔습니다.\n\n" +
+            $"경험치 배율 : x{result.ExpMultiplier:0.##}\n" +
+            $"획득 경험치 : +{result.FinalExpReward:N0}\n" +
+            $"승리 보상 : +{result.WinCashReward:N0}";
+
+        if (result.IsLevelUp)
+        {
+            msg +=
+                $"\n\n레벨업!\n" +
+                $"Lv.{result.BeforeLevel} → Lv.{result.AfterLevel}\n" +
+                $"레벨업 보상 : +{result.LevelUpCashReward:N0}";
+        }
+
+        msg +=
+            $"\n\n총 획득 재화 : +{result.TotalCashReward:N0}\n" +
+            $"잠시 후 로비로 이동합니다.";
+
+        return msg;
+    }
+
+    private string BuildWinRewardResultTextEng(BulmabulRewardResult result)
+    {
+        if (result == null)
+            return "You won!\n\nThe other player left the game.\nYou received victory rewards!\n\nReturning to the lobby shortly.";
+
+        string msg =
+            $"You won!\n\n" +
+            $"The other player left the game.\n\n" +
+            $"EXP Multiplier : x{result.ExpMultiplier:0.##}\n" +
+            $"EXP Gained : +{result.FinalExpReward:N0}\n" +
+            $"Win Reward : +{result.WinCashReward:N0}";
+
+        if (result.IsLevelUp)
+        {
+            msg +=
+                $"\n\nLevel Up!\n" +
+                $"Lv.{result.BeforeLevel} → Lv.{result.AfterLevel}\n" +
+                $"Level Up Reward : +{result.LevelUpCashReward:N0}";
+        }
+
+        msg +=
+            $"\n\nTotal Cash Gained : +{result.TotalCashReward:N0}\n" +
+            $"Returning to the lobby shortly.";
+
+        return msg;
     }
 
     /// <summary>
@@ -521,6 +691,10 @@ public class BulmabulGameUI : MonoBehaviour
 
         if (takeOverPanel != null)
             takeOverPanel.SetActive(false);
+
+        if (resultPanel != null)
+            resultPanel.SetActive(false);
+
     }
 
     /// <summary>
@@ -1477,20 +1651,50 @@ public class BulmabulGameUI : MonoBehaviour
     /// </summary>
     private void OnClickExitYes()
     {
+        if (_leavingGame)
+            return;
+
         if (exitConfirmPanel != null)
             exitConfirmPanel.SetActive(false);
+
+        StartCoroutine(CoLeaveGameAfterDefeatRequest());
+    }
+
+    private IEnumerator CoLeaveGameAfterDefeatRequest()
+    {
+        _leavingGame = true;
+
+        if (ToastMessageManager.instance != null)
+        {
+            ToastMessageManager.instance.ShowToast(
+                "게임에서 나가 패배했습니다. 잠시 후 로비로 이동합니다.",
+                "You left the game and were defeated. Returning to the lobby shortly."
+            );
+        }
 
         BulmabulGameState state = BulmabulGameState.Instance;
 
         if (state != null)
         {
-            // 네트워크 게임 상태에 "내가 나가서 패배했다" 요청
+            // 서버에 이탈 패배 요청
             state.RequestLeaveGameLocal();
-            return;
         }
 
-        // state가 없는 예외 상황이면 그냥 씬 이동 또는 Runner 종료 처리
-        UnityEngine.SceneManagement.SceneManager.LoadScene("LobbyScene");
+        // 로컬 계정에 이탈 기록 적용
+        // 오늘 이탈 5회째부터만 재화/시간 패널티 적용
+        _ = BulmabulPenaltyService.ApplyLocalLeaveRecordAsync();
+
+        // 토스트를 볼 수 있도록 잠깐 대기
+        yield return new WaitForSeconds(2f);
+
+        if (NetWorkLauncher.instance != null)
+        {
+            _ = NetWorkLauncher.instance.LeaveRoomToLobby(1);
+        }
+        else
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene("LobbyScene");
+        }
     }
 
     private void OnClickBuyLand()
