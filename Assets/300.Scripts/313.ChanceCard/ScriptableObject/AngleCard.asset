@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d3b62872524fee943bf9e3182b4bef40, type: 3}
+  m_Name: AngleCard
+  m_EditorClassIdentifier: 
+  cardId: angel_card
+  cardNameKor: "\uCC9C\uC0AC \uCE74\uB4DC"
+  cardNameEng: Angel Card
+  descriptionKor: "\uD1B5\uD589\uB8CC \uB610\uB294 \uBC8C\uAE08\uC744 1\uD68C \uB9C9\uC2B5\uB2C8\uB2E4."
+  descriptionEng: Blocks toll or penalty once.
+  cardType: 9
+  useType: 1
+  moneyAmount: 0
+  moveStep: 0
+  targetCellIndex: -1
+  cardImage: {fileID: 21300000, guid: 1c9d25787cd876e4e806759eaa6d7b32, type: 3}

@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d3b62872524fee943bf9e3182b4bef40, type: 3}
+  m_Name: MoveFowardCard_4
+  m_EditorClassIdentifier: 
+  cardId: move_forward_4
+  cardNameKor: "\uC55E\uC73C\uB85C \uC774\uB3D9"
+  cardNameEng: Move Forward
+  descriptionKor: "\uC55E\uC73C\uB85C 4\uCE78 \uC774\uB3D9\uD569\uB2C8\uB2E4."
+  descriptionEng: Move forward 4 spaces.
+  cardType: 5
+  useType: 0
+  moneyAmount: 0
+  moveStep: 4
+  targetCellIndex: -1
+  cardImage: {fileID: 21300000, guid: 82f58ed043491984f822b129d59e9526, type: 3}

@@ -72,9 +72,6 @@ public class BulmabulGameState : NetworkBehaviour
         /// <summary>파산 여부</summary>
         public NetworkBool bankrupt;
 
-        /// <summary>Travel 칸 도착 후 다음 자기 턴에 이동권 보유 여부</summary>
-        public NetworkBool hasTravelTicket;
-
         /// <summary>여행 이동 비용</summary>
         public int travelCost;
 
@@ -111,6 +108,12 @@ public class BulmabulGameState : NetworkBehaviour
         // 추가: Firebase UID
         public NetworkString<_128> uid;
 
+        /// <summary>
+        /// 여행 칸에서 비용을 지불한 뒤 다음 턴에 목적지를 선택할 수 있는 상태.
+        /// true면 여행 목적지 선택 UI를 열 수 있다.
+        /// </summary>
+        public NetworkBool hasTravelDestinationReady;
+
     }
 
     /// <summary>
@@ -122,7 +125,20 @@ public class BulmabulGameState : NetworkBehaviour
         BuyLand = 1,
         InitialBuildAfterBuy = 2,
         BuildFromStart = 3,
-        TakeOverLand = 4
+        TakeOverLand = 4,
+
+        /// <summary>
+        /// 상대 땅 도착 후 천사 카드를 사용할지 선택하는 상태.
+        /// 사용하면 통행료 면제, 취소하면 통행료 지불.
+        /// </summary>
+        AngelCardTollChoice = 5,
+
+        /// <summary>
+        /// 여행 칸 도착 후 여행 비용을 지불할지 선택하는 상태.
+        /// 확인하면 비용 차감 + 다음 턴 목적지 선택권 획득.
+        /// 취소하면 여행하지 않음.
+        /// </summary>
+        TravelCostChoice = 6
     }
 
     [Header("Rule")]
@@ -227,6 +243,10 @@ public class BulmabulGameState : NetworkBehaviour
     /// <summary>승리한 플레이어 인덱스</summary>
     [Networked] public int WinnerIndex { get; set; }
 
+    [Networked] public int ChanceDeckSeed { get; set; }
+    [Networked] public int ChanceDeckRemainCount { get; set; }
+    [Networked] public NetworkBool ChanceDeckInitialized { get; set; }
+
     string controlText = "";
 
     private bool _submittedLocalDice;
@@ -263,6 +283,16 @@ public class BulmabulGameState : NetworkBehaviour
         _placedOnce = false;
 
         StartCoroutine(CoInitializeGameAfterBoardReady());
+
+        if (Object.HasStateAuthority)
+        {
+            InitChanceDeckForFusion();
+        }
+        else
+        {
+            if (BulmabulChanceDeck.Instance != null)
+                BulmabulChanceDeck.Instance.SetCardCountFromServer(ChanceDeckRemainCount);
+        }
     }
 
     /// <summary>
@@ -556,7 +586,7 @@ public class BulmabulGameState : NetworkBehaviour
                 diceLevel = 1,
 
                 bankrupt = false,
-                hasTravelTicket = false,
+                hasTravelDestinationReady = false,
                 travelCost = 0,
                 leftGame = false,
                 leaveReasonInt = 0
@@ -897,12 +927,33 @@ public class BulmabulGameState : NetworkBehaviour
         RPC_RequestSkipBuild();
     }
 
-    public void RequestTravelMoveLocal(int targetCellIndex)
+    /// <summary>
+    /// 보관 중인 여행권 카드를 사용한다.
+    /// 
+    /// 목적지로 바로 이동하지 않는다.
+    /// 내 말을 여행 칸으로 이동시키는 요청이다.
+    /// 실제 카드 제거는 BulmabulChanceInventory에서 처리된다.
+    /// </summary>
+    public bool RequestUseTravelTicketCardLocal()
     {
-        if (!CanLocalUseTravel())
+        if (!CanLocalUseMoveToTravelCard())
+            return false;
+
+        RPC_RequestUseMoveToTravelCard();
+        return true;
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 여행 비용 결제 여부를 선택한다.
+    /// payTravelCost = true  : 여행 비용 지불, 다음 턴 목적지 선택권 획득
+    /// payTravelCost = false : 여행하지 않음
+    /// </summary>
+    public void RequestResolveTravelCostLocal(bool payTravelCost)
+    {
+        if (!ShouldShowTravelCostPopupForLocalPlayer())
             return;
 
-        RPC_RequestTravelMove(targetCellIndex);
+        RPC_RequestResolveTravelCost(payTravelCost);
     }
 
     public void RequestPauseResumeLocal()
@@ -1141,16 +1192,14 @@ public class BulmabulGameState : NetworkBehaviour
                 return false;
 
             case BulmabulCellType.Chance:
-                ApplyChance(playerIndex, cell);
-                return false;
+                return ApplyChance(playerIndex, cell);
 
             case BulmabulCellType.Jail:
                 ApplyJail(playerIndex, cell);
                 return false;
 
             case BulmabulCellType.Travel:
-                ApplyTravelCell(playerIndex, cell);
-                return false;       
+                return ApplyTravel(playerIndex, cellIndex, cell);
         }
 
         return false;
@@ -1159,7 +1208,6 @@ public class BulmabulGameState : NetworkBehaviour
     private bool ApplyLand(int playerIndex, int cellIndex, BulmabulCellData cell)
     {
         int ownerIndex = LandOwnerByCell.Get(cellIndex);
-        PlayerGameSlot actor = Players.Get(playerIndex);
 
         if (ownerIndex < 0)
         {
@@ -1203,18 +1251,44 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
         }
 
-        bool canContinue = PayToll(playerIndex, ownerIndex, cellIndex, cell);
+        /*
+         * 중요:
+         * 상대 땅에 도착하면 바로 PayToll 하지 않는다.
+         * 먼저 천사 카드 사용 여부 선택 상태로 넘긴다.
+         *
+         * 로컬 플레이어가 천사 카드를 가지고 있으면 UI 팝업이 뜨고,
+         * 없으면 UI 쪽에서 자동으로 '사용 안 함' 요청을 보내게 만들 수 있다.
+         */
+        OpenAngelCardTollChoicePending(playerIndex, cellIndex);
 
-        if (!canContinue)
-            return false;
+        return true;
+    }
 
-        // 통행료를 낸 뒤, 호텔이 없는 상대 땅이면 인수 선택 패널을 연다.
-        if (CanOpenTakeOverPending(playerIndex, ownerIndex, cellIndex, cell))
+    /// <summary>
+    /// 상대 땅 도착 후 천사 카드 사용 여부 선택 상태를 연다.
+    /// 체크 버튼을 누르면 통행료 면제,
+    /// 취소 버튼을 누르면 기존처럼 통행료를 낸다.
+    /// </summary>
+    private void OpenAngelCardTollChoicePending(int payerIndex, int cellIndex)
+    {
+        PendingAction = PendingActionType.AngelCardTollChoice;
+        PendingPlayerIndex = payerIndex;
+        PendingCellIndex = cellIndex;
+
+        BulmabulCellData cell = board != null ? board.GetCell(cellIndex) : null;
+        int ownerIndex = LandOwnerByCell.Get(cellIndex);
+
+        int toll = 0;
+
+        if (cell != null)
         {
-            OpenTakeOverPending(playerIndex, cellIndex);
-            return true;
+            int flags = LandBuildingFlagsByCell.Get(cellIndex);
+            toll = BulmabulLandSystem.CalculateToll(cell, flags);
         }
-        return false;
+
+        LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어의 땅에 도착했습니다. 천사 카드 사용 선택 대기 중. 통행료 {toll:N0}");
+
+        BumpRevision();
     }
 
     private bool TryBuyLand(int playerIndex, int cellIndex, BulmabulCellData cell)
@@ -1392,9 +1466,59 @@ public class BulmabulGameState : NetworkBehaviour
         return (int)result;
     }
 
-    private void ApplyChance(int playerIndex, BulmabulCellData cell)
+    /// <summary>
+    /// 찬스칸 도착 처리.
+    /// 
+    /// 찬스칸에 도착하면 덱의 맨 위 카드 1장을 자동으로 뽑는다.
+    /// DrawTopCard() 내부에서 카드 더미 UI도 자동으로 줄어든다.
+    /// </summary>
+    private bool ApplyChance(int playerIndex, BulmabulCellData cell)
     {
-        LogServer($"{playerIndex}번 플레이어가 찬스 칸 {cell.cellName}에 도착했습니다.");
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        if (!ChanceDeckInitialized)
+            InitChanceDeckForFusion();
+
+        BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
+
+        if (deck == null)
+        {
+            LogServer("찬스 카드 덱을 찾을 수 없습니다.");
+            return false;
+        }
+
+        BulmabulChanceCardData card = deck.DrawTopCardForAuthority();
+
+        if (card == null)
+        {
+            LogServer("뽑을 찬스 카드가 없습니다.");
+            return false;
+        }
+
+        ChanceDeckRemainCount = deck.DrawPileCount;
+        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+
+        LogServer($"{playerIndex}번 플레이어가 찬스 카드 [{card.GetName()}] 를 뽑았습니다.");
+
+        BulmabulChanceCardExecutor executor = BulmabulChanceCardExecutor.Instance;
+
+        if (executor == null)
+        {
+            LogServer("찬스 카드 실행기를 찾을 수 없습니다.");
+            deck.DiscardForAuthority(card);
+            return false;
+        }
+
+        executor.HandleDrawnCard(playerIndex, card);
+
+        ChanceDeckRemainCount = deck.DrawPileCount;
+        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+
+        return false;
     }
 
     private void ApplyJail(int playerIndex, BulmabulCellData cell)
@@ -1402,16 +1526,45 @@ public class BulmabulGameState : NetworkBehaviour
         LogServer($"{playerIndex}번 플레이어가 {cell.cellName} 칸에 도착했습니다.");
     }
 
-    private void ApplyTravelCell(int playerIndex, BulmabulCellData cell)
+    /// <summary>
+    /// 여행 칸 도착 처리.
+    /// 
+    /// 주사위로 여행 칸에 도착해도 실행되고,
+    /// MoveToTravelCard로 여행 칸에 이동해도 실행된다.
+    /// 
+    /// 여기서 바로 돈을 빼지 않는다.
+    /// 먼저 여행 비용 결제 팝업을 열고,
+    /// 확인을 누르면 그때 비용 차감 + 다음 턴 목적지 선택권 지급.
+    /// </summary>
+    private bool ApplyTravel(int playerIndex, int cellIndex, BulmabulCellData cell)
     {
-        PlayerGameSlot actor = Players.Get(playerIndex);
+        if (!Object.HasStateAuthority)
+            return false;
 
-        actor.hasTravelTicket = true;
-        actor.travelCost = Mathf.Max(0, cell.travelCost);
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
 
-        Players.Set(playerIndex, actor);
+        if (cell == null)
+            return false;
 
-        LogServer($"{playerIndex}번 플레이어가 {cell.cellName} 도착. 다음 자기 턴에 {actor.travelCost:N0}을 내고 원하는 칸으로 이동할 수 있습니다.");
+        OpenTravelCostPending(playerIndex, cellIndex, cell);
+
+        // 팝업 선택 대기 상태이므로 턴 진행을 멈춘다.
+        return true;
+    }
+
+    /// <summary>
+    /// 여행 칸 도착 후 여행 비용 결제 선택 상태를 연다.
+    /// </summary>
+    private void OpenTravelCostPending(int playerIndex, int cellIndex, BulmabulCellData cell)
+    {
+        PendingAction = PendingActionType.TravelCostChoice;
+        PendingPlayerIndex = playerIndex;
+        PendingCellIndex = cellIndex;
+
+        int travelCost = cell != null ? Mathf.Max(0, cell.travelCost) : 0;
+
+        LogServer($"{playerIndex}번 플레이어가 여행 칸에 도착했습니다. 여행 비용 {travelCost:N0} 결제 선택 대기 중.");
 
         BumpRevision();
     }
@@ -1768,6 +1921,258 @@ public class BulmabulGameState : NetworkBehaviour
 
     #region 여행 이동
 
+
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestResolveTravelCost(bool payTravelCost, RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (PendingAction != PendingActionType.TravelCostChoice)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot player = Players.Get(PendingPlayerIndex);
+
+        if (info.Source != player.player)
+            return;
+
+        if (board == null)
+            return;
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount)
+            return;
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null || cell.cellType != BulmabulCellType.Travel)
+            return;
+
+        int playerIndex = PendingPlayerIndex;
+        bool wasDouble = PendingWasDouble;
+
+        int travelCost = Mathf.Max(0, cell.travelCost);
+
+        if (payTravelCost)
+        {
+            player = Players.Get(playerIndex);
+
+            if (player.cash < travelCost)
+            {
+                LogServer($"{playerIndex}번 플레이어는 여행 비용 {travelCost:N0}원이 부족해서 여행을 사용할 수 없습니다.");
+
+                player.hasTravelDestinationReady = false;
+                player.travelCost = 0;
+                Players.Set(playerIndex, player);
+            }
+            else
+            {
+                player.cash -= travelCost;
+                player.hasTravelDestinationReady = true;
+                player.travelCost = 0;
+                Players.Set(playerIndex, player);
+
+                LogServer($"{playerIndex}번 플레이어가 여행 비용 {travelCost:N0}원을 지불했습니다. 다음 자기 턴에 목적지를 선택할 수 있습니다.");
+            }
+        }
+        else
+        {
+            player = Players.Get(playerIndex);
+            player.hasTravelDestinationReady = false;
+            player.travelCost = 0;
+            Players.Set(playerIndex, player);
+
+            LogServer($"{playerIndex}번 플레이어가 여행을 취소했습니다.");
+        }
+
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+
+        /*
+         * 주사위로 여행 칸에 도착한 경우:
+         * 더블이면 FinishTurnAfterAction 내부에서 한 번 더 굴릴 수 있게 처리.
+         *
+         * 카드로 여행 칸에 이동한 경우:
+         * CoResolveMoveToTravelByCard에서 PendingWasDouble = false로 세팅해야 함.
+         */
+        FinishTurnAfterAction(playerIndex, wasDouble);
+
+        BumpRevision();
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 여행 비용 결제 팝업을 봐야 하는지 확인.
+    /// </summary>
+    public bool ShouldShowTravelCostPopupForLocalPlayer()
+    {
+        if (Runner == null)
+            return false;
+
+        if (PendingAction != PendingActionType.TravelCostChoice)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        return slot.player == Runner.LocalPlayer;
+    }
+
+    /// <summary>
+    /// 여행 비용 팝업에 표시할 안내 문구.
+    /// </summary>
+    public string GetPendingTravelCostInfoText()
+    {
+        if (board == null)
+            return GetTravelCostDefaultText();
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount)
+            return GetTravelCostDefaultText();
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return GetTravelCostDefaultText();
+
+        int travelCost = Mathf.Max(0, cell.travelCost);
+
+        return GetByLanguageForState(
+            $"{cell.cellName}\n여행 비용: {travelCost:N0}\n비용을 지불하고 다음 턴에 여행 목적지를 선택하시겠습니까?",
+            $"{cell.cellName}\nTravel Cost: {travelCost:N0}\nPay now and choose a destination next turn?"
+        );
+    }
+
+    private string GetTravelCostDefaultText()
+    {
+        return GetByLanguageForState(
+            "여행 칸에 도착했습니다.\n비용을 지불하고 다음 턴에 여행하시겠습니까?",
+            "You arrived at the Travel cell.\nPay now and travel next turn?"
+        );
+    }
+
+    /// <summary>
+    /// 여행 목적지 선택 후 호출된다.
+    /// 
+    /// 중요:
+    /// 이 함수는 여행권을 사용하는 함수가 아니다.
+    /// 여행 칸에서 비용을 지불해서 hasTravelDestinationReady == true가 된 뒤,
+    /// 다음 자기 턴에 목적지를 선택할 때만 사용한다.
+    /// </summary>
+    public void RequestTravelMoveLocal(int targetCellIndex)
+    {
+        if (!CanLocalSelectTravelDestination())
+            return;
+
+        if (board == null || board.CellCount <= 0)
+            return;
+
+        targetCellIndex = board.ClampCellIndex(targetCellIndex);
+
+        RPC_RequestTravelMove(targetCellIndex);
+    }
+
+
+    /// <summary>
+    /// 보관 중인 여행 카드를 사용한다.
+    /// 
+    /// 목적지로 바로 이동하지 않는다.
+    /// 내 말을 여행 칸으로 이동시키고,
+    /// 여행 칸 효과 ApplyTravel()을 실행한다.
+    /// </summary>
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestUseMoveToTravelCard(RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (IsPaused || TurnBusy)
+            return;
+
+        if (PendingAction != PendingActionType.None)
+            return;
+
+        int playerIndex = FindPlayerIndex(info.Source);
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return;
+
+        /*
+         * 자기 턴에만 여행 카드 사용 가능.
+         * 보관 카드는 주사위 대신 사용하는 카드처럼 처리한다.
+         */
+        if (playerIndex != CurrentTurnIndex)
+            return;
+
+        if (board == null || board.CellCount <= 0)
+            return;
+
+        int travelCellIndex = FindTravelCellIndex();
+
+        if (travelCellIndex < 0)
+        {
+            LogServer("여행 칸을 찾을 수 없습니다.");
+            return;
+        }
+
+        StartCoroutine(CoResolveMoveToTravelByCard(playerIndex, travelCellIndex));
+    }
+
+    /// <summary>
+    /// MoveToTravelCard 사용 처리.
+    /// 
+    /// 찬스 카드로 얻은 여행 티켓은 무료 여행권이다.
+    /// 내 말을 여행 칸으로 이동시킨 뒤,
+    /// 여행 비용 없이 다음 자기 턴에 목적지를 선택할 수 있게 한다.
+    /// </summary>
+    private IEnumerator CoResolveMoveToTravelByCard(int playerIndex, int travelCellIndex)
+    {
+        TurnBusy = true;
+        BumpRevision();
+
+        PlayerGameSlot actor = Players.Get(playerIndex);
+        int fromIndex = actor.tileIndex;
+
+        LogServer($"{playerIndex}번 플레이어가 여행 티켓을 사용하여 여행 칸으로 이동합니다.");
+
+        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, travelCellIndex);
+
+        float moveWait = pawnMover != null ? pawnMover.DirectMoveSeconds + 0.1f : 0.9f;
+        yield return new WaitForSeconds(moveWait);
+
+        actor = Players.Get(playerIndex);
+        actor.tileIndex = travelCellIndex;
+
+        /*
+         * 핵심:
+         * 여행 티켓은 무료이므로 ApplyTravel()을 호출하지 않는다.
+         * ApplyTravel()은 일반 주사위 여행 칸 도착용이며,
+         * 여행 비용 결제 팝업을 여는 함수다.
+         */
+        actor.hasTravelDestinationReady = true;
+        actor.travelCost = 0;
+
+        Players.Set(playerIndex, actor);
+
+        LogServer($"{playerIndex}번 플레이어가 여행 티켓으로 무료 여행 선택권을 얻었습니다. 다음 자기 턴에 목적지를 선택할 수 있습니다.");
+
+        /*
+         * 여행 티켓 사용은 주사위 행동 대신 사용한 것으로 보고 턴 종료.
+         */
+        AdvanceTurn();
+
+        TurnBusy = false;
+        BumpRevision();
+    }
+
+    /// <summary>
+    /// 여행 목적지 선택권을 사용해서 선택한 목적지로 이동한다.
+    /// 
+    /// 비용은 여행 칸에서 이미 지불했으므로 여기서 돈을 다시 빼지 않는다.
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestTravelMove(int targetCellIndex, RpcInfo info = default)
     {
@@ -1788,10 +2193,7 @@ public class BulmabulGameState : NetworkBehaviour
         if (info.Source != actor.player)
             return;
 
-        if (!actor.hasTravelTicket)
-            return;
-
-        if (actor.cash < actor.travelCost)
+        if (!actor.hasTravelDestinationReady)
             return;
 
         if (board == null || board.CellCount <= 0)
@@ -1802,6 +2204,9 @@ public class BulmabulGameState : NetworkBehaviour
         StartCoroutine(CoResolveTravelMove(CurrentTurnIndex, targetCellIndex));
     }
 
+    /// <summary>
+    /// 여행 목적지 선택권을 소비해서 선택한 목적지로 이동한다.
+    /// </summary>
     private IEnumerator CoResolveTravelMove(int playerIndex, int targetCellIndex)
     {
         TurnBusy = true;
@@ -1810,15 +2215,14 @@ public class BulmabulGameState : NetworkBehaviour
         PlayerGameSlot actor = Players.Get(playerIndex);
 
         int fromIndex = actor.tileIndex;
-        int cost = Mathf.Max(0, actor.travelCost);
 
-        actor.cash -= cost;
-        actor.hasTravelTicket = false;
+        // 목적지 선택권 소비
+        actor.hasTravelDestinationReady = false;
         actor.travelCost = 0;
 
         Players.Set(playerIndex, actor);
 
-        LogServer($"{playerIndex}번 플레이어가 여행 비용 {cost:N0} 지불 후 이동합니다.");
+        LogServer($"{playerIndex}번 플레이어가 여행 목적지를 선택하여 {targetCellIndex}번 칸으로 이동합니다.");
 
         RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
 
@@ -1846,6 +2250,29 @@ public class BulmabulGameState : NetworkBehaviour
         BumpRevision();
     }
 
+
+    /// <summary>
+    /// 보드에서 여행 칸을 찾는다.
+    /// 여러 개 있으면 첫 번째 여행 칸을 사용한다.
+    /// </summary>
+    private int FindTravelCellIndex()
+    {
+        if (board == null)
+            return -1;
+
+        for (int i = 0; i < board.CellCount; i++)
+        {
+            BulmabulCellData cell = board.GetCell(i);
+
+            if (cell == null)
+                continue;
+
+            if (cell.cellType == BulmabulCellType.Travel)
+                return i;
+        }
+
+        return -1;
+    }
     #endregion
 
     #region 일시정지
@@ -2323,7 +2750,17 @@ public class BulmabulGameState : NetworkBehaviour
         return CanBuildPart(PendingPlayerIndex, PendingCellIndex, part);
     }
 
-    public bool CanLocalUseTravel()
+    /// <summary>
+    /// 로컬 플레이어가 여행 칸 이동 카드를 사용할 수 있는지 확인.
+    /// 
+    /// 조건:
+    /// - 내 턴
+    /// - 일시정지 아님
+    /// - 턴 처리 중 아님
+    /// - 구매/건설/인수/천사카드 선택 대기 중 아님
+    /// - 여행 칸이 보드에 존재함
+    /// </summary>
+    public bool CanLocalUseMoveToTravelCard()
     {
         if (Runner == null)
             return false;
@@ -2339,12 +2776,50 @@ public class BulmabulGameState : NetworkBehaviour
 
         int idx = FindPlayerIndex(Runner.LocalPlayer);
 
-        if (idx < 0)
+        if (!IsValidAlivePlayer(idx))
+            return false;
+
+        return FindTravelCellIndex() >= 0;
+    }
+
+    /// <summary>
+    /// 여행 버튼을 사용할 수 있는지 확인.
+    /// 
+    /// 이 함수는 보관 카드 사용 여부가 아니라,
+    /// 여행 칸에서 비용을 지불한 뒤
+    /// 다음 턴에 목적지 선택 버튼을 보여줄지 판단한다.
+    /// </summary>
+    public bool CanLocalUseTravel()
+    {
+        return CanLocalSelectTravelDestination();
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 여행 목적지를 선택할 수 있는지 확인.
+    /// 여행 칸에서 비용을 지불해서 hasTravelDestinationReady가 true일 때만 가능.
+    /// </summary>
+    public bool CanLocalSelectTravelDestination()
+    {
+        if (Runner == null)
+            return false;
+
+        if (IsPaused || TurnBusy)
+            return false;
+
+        if (PendingAction != PendingActionType.None)
+            return false;
+
+        if (!IsMyTurn(Runner.LocalPlayer))
+            return false;
+
+        int idx = FindPlayerIndex(Runner.LocalPlayer);
+
+        if (!IsValidAlivePlayer(idx))
             return false;
 
         PlayerGameSlot slot = Players.Get(idx);
 
-        return slot.hasTravelTicket && slot.cash >= slot.travelCost;
+        return slot.hasTravelDestinationReady;
     }
 
     public bool CanLocalPause()
@@ -2398,6 +2873,19 @@ public class BulmabulGameState : NetworkBehaviour
             return;
 
         RPC_RequestTakeOverLand();
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 천사 카드 사용을 선택한다.
+    /// useAngelCard = true  : 천사 카드 사용, 통행료 면제
+    /// useAngelCard = false : 천사 카드 사용 안 함, 통행료 지불
+    /// </summary>
+    public void RequestResolveAngelCardTollLocal(bool useAngelCard)
+    {
+        if (!ShouldShowAngelCardTollPopupForLocalPlayer())
+            return;
+
+        RPC_RequestResolveAngelCardToll(useAngelCard);
     }
 
     public void RequestSkipTakeOverLandLocal()
@@ -2496,6 +2984,110 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestResolveAngelCardToll(bool useAngelCard, RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (PendingAction != PendingActionType.AngelCardTollChoice)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot payerSlot = Players.Get(PendingPlayerIndex);
+
+        if (info.Source != payerSlot.player)
+            return;
+
+        if (board == null)
+            return;
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount)
+            return;
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null || cell.cellType != BulmabulCellType.Land)
+            return;
+
+        int payerIndex = PendingPlayerIndex;
+        int cellIndex = PendingCellIndex;
+        bool wasDouble = PendingWasDouble;
+
+        int ownerIndex = LandOwnerByCell.Get(cellIndex);
+
+        if (!IsValidAlivePlayer(ownerIndex))
+        {
+            LandOwnerByCell.Set(cellIndex, -1);
+            LandBuildingFlagsByCell.Set(cellIndex, BulmabulBuildFlags.None);
+
+            PendingAction = PendingActionType.None;
+            PendingPlayerIndex = -1;
+            PendingCellIndex = -1;
+
+            FinishTurnAfterAction(payerIndex, wasDouble);
+            BumpRevision();
+            return;
+        }
+
+        if (useAngelCard)
+        {
+            /*
+             * 실제 카드 제거는 로컬 UI 쪽에서 먼저 제거한다.
+             * 여기서는 서버 상태 기준으로 통행료만 면제 처리한다.
+             */
+            LogServer($"{payerIndex}번 플레이어가 천사 카드를 사용하여 {cell.cellName} 통행료를 면제받았습니다.");
+
+            PendingAction = PendingActionType.None;
+            PendingPlayerIndex = -1;
+            PendingCellIndex = -1;
+
+            /*
+             * 천사 카드로 통행료만 막는다.
+             * 인수 가능 여부는 기존 규칙대로 열어준다.
+             */
+            if (CanOpenTakeOverPending(payerIndex, ownerIndex, cellIndex, cell))
+            {
+                OpenTakeOverPending(payerIndex, cellIndex);
+                BumpRevision();
+                return;
+            }
+
+            FinishTurnAfterAction(payerIndex, wasDouble);
+            BumpRevision();
+            return;
+        }
+
+        /*
+         * 천사 카드 사용 안 함.
+         * 기존처럼 통행료를 낸다.
+         */
+        bool canContinue = PayToll(payerIndex, ownerIndex, cellIndex, cell);
+
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+
+        if (!canContinue)
+        {
+            FinishTurnAfterAction(payerIndex, wasDouble);
+            BumpRevision();
+            return;
+        }
+
+        if (CanOpenTakeOverPending(payerIndex, ownerIndex, cellIndex, cell))
+        {
+            OpenTakeOverPending(payerIndex, cellIndex);
+            BumpRevision();
+            return;
+        }
+
+        FinishTurnAfterAction(payerIndex, wasDouble);
+        BumpRevision();
+    }
+
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestSkipTakeOverLand(RpcInfo info = default)
     {
         if (!Object.HasStateAuthority)
@@ -2543,6 +3135,64 @@ public class BulmabulGameState : NetworkBehaviour
 
         PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
         return slot.player == Runner.LocalPlayer;
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 천사 카드 통행료 선택 팝업을 봐야 하는지 확인.
+    /// </summary>
+    public bool ShouldShowAngelCardTollPopupForLocalPlayer()
+    {
+        if (Runner == null)
+            return false;
+
+        if (PendingAction != PendingActionType.AngelCardTollChoice)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        return slot.player == Runner.LocalPlayer;
+    }
+
+    /// <summary>
+    /// 천사 카드 팝업에 표시할 정보.
+    /// </summary>
+    public string GetPendingAngelCardTollInfoText()
+    {
+        if (board == null)
+            return GetByLanguageForState(
+                "상대 땅에 도착했습니다.\n천사 카드를 사용하시겠습니까?",
+                "You landed on an opponent's land.\nUse Angel Card?"
+            );
+
+        if (PendingCellIndex < 0 || PendingCellIndex >= board.CellCount)
+            return GetByLanguageForState(
+                "상대 땅에 도착했습니다.\n천사 카드를 사용하시겠습니까?",
+                "You landed on an opponent's land.\nUse Angel Card?"
+            );
+
+        BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+        if (cell == null)
+            return GetByLanguageForState(
+                "상대 땅에 도착했습니다.\n천사 카드를 사용하시겠습니까?",
+                "You landed on an opponent's land.\nUse Angel Card?"
+            );
+
+        int ownerIndex = LandOwnerByCell.Get(PendingCellIndex);
+        int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+        int toll = BulmabulLandSystem.CalculateToll(cell, flags);
+
+        string ownerName = IsValidAlivePlayer(ownerIndex)
+            ? GetPlayerDisplayName(ownerIndex)
+            : GetByLanguageForState("알 수 없음", "Unknown");
+
+        return GetByLanguageForState(
+            $"{cell.cellName}\n소유자: {ownerName}\n통행료: {toll:N0}\n천사 카드를 사용하시겠습니까?",
+            $"{cell.cellName}\nOwner: {ownerName}\nToll: {toll:N0}\nUse Angel Card?"
+        );
     }
 
     public string GetPendingTakeOverInfoText()
@@ -2974,7 +3624,7 @@ public class BulmabulGameState : NetworkBehaviour
         slot.bankrupt = true;
         slot.leftGame = true;
         slot.leaveReasonInt = (int)reason;
-        slot.hasTravelTicket = false;
+        slot.hasTravelDestinationReady = false;
         slot.travelCost = 0;
 
         Players.Set(playerIndex, slot);
@@ -3081,6 +3731,45 @@ public class BulmabulGameState : NetworkBehaviour
         Debug.Log($"[BulmabulGameState] Game Finished. WinnerIndex={winnerIndex}, Winner={winnerNick}");
 
         BumpRevision();
+    }
+
+    #endregion
+
+    #region 멀티 플레이 카드 덱 초기화
+
+    /// <summary>
+    /// Photon Fusion 멀티플레이용 찬스 카드 덱 초기화.
+    /// 반드시 StateAuthority에서만 호출한다.
+    /// </summary>
+    private void InitChanceDeckForFusion()
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
+
+        if (deck == null)
+        {
+            LogServer("BulmabulChanceDeck을 찾을 수 없습니다.");
+            return;
+        }
+
+        int seed = System.Guid.NewGuid().GetHashCode();
+
+        ChanceDeckSeed = seed;
+        ChanceDeckRemainCount = deck.ResetDeckForAuthority(seed);
+        ChanceDeckInitialized = true;
+
+        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+
+        LogServer($"찬스 카드 덱 초기화 완료. seed={seed}, remain={ChanceDeckRemainCount}");
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_SyncChanceDeckUI(int remainCount)
+    {
+        if (BulmabulChanceDeck.Instance != null)
+            BulmabulChanceDeck.Instance.SetCardCountFromServer(remainCount);
     }
 
     #endregion

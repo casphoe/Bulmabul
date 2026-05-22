@@ -19,7 +19,11 @@ public enum BulmabulChanceCardType
     // 보관 후 사용
     AngelCard,           // 통행료/벌금 방어
     JailEscapeCard,      // 감옥 탈출
-    FreeTravelCard       // 원하는 위치 이동
+    /// <summary>
+    /// 여행 칸으로 이동하는 보관 카드.
+    /// 기존 FreeTravelCard를 대체한다.
+    /// </summary>
+    MoveToTravelCard
 }
 
 /// <summary>

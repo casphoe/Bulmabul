@@ -1787,7 +1787,9 @@ public class BulmabulGameUI : MonoBehaviour
     private void OnClickTravelMove()
     {
         BulmabulGameState state = BulmabulGameState.Instance;
-        if (state == null) return;
+
+        if (state == null)
+            return;
 
         if (!state.CanLocalUseTravel())
             return;
