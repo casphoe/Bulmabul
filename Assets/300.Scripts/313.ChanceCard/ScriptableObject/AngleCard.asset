@@ -17,7 +17,7 @@ MonoBehaviour:
   cardNameEng: Angel Card
   descriptionKor: "\uD1B5\uD589\uB8CC \uB610\uB294 \uBC8C\uAE08\uC744 1\uD68C \uB9C9\uC2B5\uB2C8\uB2E4."
   descriptionEng: Blocks toll or penalty once.
-  cardType: 9
+  cardType: 10
   useType: 1
   moneyAmount: 0
   moveStep: 0

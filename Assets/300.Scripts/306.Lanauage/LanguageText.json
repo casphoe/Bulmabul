@@ -311,6 +311,10 @@
     {
       "key": "txt.GameTitle",
       "text": "부루마불 게임"
+    },
+    {
+      "key": "txt.OK",
+      "text": "확인"
     }
   ],
   "eng": [
@@ -625,6 +629,10 @@
     {
       "key": "txt.GameTitle",
       "text": "Blue Marble game"
+    },
+    {
+      "key": "txt.OK",
+      "text": "Confirm"
     }
   ]
 }

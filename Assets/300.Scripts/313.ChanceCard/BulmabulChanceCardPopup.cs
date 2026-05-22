@@ -14,7 +14,7 @@ public class BulmabulChanceCardPopup : MonoBehaviour
 
     [Header("UI")]
     [SerializeField] private Image imgCard;
-    [SerializeField] private TMP_Text txtTitle;
+    [SerializeField] private TMP_Text txtName;
     [SerializeField] private TMP_Text txtDescription;
     [SerializeField] private TMP_Text txtUseType;
     [SerializeField] private Button btnConfirm;
@@ -43,8 +43,8 @@ public class BulmabulChanceCardPopup : MonoBehaviour
             imgCard.gameObject.SetActive(card != null && card.cardImage != null);
         }
 
-        if (txtTitle != null)
-            txtTitle.text = card != null ? card.GetName() : "";
+        if (txtName != null)
+            txtName.text = card != null ? card.GetName() : "";
 
         if (txtDescription != null)
             txtDescription.text = card != null ? card.GetDescription() : "";
