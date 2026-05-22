@@ -10,7 +10,7 @@ using TMPro;
 /// UI에서는 최대 20장의 더미처럼 보이게 만든다.
 /// 
 /// 규칙:
-/// - 실제 카드 5장 = UI 카드 1장
+/// - 실제 카드 15장 = UI 카드 1장
 /// - 100장 -> 20장 보임
 /// - 95장  -> 19장 보임
 /// - 90장  -> 18장 보임
@@ -27,8 +27,8 @@ public class BulmabulCardDeckUI : MonoBehaviour
     [SerializeField] private Image imageTemplate;
 
     [Header("설정")]
-    [SerializeField] private int maxCardCount = 100;
-    [SerializeField] private int maxVisibleStackCount = 20;
+    [SerializeField] private int maxCardCount = 300;
+    [SerializeField] private int maxVisibleStackCount = 30;
 
     [Tooltip("카드가 겹쳐질 때 X 간격")]
     [SerializeField] private float offsetX = 2.5f;
@@ -46,7 +46,7 @@ public class BulmabulCardDeckUI : MonoBehaviour
 
     private readonly List<Image> stackImages = new List<Image>();
 
-    private int currentCardCount = 100;
+    private int currentCardCount = 300;
 
     private void Awake()
     {
@@ -165,10 +165,16 @@ public class BulmabulCardDeckUI : MonoBehaviour
                 stackImages[i].transform.SetSiblingIndex(i);
             }
         }
-
         if (txtCardCount != null)
         {
-            txtCardCount.text = $"{currentCardCount}";
+            var lang = (LaguageManager.Instance != null)
+                ? LaguageManager.Instance.currentLang
+                : Lauaguage.Kor;
+
+            if (lang == Lauaguage.Kor)
+                txtCardCount.text = $"남은 카드 {currentCardCount} / {maxCardCount}";
+            else
+                txtCardCount.text = $"Cards {currentCardCount} / {maxCardCount}";
         }
     }
 
@@ -200,7 +206,7 @@ public class BulmabulCardDeckUI : MonoBehaviour
     [ContextMenu("테스트 - 100장으로 리셋")]
     private void TestReset100()
     {
-        SetCardCount(100);
+        SetCardCount(300);
     }
 #endif
 }

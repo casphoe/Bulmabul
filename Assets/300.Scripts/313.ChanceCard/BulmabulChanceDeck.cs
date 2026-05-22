@@ -17,20 +17,23 @@ public class BulmabulChanceDeck : MonoBehaviour
     [SerializeField] private bool autoBuildStartCards = true;
 
     [Header("단일 카드 데이터")]
-    [Tooltip("천사 카드. 4장 들어감.")]
+    [Tooltip("천사 카드. 8장 들어감.")]
     [SerializeField] private BulmabulChanceCardData angelCard;
 
-    [Tooltip("감옥 이동 카드. 3장 들어감.")]
+    [Tooltip("감옥 이동 카드. 6장 들어감.")]
     [SerializeField] private BulmabulChanceCardData jailCard;
 
-    [Tooltip("감옥 탈출 카드. 6장 들어감.")]
+    [Tooltip("감옥 탈출 카드. 12장 들어감.")]
     [SerializeField] private BulmabulChanceCardData jailEscapeCard;
 
-    [Tooltip("여행 카드. 10장 들어감.")]
+    [Tooltip("여행 카드. 20장 들어감.")]
     [SerializeField] private BulmabulChanceCardData travelCard;
 
-    [Tooltip("시작지점 이동 카드. 7장 들어감.")]
+    [Tooltip("시작지점 이동 카드. 21장 들어감.")]
     [SerializeField] private BulmabulChanceCardData moveToStartCard;
+
+    [Tooltip("현재 위치 기준 앞으로 가장 가까운 적 소유 땅으로 이동하는 카드. 23장 들어감.")]
+    [SerializeField] private BulmabulChanceCardData moveToNearestEnemyLandCard;
 
     [Header("여러 값 카드 데이터")]
     [Tooltip("세금 카드 목록. 금액이 다른 PayMoney 카드들을 넣는다.")]
@@ -46,15 +49,16 @@ public class BulmabulChanceDeck : MonoBehaviour
     [SerializeField] private List<BulmabulChanceCardData> moveBackwardCards = new List<BulmabulChanceCardData>();
 
     [Header("Card Count")]
-    [SerializeField] private int angelCardCount = 4;
-    [SerializeField] private int jailCardCount = 3;
-    [SerializeField] private int jailEscapeCardCount = 6;
-    [SerializeField] private int travelCardCount = 10;
-    [SerializeField] private int taxCardCount = 30;
-    [SerializeField] private int celebrationCardCount = 20;
-    [SerializeField] private int moveForwardCardCount = 10;
-    [SerializeField] private int moveBackwardCardCount = 10;
-    [SerializeField] private int moveToStartCardCount = 7;
+    [SerializeField] private int angelCardCount = 8;
+    [SerializeField] private int jailCardCount = 6;
+    [SerializeField] private int jailEscapeCardCount = 12;
+    [SerializeField] private int travelCardCount = 20;
+    [SerializeField] private int taxCardCount = 90;
+    [SerializeField] private int celebrationCardCount = 60;
+    [SerializeField] private int moveForwardCardCount = 30;
+    [SerializeField] private int moveBackwardCardCount = 30;
+    [SerializeField] private int moveToStartCardCount = 21;
+    [SerializeField] private int moveToNearestEnemyLandCardCount = 23;
 
     [Header("Card List")]
     [Tooltip("자동 생성된 카드 목록. StateAuthority가 덱 초기화할 때 사용.")]
@@ -110,6 +114,7 @@ public class BulmabulChanceDeck : MonoBehaviour
         moveForwardCardCount = Mathf.Max(0, moveForwardCardCount);
         moveBackwardCardCount = Mathf.Max(0, moveBackwardCardCount);
         moveToStartCardCount = Mathf.Max(0, moveToStartCardCount);
+        moveToNearestEnemyLandCardCount = Mathf.Max(0, moveToNearestEnemyLandCardCount);
 
         if (autoBuildStartCards)
             BuildStartCards();
@@ -254,6 +259,7 @@ public class BulmabulChanceDeck : MonoBehaviour
         AddListCards(moveForwardCards, moveForwardCardCount, "앞으로 이동 카드");
         AddListCards(moveBackwardCards, moveBackwardCardCount, "뒤로 이동 카드");
         AddSingleCard(moveToStartCard, moveToStartCardCount, "시작지점 이동 카드");
+        AddSingleCard(moveToNearestEnemyLandCard, moveToNearestEnemyLandCardCount, "적 소유 땅 이동 카드");
 
         if (logDeckState)
         {
@@ -262,12 +268,12 @@ public class BulmabulChanceDeck : MonoBehaviour
                 $"천사={angelCardCount}, 감옥={jailCardCount}, 감옥탈출={jailEscapeCardCount}, " +
                 $"여행={travelCardCount}, 세금={taxCardCount}, 축하={celebrationCardCount}, " +
                 $"앞으로={moveForwardCardCount}, 뒤로={moveBackwardCardCount}, 시작={moveToStartCardCount}, " +
-                $"합계={startCards.Count}"
+                $"적땅이동={moveToNearestEnemyLandCardCount}, 합계={startCards.Count}"
             );
         }
 
-        if (startCards.Count != 100)
-            Debug.LogWarning($"[ChanceDeck] 현재 자동 생성 카드 수가 100장이 아닙니다. 현재={startCards.Count}");
+        if (startCards.Count != 300)
+            Debug.LogWarning($"[ChanceDeck] 현재 자동 생성 카드 수가 300장이 아닙니다. 현재={startCards.Count}");
     }
 
     private void AddSingleCard(BulmabulChanceCardData card, int count, string label)

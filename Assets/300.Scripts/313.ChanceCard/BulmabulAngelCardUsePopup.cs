@@ -57,13 +57,7 @@ public class BulmabulAngelCardUsePopup : MonoBehaviour
             return;
         }
 
-        BulmabulChanceInventory inventory = BulmabulChanceInventory.Instance;
-
-        /*
-         * 천사 카드가 없으면 팝업을 띄우지 않고
-         * 자동으로 '천사 카드 사용 안 함' 처리한다.
-         */
-        if (inventory == null || !inventory.HasCardType(BulmabulChanceCardType.AngelCard))
+        if (!state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard))
         {
             Hide();
             state.RequestResolveAngelCardTollLocal(false);
@@ -118,18 +112,7 @@ public class BulmabulAngelCardUsePopup : MonoBehaviour
         if (state == null)
             return;
 
-        BulmabulChanceInventory inventory = BulmabulChanceInventory.Instance;
-
-        if (inventory == null)
-        {
-            state.RequestResolveAngelCardTollLocal(false);
-            Hide();
-            return;
-        }
-
-        bool consumed = inventory.ConsumeFirstCardByType(BulmabulChanceCardType.AngelCard);
-
-        if (!consumed)
+        if (!state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard))
         {
             state.RequestResolveAngelCardTollLocal(false);
             Hide();
@@ -144,6 +127,9 @@ public class BulmabulAngelCardUsePopup : MonoBehaviour
             );
         }
 
+        /*
+         * 실제 천사 카드 소비는 StateAuthority의 RPC_RequestResolveAngelCardToll에서 한다.
+         */
         state.RequestResolveAngelCardTollLocal(true);
         Hide();
     }

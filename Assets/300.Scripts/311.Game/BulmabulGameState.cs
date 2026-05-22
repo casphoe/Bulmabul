@@ -114,6 +114,24 @@ public class BulmabulGameState : NetworkBehaviour
         /// </summary>
         public NetworkBool hasTravelDestinationReady;
 
+        /// <summary>
+        /// 보관 중인 천사 카드.
+        /// 플레이어당 최대 1장.
+        /// </summary>
+        public NetworkBool hasAngelCard;
+
+        /// <summary>
+        /// 보관 중인 감옥 탈출 카드.
+        /// 플레이어당 최대 1장.
+        /// </summary>
+        public NetworkBool hasJailEscapeCard;
+
+        /// <summary>
+        /// 보관 중인 여행 카드.
+        /// 플레이어당 최대 1장.
+        /// </summary>
+        public NetworkBool hasTravelCard;
+
     }
 
     /// <summary>
@@ -587,6 +605,9 @@ public class BulmabulGameState : NetworkBehaviour
 
                 bankrupt = false,
                 hasTravelDestinationReady = false,
+                hasAngelCard = false,
+                hasJailEscapeCard = false,
+                hasTravelCard = false,
                 travelCost = 0,
                 leftGame = false,
                 leaveReasonInt = 0
@@ -940,6 +961,19 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
 
         RPC_RequestUseMoveToTravelCard();
+        return true;
+    }
+
+    /// <summary>
+    /// 보관 중인 감옥 탈출 카드를 사용한다.
+    /// 실제 카드 소비는 StateAuthority의 RPC_RequestUseJailEscapeCard에서만 처리한다.
+    /// </summary>
+    public bool RequestUseJailEscapeCardLocal()
+    {
+        if (!CanLocalUseJailEscapeCard())
+            return false;
+
+        RPC_RequestUseJailEscapeCard();
         return true;
     }
 
@@ -1513,12 +1547,12 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
         }
 
-        executor.HandleDrawnCard(playerIndex, card);
+        bool waitsForPlayerChoice = executor.HandleDrawnCard(playerIndex, card);
 
         ChanceDeckRemainCount = deck.DrawPileCount;
         RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
 
-        return false;
+        return waitsForPlayerChoice;
     }
 
     private void ApplyJail(int playerIndex, BulmabulCellData cell)
@@ -2118,7 +2152,69 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
+        if (!TryConsumeKeptChanceCardForAuthority(playerIndex, BulmabulChanceCardType.MoveToTravelCard))
+        {
+            LogServer($"{playerIndex}번 플레이어는 여행 카드를 가지고 있지 않습니다.");
+            return;
+        }
+
         StartCoroutine(CoResolveMoveToTravelByCard(playerIndex, travelCellIndex));
+    }
+
+    /// <summary>
+    /// 감옥 탈출 카드 사용 요청.
+    /// 카드 보유 여부와 현재 감옥 칸 여부를 서버(StateAuthority)가 최종 검증한 뒤 소비한다.
+    /// </summary>
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestUseJailEscapeCard(RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (IsPaused || TurnBusy)
+            return;
+
+        if (PendingAction != PendingActionType.None)
+            return;
+
+        int playerIndex = FindPlayerIndex(info.Source);
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return;
+
+        if (board == null || board.CellCount <= 0)
+            return;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        if (slot.tileIndex < 0 || slot.tileIndex >= board.CellCount)
+            return;
+
+        BulmabulCellData cell = board.GetCell(slot.tileIndex);
+
+        if (cell == null || cell.cellType != BulmabulCellType.Jail)
+        {
+            LogServer($"{playerIndex}번 플레이어는 감옥 칸에 있지 않아 감옥 탈출 카드를 사용할 수 없습니다.");
+            return;
+        }
+
+        if (!TryConsumeKeptChanceCardForAuthority(playerIndex, BulmabulChanceCardType.JailEscapeCard))
+        {
+            LogServer($"{playerIndex}번 플레이어는 감옥 탈출 카드를 가지고 있지 않습니다.");
+            return;
+        }
+
+        /*
+         * 현재 프로젝트의 감옥 칸은 ApplyJail()에서 구속 턴을 저장하지 않는다.
+         * 그래서 여기서는 서버 검증 후 카드만 소비한다.
+         *
+         * 나중에 감옥 턴 시스템이 생기면 여기에서
+         * jailRemainTurn = 0;
+         * 같은 처리를 넣으면 된다.
+         */
+        LogServer($"{playerIndex}번 플레이어가 감옥 탈출 카드를 사용했습니다.");
+
+        BumpRevision();
     }
 
     /// <summary>
@@ -2273,6 +2369,150 @@ public class BulmabulGameState : NetworkBehaviour
 
         return -1;
     }
+    #endregion
+
+    #region 적 소유 땅 이동 함수
+
+    /// <summary>
+    /// 찬스 카드 효과:
+    /// 현재 위치 기준으로 앞으로 가장 가까운 적 소유 땅으로 이동한다.
+    ///
+    /// 개인전:
+    /// - 내 땅이 아닌 다른 생존 플레이어의 땅으로 이동한다.
+    /// - 3명 이상 플레이 중이면 여러 상대 중 가장 가까운 상대 땅을 찾는다.
+    ///
+    /// 팀전:
+    /// - 같은 팀의 땅은 제외한다.
+    /// - 상대 팀 플레이어가 소유한 땅 중 가장 가까운 땅을 찾는다.
+    ///
+    /// 반환값:
+    /// - true  = 이동 후 구매/통행료/천사카드 등 플레이어 선택 대기 발생
+    /// - false = 추가 선택 없이 카드 효과 종료
+    /// </summary>
+    public bool MoveToNearestEnemyOwnedLandByChanceCardForAuthority(int playerIndex)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        if (board == null || board.CellCount <= 0)
+            return false;
+
+        int targetCellIndex = FindNearestEnemyOwnedLandForward(playerIndex);
+
+        if (targetCellIndex < 0)
+        {
+            LogServer($"{playerIndex}번 플레이어 기준으로 이동 가능한 적 소유 땅이 없습니다.");
+            return false;
+        }
+
+        PlayerGameSlot actor = Players.Get(playerIndex);
+
+        int fromIndex = actor.tileIndex;
+
+        actor.tileIndex = targetCellIndex;
+        Players.Set(playerIndex, actor);
+
+        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
+
+        BulmabulCellData targetCell = board.GetCell(targetCellIndex);
+        string cellName = targetCell != null ? targetCell.cellName : $"{targetCellIndex}번 칸";
+
+        LogServer($"{playerIndex}번 플레이어가 찬스 카드 효과로 가장 가까운 적 소유 땅 [{cellName}] 으로 이동했습니다.");
+
+        BumpRevision();
+
+        /*
+         * 중요:
+         * 그냥 위치만 바꾸면 안 된다.
+         * 적 땅에 도착한 것이므로 ApplyLand까지 실행되어야 한다.
+         * 여기서 ResolveLanding을 호출해야 천사 카드 선택 / 통행료 처리가 이어진다.
+         */
+        return ResolveLanding(playerIndex, targetCellIndex);
+    }
+
+    /// <summary>
+    /// 현재 위치 기준으로 앞으로 가장 가까운 적 소유 땅을 찾는다.
+    /// 
+    /// 개인전:
+    /// - 내 땅이 아닌 다른 생존 플레이어의 땅으로 이동한다.
+    /// - 3명 이상 플레이 중이면 여러 상대 중 가장 가까운 상대 땅을 찾는다.
+    /// 
+    /// 팀전:
+    /// - 같은 팀의 땅은 제외한다.
+    /// - 상대 팀 플레이어가 소유한 땅 중 가장 가까운 땅을 찾는다.
+    /// </summary>
+    private int FindNearestEnemyOwnedLandForward(int playerIndex)
+    {
+        if (board == null || board.CellCount <= 0)
+            return -1;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return -1;
+
+        PlayerGameSlot actor = Players.Get(playerIndex);
+        int startIndex = actor.tileIndex;
+        int cellCount = board.CellCount;
+
+        for (int step = 1; step < cellCount; step++)
+        {
+            int checkIndex = (startIndex + step) % cellCount;
+
+            BulmabulCellData cell = board.GetCell(checkIndex);
+
+            if (cell == null)
+                continue;
+
+            if (cell.cellType != BulmabulCellType.Land)
+                continue;
+
+            int ownerIndex = LandOwnerByCell.Get(checkIndex);
+
+            if (!IsValidEnemyLandOwner(playerIndex, ownerIndex))
+                continue;
+
+            return checkIndex;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// 해당 땅 소유자가 카드 사용자의 적인지 확인한다.
+    /// 개인전이면 자기 자신만 제외.
+    /// 팀전이면 같은 팀 제외.
+    /// </summary>
+    private bool IsValidEnemyLandOwner(int playerIndex, int ownerIndex)
+    {
+        if (ownerIndex < 0)
+            return false;
+
+        if (ownerIndex == playerIndex)
+            return false;
+
+        if (!IsValidAlivePlayer(ownerIndex))
+            return false;
+
+        bool isTeamMode =
+            BulmabulGameStartCache.ModeInt == (int)MatchMode.Team;
+
+        if (!isTeamMode)
+            return true;
+
+        PlayerGameSlot actor = Players.Get(playerIndex);
+        PlayerGameSlot owner = Players.Get(ownerIndex);
+
+        if (actor.teamSideInt == (int)TeamSide.None)
+            return true;
+
+        if (owner.teamSideInt == (int)TeamSide.None)
+            return true;
+
+        return actor.teamSideInt != owner.teamSideInt;
+    }
+
     #endregion
 
     #region 일시정지
@@ -2775,11 +3015,50 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
 
         int idx = FindPlayerIndex(Runner.LocalPlayer);
+        if (!IsValidAlivePlayer(idx))
+            return false;
+
+        if (!LocalHasKeptChanceCard(BulmabulChanceCardType.MoveToTravelCard))
+            return false;
+
+        return FindTravelCellIndex() >= 0;
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 감옥 탈출 카드를 사용할 수 있는지 확인.
+    /// 현재 감옥 칸은 별도 구속 턴 시스템이 없으므로,
+    /// 자기 말이 감옥 칸에 있을 때만 카드 사용/소비를 허용한다.
+    /// </summary>
+    public bool CanLocalUseJailEscapeCard()
+    {
+        if (Runner == null)
+            return false;
+
+        if (IsPaused || TurnBusy)
+            return false;
+
+        if (PendingAction != PendingActionType.None)
+            return false;
+
+        int idx = FindPlayerIndex(Runner.LocalPlayer);
 
         if (!IsValidAlivePlayer(idx))
             return false;
 
-        return FindTravelCellIndex() >= 0;
+        if (!LocalHasKeptChanceCard(BulmabulChanceCardType.JailEscapeCard))
+            return false;
+
+        if (board == null || board.CellCount <= 0)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(idx);
+
+        if (slot.tileIndex < 0 || slot.tileIndex >= board.CellCount)
+            return false;
+
+        BulmabulCellData cell = board.GetCell(slot.tileIndex);
+
+        return cell != null && cell.cellType == BulmabulCellType.Jail;
     }
 
     /// <summary>
@@ -3031,12 +3310,28 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
+        /*
+         * 멀티플레이 핵심:
+         * 천사 카드 사용 요청이 들어와도 서버가 실제 보유 여부를 확인해야 한다.
+         * 로컬 UI에서 먼저 카드를 제거하면 안 된다.
+         */
         if (useAngelCard)
         {
-            /*
-             * 실제 카드 제거는 로컬 UI 쪽에서 먼저 제거한다.
-             * 여기서는 서버 상태 기준으로 통행료만 면제 처리한다.
-             */
+            bool consumed = TryConsumeKeptChanceCardForAuthority(
+                payerIndex,
+                BulmabulChanceCardType.AngelCard
+            );
+
+            if (!consumed)
+            {
+                LogServer($"{payerIndex}번 플레이어는 천사 카드를 가지고 있지 않습니다. 통행료를 지불합니다.");
+
+                useAngelCard = false;
+            }
+        }
+
+        if (useAngelCard)
+        {
             LogServer($"{payerIndex}번 플레이어가 천사 카드를 사용하여 {cell.cellName} 통행료를 면제받았습니다.");
 
             PendingAction = PendingActionType.None;
@@ -3044,8 +3339,8 @@ public class BulmabulGameState : NetworkBehaviour
             PendingCellIndex = -1;
 
             /*
-             * 천사 카드로 통행료만 막는다.
-             * 인수 가능 여부는 기존 규칙대로 열어준다.
+             * 천사 카드는 통행료만 막는다.
+             * 호텔이 없는 땅이면 기존 규칙대로 인수 가능 여부를 열어준다.
              */
             if (CanOpenTakeOverPending(payerIndex, ownerIndex, cellIndex, cell))
             {
@@ -3060,7 +3355,7 @@ public class BulmabulGameState : NetworkBehaviour
         }
 
         /*
-         * 천사 카드 사용 안 함.
+         * 천사 카드 사용 안 함 또는 서버 검증 실패.
          * 기존처럼 통행료를 낸다.
          */
         bool canContinue = PayToll(payerIndex, ownerIndex, cellIndex, cell);
@@ -3625,6 +3920,9 @@ public class BulmabulGameState : NetworkBehaviour
         slot.leftGame = true;
         slot.leaveReasonInt = (int)reason;
         slot.hasTravelDestinationReady = false;
+        slot.hasAngelCard = false;
+        slot.hasJailEscapeCard = false;
+        slot.hasTravelCard = false;
         slot.travelCost = 0;
 
         Players.Set(playerIndex, slot);
@@ -3770,6 +4068,143 @@ public class BulmabulGameState : NetworkBehaviour
     {
         if (BulmabulChanceDeck.Instance != null)
             BulmabulChanceDeck.Instance.SetCardCountFromServer(remainCount);
+    }
+
+    #endregion
+
+    #region 보관 찬스 카드 네트워크 상태
+
+    /// <summary>
+    /// StateAuthority에서 보관 카드를 플레이어에게 지급한다.
+    /// 플레이어당 같은 보관 카드는 1장만 가질 수 있다.
+    /// </summary>
+    public bool TryGiveKeptChanceCardForAuthority(int playerIndex, BulmabulChanceCardData card)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        if (card == null)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        switch (card.cardType)
+        {
+            case BulmabulChanceCardType.AngelCard:
+                if (slot.hasAngelCard)
+                    return false;
+
+                slot.hasAngelCard = true;
+                Players.Set(playerIndex, slot);
+                BumpRevision();
+                return true;
+
+            case BulmabulChanceCardType.JailEscapeCard:
+                if (slot.hasJailEscapeCard)
+                    return false;
+
+                slot.hasJailEscapeCard = true;
+                Players.Set(playerIndex, slot);
+                BumpRevision();
+                return true;
+
+            case BulmabulChanceCardType.MoveToTravelCard:
+                if (slot.hasTravelCard)
+                    return false;
+
+                slot.hasTravelCard = true;
+                Players.Set(playerIndex, slot);
+                BumpRevision();
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// StateAuthority에서 보관 카드를 소비한다.
+    /// 실제 효과 실행 직전에 호출해야 한다.
+    /// </summary>
+    public bool TryConsumeKeptChanceCardForAuthority(int playerIndex, BulmabulChanceCardType type)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+        bool consumed = false;
+
+        switch (type)
+        {
+            case BulmabulChanceCardType.AngelCard:
+                if (!slot.hasAngelCard)
+                    return false;
+
+                slot.hasAngelCard = false;
+                consumed = true;
+                break;
+
+            case BulmabulChanceCardType.JailEscapeCard:
+                if (!slot.hasJailEscapeCard)
+                    return false;
+
+                slot.hasJailEscapeCard = false;
+                consumed = true;
+                break;
+
+            case BulmabulChanceCardType.MoveToTravelCard:
+                if (!slot.hasTravelCard)
+                    return false;
+
+                slot.hasTravelCard = false;
+                consumed = true;
+                break;
+        }
+
+        if (!consumed)
+            return false;
+
+        Players.Set(playerIndex, slot);
+        BumpRevision();
+        return true;
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 특정 보관 카드를 가지고 있는지 확인.
+    /// UI는 이 함수로 자기 카드만 보여주면 된다.
+    /// </summary>
+    public bool LocalHasKeptChanceCard(BulmabulChanceCardType type)
+    {
+        if (Runner == null)
+            return false;
+
+        int idx = FindPlayerIndex(Runner.LocalPlayer);
+
+        if (!IsValidAlivePlayer(idx))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(idx);
+
+        switch (type)
+        {
+            case BulmabulChanceCardType.AngelCard:
+                return slot.hasAngelCard;
+
+            case BulmabulChanceCardType.JailEscapeCard:
+                return slot.hasJailEscapeCard;
+
+            case BulmabulChanceCardType.MoveToTravelCard:
+                return slot.hasTravelCard;
+
+            default:
+                return false;
+        }
     }
 
     #endregion

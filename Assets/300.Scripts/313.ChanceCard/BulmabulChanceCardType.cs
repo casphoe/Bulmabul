@@ -16,6 +16,13 @@ public enum BulmabulChanceCardType
     PayToAllPlayers,     // 모든 플레이어에게 돈 지급
     ReceiveFromAllPlayers, // 모든 플레이어에게 돈 받기
 
+    /// <summary>
+    /// 현재 위치 기준으로 앞으로 가장 가까운 적 소유 땅으로 이동.
+    /// 개인전: 다른 생존 플레이어의 땅.
+    /// 팀전: 같은 팀 땅 제외, 상대 팀 소유 땅.
+    /// </summary>
+    MoveToNearestEnemyLand,
+
     // 보관 후 사용
     AngelCard,           // 통행료/벌금 방어
     JailEscapeCard,      // 감옥 탈출

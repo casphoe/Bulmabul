@@ -1,1 +1,0 @@
-This asset does not have any script or shader. The Demo is just a demonstration of sprites using Unity's UI.

@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d3b62872524fee943bf9e3182b4bef40, type: 3}
+  m_Name: MoveBackWardCard_9
+  m_EditorClassIdentifier: 
+  cardId: move_backward_9
+  cardNameKor: "\uB4A4\uB85C \uC774\uB3D9"
+  cardNameEng: Move Backward
+  descriptionKor: "\uB4A4\uB85C 9\uCE78 \uC774\uB3D9\uD569\uB2C8\uB2E4."
+  descriptionEng: Move backward 9 spaces.
+  cardType: 6
+  useType: 0
+  moneyAmount: 0
+  moveStep: 9
+  targetCellIndex: -1
+  cardImage: {fileID: 21300000, guid: 2c1a40a29c1a8824b8e146558ce55715, type: 3}

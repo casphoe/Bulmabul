@@ -34,21 +34,23 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
     /// 즉시 실행 카드는 바로 실행하고,
     /// 보관 카드는 인벤토리에 저장한다.
     /// </summary>
-    public void HandleDrawnCard(int playerIndex, BulmabulChanceCardData card)
+    public bool HandleDrawnCard(int playerIndex, BulmabulChanceCardData card)
     {
         if (card == null)
-            return;
+            return false;
 
         if (card.useType == BulmabulChanceCardUseType.Keep)
         {
             KeepCard(playerIndex, card);
-            return;
+            return false;
         }
 
-        ExecuteImmediateCard(playerIndex, card);
+        bool waitsForPlayerChoice = ExecuteImmediateCard(playerIndex, card);
 
         if (BulmabulChanceDeck.Instance != null)
             BulmabulChanceDeck.Instance.Discard(card);
+
+        return waitsForPlayerChoice;
     }
 
     private void KeepCard(int playerIndex, BulmabulChanceCardData card)
@@ -56,27 +58,20 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
         if (card == null)
             return;
 
-        BulmabulChanceInventory inventory = BulmabulChanceInventory.Instance;
+        BulmabulGameState state = BulmabulGameState.Instance;
 
-        if (inventory == null)
+        if (state == null)
         {
-            ShowToast("카드 보관함이 없습니다.", "Card inventory is missing.");
+            ShowToast("게임 상태를 찾을 수 없습니다.", "Game state is missing.");
             DiscardCard(card);
             return;
         }
 
-        if (inventory.HasCardType(card.cardType))
-        {
-            ShowToast(
-                $"{card.GetName()} 카드는 이미 보관 중입니다. 새 카드는 버립니다.",
-                $"{card.GetName()} is already kept. The new card is discarded."
-            );
-
-            DiscardCard(card);
-            return;
-        }
-
-        bool kept = inventory.AddCard(card);
+        /*
+         * 멀티플레이에서는 보관 카드를 로컬 Inventory 리스트에 넣지 않는다.
+         * StateAuthority의 PlayerGameSlot Networked 상태에 저장해야 한다.
+         */
+        bool kept = state.TryGiveKeptChanceCardForAuthority(playerIndex, card);
 
         if (kept)
         {
@@ -88,15 +83,15 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
         else
         {
             ShowToast(
-                "보관할 수 없는 카드입니다. 카드를 버립니다.",
-                "Cannot keep this card. The card is discarded."
+                $"{card.GetName()} 카드는 이미 보관 중이거나 보관할 수 없습니다. 새 카드는 버립니다.",
+                $"{card.GetName()} is already kept or cannot be kept. The new card is discarded."
             );
 
             DiscardCard(card);
         }
     }
 
-    private void ExecuteImmediateCard(int playerIndex, BulmabulChanceCardData card)
+    private bool ExecuteImmediateCard(int playerIndex, BulmabulChanceCardData card)
     {
         switch (card.cardType)
         {
@@ -130,6 +125,23 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                 ShowToast($"{card.moveStep}칸 뒤로 이동합니다.", $"Move backward {card.moveStep} spaces.");
                 break;
 
+            case BulmabulChanceCardType.MoveToNearestEnemyLand:
+                {
+                    BulmabulGameState state = BulmabulGameState.Instance;
+
+                    if (state == null)
+                        return false;
+
+                    bool waitsForPlayerChoice = state.MoveToNearestEnemyOwnedLandByChanceCardForAuthority(playerIndex);
+
+                    ShowToast(
+                        "가장 가까운 적 소유 땅으로 이동합니다.",
+                        "Move to the nearest enemy-owned land."
+                    );
+
+                    return waitsForPlayerChoice;
+                }
+
             case BulmabulChanceCardType.PayToAllPlayers:
                 PayToAllPlayers(playerIndex, card.moneyAmount);
                 ShowToast(
@@ -150,6 +162,8 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                 Debug.LogWarning($"[ChanceExecutor] 즉시 실행할 수 없는 카드 타입: {card.cardType}");
                 break;
         }
+
+        return false;
     }
 
     /// <summary>
@@ -181,26 +195,52 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                 Debug.LogWarning($"[ChanceExecutor] 보관 카드로 사용할 수 없는 타입: {card.cardType}");
                 break;
         }
-
-        if (used)
-        {
-            if (BulmabulChanceInventory.Instance != null)
-                BulmabulChanceInventory.Instance.RemoveCard(card);
-
-            DiscardCard(card);
-        }
-
+        /*
+         * 멀티플레이 보관 카드의 실제 소비/제거는 반드시 BulmabulGameState의
+         * StateAuthority RPC에서 처리한다.
+         * 여기서 로컬 인벤토리를 먼저 Remove/Discard 하면 서버가 거절했을 때
+         * 클라이언트 UI와 서버 상태가 어긋난다.
+         */
         return used;
     }
 
     private bool UseAngelCard(int playerIndex, BulmabulChanceCardData card)
     {
-        ShowToast("천사 카드를 사용했습니다.", "Angel Card used.");
-        return true;
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null || !state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard))
+        {
+            ShowToast("천사 카드가 없습니다.", "You do not have an Angel Card.");
+            return false;
+        }
+
+        ShowToast(
+            "천사 카드는 상대 땅 통행료 선택 팝업에서 사용할 수 있습니다.",
+            "Use the Angel Card from the toll popup."
+        );
+
+        return false;
     }
 
     private bool UseJailEscapeCard(int playerIndex, BulmabulChanceCardData card)
     {
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null)
+            return false;
+
+        bool requested = state.RequestUseJailEscapeCardLocal();
+
+        if (!requested)
+        {
+            ShowToast(
+                "지금은 감옥 탈출 카드를 사용할 수 없습니다.",
+                "You cannot use the Jail Escape Card now."
+            );
+
+            return false;
+        }
+
         ShowToast("감옥 탈출 카드를 사용했습니다.", "Jail Escape Card used.");
         return true;
     }
