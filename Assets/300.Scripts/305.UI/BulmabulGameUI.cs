@@ -82,6 +82,14 @@ public class BulmabulGameUI : MonoBehaviour
     private float _diceGaugeValue = 0f;
     private BulmabulDiceParityChoice _selectedDiceParity = BulmabulDiceParityChoice.None;
 
+    private enum DiceControlRequestMode
+    {
+        NormalRoll = 0,
+        JailEscapeRoll = 1
+    }
+
+    private DiceControlRequestMode _diceControlRequestMode = DiceControlRequestMode.NormalRoll;
+
     [Header("Land Purchase UI")]
     [Tooltip("빈 땅 도착 시 표시되는 구매 패널")]
     [SerializeField] private GameObject buyPanel;
@@ -948,13 +956,38 @@ public class BulmabulGameUI : MonoBehaviour
     /// 내 턴이고 주사위를 굴릴 수 있으면 DiceControlPanel을 자동으로 열고,
     /// 굴릴 수 없으면 자동으로 닫는다.
     /// 
-    /// btnRollDice는 사용하지 않는다.
+    /// 단, 감옥 탈출 주사위 모드일 때는 CanLocalRollDice()가 false여도
+    /// CanLocalJailRollDice()가 true면 패널을 유지해야 한다.
     /// </summary>
     private void RefreshMainButtons(BulmabulGameState state)
     {
-        bool canRoll = state.CanLocalRollDice();
+        bool isJailDiceMode = _diceControlRequestMode == DiceControlRequestMode.JailEscapeRoll;
+        bool canNormalRoll = state.CanLocalRollDice();
+        bool canJailRoll = state.CanLocalJailRollDice();
 
-        if (!canRoll)
+        if (isJailDiceMode)
+        {
+            if (!canJailRoll)
+            {
+                _waitingRollStateChange = false;
+
+                if (_diceControlOpen)
+                    CloseDiceControlPanel();
+
+                if (diceControlPanel != null)
+                    diceControlPanel.SetActive(false);
+            }
+
+            if (btnTravelMove != null)
+            {
+                btnTravelMove.gameObject.SetActive(false);
+                btnTravelMove.interactable = false;
+            }
+
+            return;
+        }
+
+        if (!canNormalRoll)
         {
             _waitingRollStateChange = false;
 
@@ -1308,6 +1341,56 @@ public class BulmabulGameUI : MonoBehaviour
     }
 
     /// <summary>
+    /// 감옥 탈출용 주사위 컨트롤 패널 열기.
+    /// 감옥 팝업에서 주사위 굴리기를 눌렀을 때 호출한다.
+    /// 
+    /// 일반 주사위 이동이 아니라,
+    /// 확정 시 RequestJailRollDiceLocal()로 보내기 위한 모드다.
+    /// </summary>
+    public void OpenDiceControlPanelForJailEscape()
+    {
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null)
+            return;
+
+        if (!state.CanLocalJailRollDice())
+        {
+            if (ToastMessageManager.instance != null)
+            {
+                ToastMessageManager.instance.ShowToast(
+                    "지금은 감옥 탈출 주사위를 굴릴 수 없습니다.",
+                    "You cannot roll for jail escape now."
+                );
+            }
+
+            return;
+        }
+
+        _diceControlRequestMode = DiceControlRequestMode.JailEscapeRoll;
+        _waitingRollStateChange = false;
+        _waitingDiceResult = false;
+
+        OpenDiceControlPanel();
+
+        if (txtDiceControlTitle != null)
+        {
+            txtDiceControlTitle.text = GetByLanguage(
+                "감옥 탈출 주사위",
+                "Jail Escape Dice"
+            );
+        }
+
+        if (txtDiceControlInfo != null)
+        {
+            txtDiceControlInfo.text = GetByLanguage(
+                "홀수 또는 짝수를 선택한 뒤 확정 버튼을 누르고 떼세요.\n더블이 나오면 감옥에서 탈출합니다.",
+                "Choose odd or even, then hold and release Confirm.\nRoll doubles to escape jail."
+            );
+        }
+    }
+
+    /// <summary>
     /// 주사위 컨트롤 패널 닫기.
     /// </summary>
     private void CloseDiceControlPanel()
@@ -1315,6 +1398,7 @@ public class BulmabulGameUI : MonoBehaviour
         _diceControlOpen = false;
         _diceGaugeHolding = false;
         _selectedDiceParity = BulmabulDiceParityChoice.None;
+        _diceControlRequestMode = DiceControlRequestMode.NormalRoll;
 
         if (diceControlPanel != null)
             diceControlPanel.SetActive(false);
@@ -1352,7 +1436,11 @@ public class BulmabulGameUI : MonoBehaviour
         if (!_diceControlOpen)
             return;
 
-        if (!state.CanLocalRollDice())
+        bool canRoll = _diceControlRequestMode == DiceControlRequestMode.JailEscapeRoll
+            ? state.CanLocalJailRollDice()
+            : state.CanLocalRollDice();
+
+        if (!canRoll)
         {
             CloseDiceControlPanel();
             return;
@@ -1390,6 +1478,7 @@ public class BulmabulGameUI : MonoBehaviour
 
     /// <summary>
     /// 현재 게이지 값으로 주사위 굴림 요청.
+    /// 일반 턴 주사위와 감옥 탈출 주사위를 같은 DiceRollPanel에서 처리한다.
     /// </summary>
     private void RollDiceByCurrentGauge()
     {
@@ -1398,7 +1487,13 @@ public class BulmabulGameUI : MonoBehaviour
         if (state == null)
             return;
 
-        if (!state.CanLocalRollDice())
+        bool isJailDiceMode = _diceControlRequestMode == DiceControlRequestMode.JailEscapeRoll;
+
+        bool canRoll = isJailDiceMode
+            ? state.CanLocalJailRollDice()
+            : state.CanLocalRollDice();
+
+        if (!canRoll)
         {
             CloseDiceControlPanel();
             return;
@@ -1424,7 +1519,6 @@ public class BulmabulGameUI : MonoBehaviour
 
         CloseDiceControlPanel();
 
-        // 전체 맵 보기 중에 주사위를 굴리면 즉시 45도 Pawn 따라가기 카메라로 복귀한다.
         if (cameraFollow != null)
         {
             cameraFollow.ForceFollowView(true);
@@ -1433,12 +1527,17 @@ public class BulmabulGameUI : MonoBehaviour
 
         OwnedDice equippedDice = GetLocalEquippedDice();
 
-        // 주사위 굴림 연출 시작
         if (diceRollingUI != null)
             diceRollingUI.ShowRolling(equippedDice);
 
-        // 실제 결과는 서버/게임 상태가 결정
-        state.RequestRollDiceLocal((int)_selectedDiceParity, gaugePermille);
+        if (isJailDiceMode)
+        {
+            state.RequestJailRollDiceLocal((int)_selectedDiceParity, gaugePermille);
+        }
+        else
+        {
+            state.RequestRollDiceLocal((int)_selectedDiceParity, gaugePermille);
+        }
     }
 
     /// <summary>

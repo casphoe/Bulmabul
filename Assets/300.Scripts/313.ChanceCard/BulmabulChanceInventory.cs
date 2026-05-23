@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
+using UnityEngine.UI;
 
 /// <summary>
 /// 로컬 플레이어가 보관 중인 찬스 카드 목록을 UI용으로 보여주는 인벤토리.
@@ -27,6 +29,17 @@ public class BulmabulChanceInventory : MonoBehaviour
     [Tooltip("여행 카드 ScriptableObject를 연결하세요.")]
     [SerializeField] private BulmabulChanceCardData travelCardData;
 
+    [Header("UI")]
+    [SerializeField] private TextMeshProUGUI txtInventoryTitle;
+
+    [Header("Inventory UI")]
+    [SerializeField] private Image[] slotCardImages;
+    [SerializeField] private TextMeshProUGUI[] slotCardNameTexts;
+    [SerializeField] private Button[] slotUseButtons;
+    [SerializeField] private TextMeshProUGUI[] slotUseButtonTexts;
+
+    [SerializeField] private Sprite emptySlotSprite;
+
     private readonly List<BulmabulChanceCardData> keptCards = new List<BulmabulChanceCardData>();
 
     private int lastSyncedRevision = int.MinValue;
@@ -36,6 +49,66 @@ public class BulmabulChanceInventory : MonoBehaviour
     private void Awake()
     {
         Instance = this;
+
+        txtInventoryTitle.text = GetLanaugeText("카드 인벤토리", "Card Inventory");
+
+        BindSlotButtons();
+    }
+
+    private void BindSlotButtons()
+    {
+        if (slotUseButtons == null)
+            return;
+
+        for (int i = 0; i < slotUseButtons.Length; i++)
+        {
+            int index = i;
+
+            if (slotUseButtons[index] == null)
+                continue;
+
+            slotUseButtons[index].onClick.RemoveAllListeners();
+            slotUseButtons[index].onClick.AddListener(() => OnClickUseButton(index));
+        }
+    }
+
+    private void OnClickUseButton(int index)
+    {
+        SyncFromNetworkStateIfNeeded();
+
+        if (index < 0 || index >= keptCards.Count)
+            return;
+
+        BulmabulChanceCardData card = keptCards[index];
+
+        if (card == null)
+            return;
+
+        /*
+         * 현재 인벤토리에서 직접 사용할 수 있는 카드는 여행 카드만 허용한다.
+         * 천사 카드는 통행료 팝업에서만 사용.
+         * 감옥 탈출 카드는 감옥 시스템이 완성되기 전까지 슬롯 직접 사용을 막는다.
+         */
+        if (card.cardType != BulmabulChanceCardType.MoveToTravelCard)
+            return;
+
+        if (BulmabulChanceCardExecutor.Instance == null)
+        {
+            Debug.LogWarning("[ChanceInventory] BulmabulChanceCardExecutor.Instance가 없습니다.");
+            return;
+        }
+
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null || state.Runner == null)
+            return;
+
+        int playerIndex = state.FindPlayerIndex(state.Runner.LocalPlayer);
+
+        if (playerIndex < 0)
+            return;
+
+        BulmabulChanceCardExecutor.Instance.UseKeptCard(playerIndex, card);
     }
 
     private void OnDestroy()
@@ -92,6 +165,69 @@ public class BulmabulChanceInventory : MonoBehaviour
 
         if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.MoveToTravelCard) && travelCardData != null)
             keptCards.Add(travelCardData);
+
+        RefreshInventoryUI();
+    }
+
+    private void RefreshInventoryUI()
+    {
+        int slotCount = slotCardImages != null ? slotCardImages.Length : 0;
+
+        for (int i = 0; i < slotCount; i++)
+        {
+            BulmabulChanceCardData card = i < keptCards.Count ? keptCards[i] : null;
+
+            Image img = slotCardImages[i];
+
+            if (img != null)
+            {
+                if (card != null && card.cardImage != null)
+                {
+                    img.sprite = card.cardImage;
+                    img.color = Color.white;
+                    img.preserveAspect = true;
+                    img.gameObject.SetActive(true);
+                }
+                else
+                {
+                    img.sprite = emptySlotSprite;
+                    img.color = emptySlotSprite != null ? Color.white : new Color(1f, 1f, 1f, 0.25f);
+                    img.gameObject.SetActive(true);
+                }
+            }
+
+            if (slotCardNameTexts != null && i < slotCardNameTexts.Length && slotCardNameTexts[i] != null)
+            {
+                if (card != null)
+                    slotCardNameTexts[i].text = card.GetName();
+                else
+                    slotCardNameTexts[i].text = GetLanaugeText("빈 슬롯", "Empty");
+            }
+
+            if (slotUseButtons != null && i < slotUseButtons.Length && slotUseButtons[i] != null)
+            {
+                bool showUseButton =
+                    card != null &&
+                    card.cardType == BulmabulChanceCardType.MoveToTravelCard;
+
+                slotUseButtons[i].gameObject.SetActive(showUseButton);
+                slotUseButtons[i].interactable = showUseButton;
+            }
+
+            if (slotUseButtonTexts != null && i < slotUseButtonTexts.Length && slotUseButtonTexts[i] != null)
+            {
+                slotUseButtonTexts[i].text = GetLanaugeText("사용", "Use");
+            }
+        }
+    }
+
+    private string GetLanaugeText(string kor, string eng)
+    {
+        var lang = (LaguageManager.Instance != null)
+            ? LaguageManager.Instance.currentLang
+            : Lauaguage.Kor;
+
+        return lang == Lauaguage.Eng ? eng : kor;
     }
 
     public bool CanKeepCard()

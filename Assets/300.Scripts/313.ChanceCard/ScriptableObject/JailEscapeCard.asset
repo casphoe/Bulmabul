@@ -17,7 +17,7 @@ MonoBehaviour:
   cardNameEng: Jail Escape Card
   descriptionKor: "\uAC10\uC625\uC5D0\uC11C \uC989\uC2DC \uD0C8\uCD9C\uD569\uB2C8\uB2E4."
   descriptionEng: Escape from jail immediately.
-  cardType: 10
+  cardType: 11
   useType: 1
   moneyAmount: 0
   moveStep: 0
