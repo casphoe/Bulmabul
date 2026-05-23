@@ -18,7 +18,7 @@ MonoBehaviour:
   descriptionKor: "\uC5EC\uD589 \uCE78\uC73C\uB85C \uC774\uB3D9\uD558\uACE0 \uB2E4\uC74C
     \uD134\uC5D0 \uBB34\uB8CC \uC5EC\uD589\uC744 \uD569\uB2C8\uB2E4."
   descriptionEng: Move to the travel cell and travel for free next turn.
-  cardType: 11
+  cardType: 12
   useType: 1
   moneyAmount: 0
   moveStep: 0
