@@ -132,15 +132,6 @@ public class BulmabulGameState : NetworkBehaviour
         /// </summary>
         public NetworkBool hasTravelCard;
 
-        /// <summary>감옥에 갇혀 있는지 여부.</summary>
-        public NetworkBool isInJail;
-
-        /// <summary>
-        /// 감옥에서 더블 탈출을 시도한 횟수.
-        /// 5회 실패 후 다음 턴에는 무료 탈출 가능.
-        /// </summary>
-        public int jailTryCount;
-
     }
 
     /// <summary>
@@ -165,12 +156,7 @@ public class BulmabulGameState : NetworkBehaviour
         /// 확인하면 비용 차감 + 다음 턴 목적지 선택권 획득.
         /// 취소하면 여행하지 않음.
         /// </summary>
-        TravelCostChoice = 6,
-
-        /// <summary>
-        /// 감옥에 갇힌 플레이어의 턴 시작 시 탈출 방법을 선택하는 상태.
-        /// </summary>
-        JailChoice = 7
+        TravelCostChoice = 6
     }
 
     [Header("Rule")]
@@ -202,11 +188,6 @@ public class BulmabulGameState : NetworkBehaviour
 
     [Header("Pause Settings")]
     [SerializeField] private int maxPauseCountPerPlayer = 5;
-
-    [Header("Jail Settings")]
-    [SerializeField] private int jailEscapeCost = 50000;
-
-    [SerializeField] private int maxJailDoubleFailCount = 5;
 
     [Header("Land Settings")]
     [Tooltip("true면 빈 땅 도착 시 구매 패널 없이 자동 구매. false면 구매/패스 UI를 기다림")]
@@ -629,9 +610,7 @@ public class BulmabulGameState : NetworkBehaviour
                 hasTravelCard = false,
                 travelCost = 0,
                 leftGame = false,
-                leaveReasonInt = 0,
-                isInJail = false,
-                jailTryCount = 0
+                leaveReasonInt = 0
             };
 
             if (i < orderedPlayers.Count)
@@ -1068,16 +1047,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         PlayerGameSlot actor = Players.Get(turnIndex);
 
-        if (actor.isInJail)
-        {
-            OpenJailChoicePending(turnIndex);
-
-            TurnBusy = false;
-            BumpRevision();
-
-            yield break;
-        }
-
         int fromIndex = actor.tileIndex;
 
         BulmabulDiceRollResult roll = BulmabulDiceRoller.RollTwoDiceControlled(
@@ -1171,29 +1140,7 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
-        if (!IsValidAlivePlayer(playerIndex))
-        {
-            AdvanceTurn();
-            return;
-        }
-
         PlayerGameSlot actor = Players.Get(playerIndex);
-
-        /*
-         * 중요:
-         * 감옥에 들어간 경우에는 주사위가 더블이었어도 추가 턴을 주면 안 된다.
-         * 예:
-         * - 더블로 찬스칸 도착
-         * - 감옥 이동 카드 뽑음
-         * - 감옥에 들어감
-         * 이 경우 바로 다음 플레이어 턴으로 넘겨야 한다.
-         */
-        if (actor.isInJail)
-        {
-            LogServer($"{playerIndex}번 플레이어가 감옥 상태이므로 추가 턴 없이 다음 플레이어로 넘어갑니다.");
-            AdvanceTurn();
-            return;
-        }
 
         if (!actor.bankrupt && isDouble)
         {
@@ -1230,13 +1177,6 @@ public class BulmabulGameState : NetworkBehaviour
                 CurrentTurnIndex = next;
                 StartTurnTimer();
 
-                if (TryOpenJailChoiceAtTurnStart(CurrentTurnIndex))
-                {
-                    LogServer($"{CurrentTurnIndex}번 플레이어는 감옥에 있습니다. 탈출 방법 선택 대기 중입니다.");
-                    BumpRevision();
-                    return;
-                }
-
                 LogServer($"{CurrentTurnIndex}번 플레이어 턴입니다.");
 
                 BumpRevision();
@@ -1252,286 +1192,6 @@ public class BulmabulGameState : NetworkBehaviour
         // 카메라는 항상 자기 로컬 플레이어 말 기준
         if (IsSpawnReady)
             UpdateCameraTargetToLocalPlayer(false);
-    }
-
-    #endregion
-
-    #region 감옥 
-    // 5회 실패 후 다음 자기 턴 시작 시 자동 탈출시키는 코드다.
-    // 기존 "무료 탈출 버튼" 방식이 아니라 팝업 없이 자동으로 감옥 상태를 해제하고 턴을 넘긴다.
-
-    private bool TryOpenJailChoiceAtTurnStart(int playerIndex)
-    {
-        if (!Object.HasStateAuthority)
-            return false;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return false;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        if (!slot.isInJail)
-            return false;
-
-        if (slot.jailTryCount >= maxJailDoubleFailCount)
-        {
-            AutoEscapeJailAfterMaxFail(playerIndex);
-            return true;
-        }
-
-        OpenJailChoicePending(playerIndex);
-        return true;
-    }
-
-
-    private void OpenJailChoicePending(int playerIndex)
-    {
-        PendingAction = PendingActionType.JailChoice;
-        PendingPlayerIndex = playerIndex;
-        PendingCellIndex = -1;
-        PendingWasDouble = false;
-
-        BumpRevision();
-    }
-
-    #endregion
-
-    #region 감옥 탈출
-
-    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    public void RPC_RequestJailRollDice(int parityChoiceInt, int gaugePermille, RpcInfo info = default)
-    {
-        if (!Object.HasStateAuthority || IsPaused || TurnBusy)
-            return;
-
-        if (PendingAction != PendingActionType.JailChoice || !IsValidAlivePlayer(PendingPlayerIndex))
-            return;
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        if (info.Source != slot.player || !slot.isInJail)
-            return;
-
-        if (slot.jailTryCount >= maxJailDoubleFailCount)
-        {
-            LogServer($"{PendingPlayerIndex}번 플레이어는 이미 감옥 탈출 주사위 5회 실패 상태입니다. 무료 탈출을 선택해야 합니다.");
-            BumpRevision();
-            return;
-        }
-
-        StartCoroutine(CoResolveJailRollDice(
-            PendingPlayerIndex,
-            Mathf.Clamp(parityChoiceInt, 0, 2),
-            Mathf.Clamp(gaugePermille, 0, 1000)
-        ));
-    }
-
-    private IEnumerator CoResolveJailRollDice(int playerIndex, int parityChoiceInt, int gaugePermille)
-    {
-        TurnBusy = true;
-        BumpRevision();
-
-        PlayerGameSlot actor = Players.Get(playerIndex);
-
-        BulmabulDiceRollResult roll = BulmabulDiceRoller.RollTwoDiceControlled(
-            actor.diceGrade,
-            actor.diceStar,
-            actor.diceLevel,
-            parityChoiceInt,
-            gaugePermille
-        );
-
-        LastDiceLeft = roll.left;
-        LastDiceRight = roll.right;
-        PendingWasDouble = roll.isDouble;
-
-        OnDiceRollResolved(roll.left, roll.right);
-        RPC_PlayDiceVisual(roll.left, roll.right);
-
-        yield return new WaitForSeconds(GetDicePresentationWaitSeconds());
-
-        actor = Players.Get(playerIndex);
-
-        if (roll.isDouble)
-        {
-            actor.isInJail = false;
-            actor.jailTryCount = 0;
-
-            Players.Set(playerIndex, actor);
-
-            LogServer($"{playerIndex}번 플레이어가 더블로 감옥에서 탈출했습니다. 이번 턴은 이동하지 않고 종료됩니다.");
-        }
-        else
-        {
-            actor.jailTryCount++;
-
-            Players.Set(playerIndex, actor);
-
-            LogServer($"{playerIndex}번 플레이어 감옥 탈출 실패 ({actor.jailTryCount}/{maxJailDoubleFailCount}).");
-        }
-
-        PendingAction = PendingActionType.None;
-        PendingPlayerIndex = -1;
-        PendingCellIndex = -1;
-        PendingWasDouble = false;
-
-        AdvanceTurn();
-
-        TurnBusy = false;
-        BumpRevision();
-    }
-
-    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-    public void RPC_RequestPayJailEscapeCost(RpcInfo info = default)
-    {
-        if (!Object.HasStateAuthority || IsPaused || TurnBusy)
-            return;
-
-        if (PendingAction != PendingActionType.JailChoice || !IsValidAlivePlayer(PendingPlayerIndex))
-            return;
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        if (info.Source != slot.player || !slot.isInJail)
-            return;
-
-        bool freeEscape = slot.jailTryCount >= maxJailDoubleFailCount;
-        int cost = Mathf.Max(0, jailEscapeCost);
-
-        if (!freeEscape && slot.cash < cost)
-        {
-            LogServer($"{PendingPlayerIndex}번 플레이어는 감옥 탈출 비용이 부족합니다. 필요 금액 {cost:N0}");
-            BumpRevision();
-            return;
-        }
-
-        if (!freeEscape)
-            slot.cash -= cost;
-
-        slot.isInJail = false;
-        slot.jailTryCount = 0;
-
-        Players.Set(PendingPlayerIndex, slot);
-
-        int finishedPlayer = PendingPlayerIndex;
-
-        PendingAction = PendingActionType.None;
-        PendingPlayerIndex = -1;
-        PendingCellIndex = -1;
-        PendingWasDouble = false;
-
-        if (freeEscape)
-            LogServer($"{finishedPlayer}번 플레이어가 5회 실패 보상으로 무료 감옥 탈출했습니다.");
-        else
-            LogServer($"{finishedPlayer}번 플레이어가 {cost:N0}원을 지불하고 감옥에서 탈출했습니다.");
-
-        AdvanceTurn();
-
-        BumpRevision();
-    }
-
-    public bool RequestJailRollDiceLocal(int parityChoiceInt = 0, int gaugePermille = 0)
-    {
-        if (!CanLocalJailRollDice())
-            return false;
-
-        RPC_RequestJailRollDice(parityChoiceInt, gaugePermille);
-        return true;
-    }
-
-    public bool RequestPayJailEscapeCostLocal()
-    {
-        if (!CanLocalPayJailEscapeCost())
-            return false;
-
-        RPC_RequestPayJailEscapeCost();
-        return true;
-    }
-
-    public bool ShouldShowJailChoicePopupForLocalPlayer()
-    {
-        if (Runner == null)
-            return false;
-
-        if (PendingAction != PendingActionType.JailChoice)
-            return false;
-
-        if (!IsValidAlivePlayer(PendingPlayerIndex))
-            return false;
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        return slot.player == Runner.LocalPlayer && slot.isInJail;
-    }
-
-    public string GetPendingJailInfoText()
-    {
-        if (!IsValidAlivePlayer(PendingPlayerIndex))
-            return GetByLanguageForState("감옥 탈출 방법을 선택하세요.", "Choose how to escape jail.");
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        int maxFail = Mathf.Max(1, maxJailDoubleFailCount);
-        int tryCount = Mathf.Clamp(slot.jailTryCount, 0, maxFail);
-
-        return GetByLanguageForState(
-            $"감옥에 갇혔습니다.\n주사위 더블이 나오면 탈출합니다.\n실패 횟수: {tryCount}/{maxFail}\n또는 {jailEscapeCost:N0}원을 지불하고 탈출할 수 있습니다.\n5회 실패 후 다음 자기 턴에는 자동으로 감옥에서 나갑니다.",
-            $"You are in Jail.\nRoll doubles to escape.\nFailed attempts: {tryCount}/{maxFail}\nOr pay {jailEscapeCost:N0} to escape.\nAfter 5 failed attempts, you automatically leave jail on your next turn."
-        );
-    }
-
-
-    public bool CanLocalJailRollDice()
-    {
-        if (!ShouldShowJailChoicePopupForLocalPlayer())
-            return false;
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        return slot.jailTryCount < maxJailDoubleFailCount;
-    }
-
-    public bool CanLocalPayJailEscapeCost()
-    {
-        if (!ShouldShowJailChoicePopupForLocalPlayer())
-            return false;
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        if (slot.jailTryCount >= maxJailDoubleFailCount)
-            return true;
-
-        return slot.cash >= Mathf.Max(0, jailEscapeCost);
-    }
-
-
-    private void AutoEscapeJailAfterMaxFail(int playerIndex)
-    {
-        if (!Object.HasStateAuthority)
-            return;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        if (!slot.isInJail)
-            return;
-
-        slot.isInJail = false;
-        slot.jailTryCount = 0;
-
-        Players.Set(playerIndex, slot);
-
-        PendingAction = PendingActionType.None;
-        PendingPlayerIndex = -1;
-        PendingCellIndex = -1;
-        PendingWasDouble = false;
-
-        LogServer($"{playerIndex}번 플레이어가 감옥 탈출 주사위 5회 실패 후 자동으로 감옥에서 탈출했습니다. 이번 턴은 이동하지 않고 종료됩니다.");
-
-        AdvanceTurn();
-        BumpRevision();
     }
 
     #endregion
@@ -1898,26 +1558,6 @@ public class BulmabulGameState : NetworkBehaviour
     private void ApplyJail(int playerIndex, BulmabulCellData cell)
     {
         LogServer($"{playerIndex}번 플레이어가 {cell.cellName} 칸에 도착했습니다.");
-        SendPlayerToJailForAuthority(playerIndex, cell);
-    }
-
-    private void SendPlayerToJailForAuthority(int playerIndex, BulmabulCellData cell)
-    {
-        if (!Object.HasStateAuthority || !IsValidAlivePlayer(playerIndex))
-            return;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        slot.isInJail = true;
-        slot.jailTryCount = 0;
-
-        Players.Set(playerIndex, slot);
-
-        string cellName = cell != null ? cell.cellName : GetByLanguageForState("감옥", "Jail");
-
-        LogServer($"{playerIndex}번 플레이어가 {cellName} 칸에 도착하여 감옥에 갇혔습니다. 다음 자기 턴에 탈출 선택 팝업이 열립니다.");
-
-        BumpRevision();
     }
 
     /// <summary>
@@ -1960,15 +1600,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         LogServer($"{playerIndex}번 플레이어가 여행 칸에 도착했습니다. 여행 비용 {travelCost:N0} 결제 선택 대기 중.");
 
-        BumpRevision();
-    }
-
-    public void ReleaseAllOwnedLandsByCardForAuthority(int playerIndex)
-    {
-        if (!Object.HasStateAuthority)
-            return;
-
-        ReleaseAllOwnedLands(playerIndex);
         BumpRevision();
     }
 
@@ -2543,41 +2174,45 @@ public class BulmabulGameState : NetworkBehaviour
         if (IsPaused || TurnBusy)
             return;
 
-        if (PendingAction != PendingActionType.JailChoice)
+        if (PendingAction != PendingActionType.None)
             return;
 
-        if (!IsValidAlivePlayer(PendingPlayerIndex))
+        int playerIndex = FindPlayerIndex(info.Source);
+
+        if (!IsValidAlivePlayer(playerIndex))
             return;
 
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        if (info.Source != slot.player)
+        if (board == null || board.CellCount <= 0)
             return;
 
-        if (!slot.isInJail)
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        if (slot.tileIndex < 0 || slot.tileIndex >= board.CellCount)
             return;
 
-        if (!TryConsumeKeptChanceCardForAuthority(PendingPlayerIndex, BulmabulChanceCardType.JailEscapeCard))
+        BulmabulCellData cell = board.GetCell(slot.tileIndex);
+
+        if (cell == null || cell.cellType != BulmabulCellType.Jail)
         {
-            LogServer($"{PendingPlayerIndex}번 플레이어는 감옥 탈출 카드를 가지고 있지 않습니다.");
+            LogServer($"{playerIndex}번 플레이어는 감옥 칸에 있지 않아 감옥 탈출 카드를 사용할 수 없습니다.");
             return;
         }
 
-        slot.isInJail = false;
-        slot.jailTryCount = 0;
+        if (!TryConsumeKeptChanceCardForAuthority(playerIndex, BulmabulChanceCardType.JailEscapeCard))
+        {
+            LogServer($"{playerIndex}번 플레이어는 감옥 탈출 카드를 가지고 있지 않습니다.");
+            return;
+        }
 
-        Players.Set(PendingPlayerIndex, slot);
-
-        int finishedPlayer = PendingPlayerIndex;
-
-        PendingAction = PendingActionType.None;
-        PendingPlayerIndex = -1;
-        PendingCellIndex = -1;
-        PendingWasDouble = false;
-
-        LogServer($"{finishedPlayer}번 플레이어가 감옥 탈출 카드를 사용해 감옥에서 탈출했습니다.");
-
-        AdvanceTurn();
+        /*
+         * 현재 프로젝트의 감옥 칸은 ApplyJail()에서 구속 턴을 저장하지 않는다.
+         * 그래서 여기서는 서버 검증 후 카드만 소비한다.
+         *
+         * 나중에 감옥 턴 시스템이 생기면 여기에서
+         * jailRemainTurn = 0;
+         * 같은 처리를 넣으면 된다.
+         */
+        LogServer($"{playerIndex}번 플레이어가 감옥 탈출 카드를 사용했습니다.");
 
         BumpRevision();
     }
@@ -2736,135 +2371,23 @@ public class BulmabulGameState : NetworkBehaviour
     }
     #endregion
 
-    #region 찬스 카드 공통 이동 처리
-
-    /// <summary>
-    /// 찬스 카드 효과로 현재 위치 기준 N칸 이동한다.
-    /// 앞으로 이동은 양수, 뒤로 이동은 음수.
-    /// 
-    /// 중요:
-    /// 카드 이동도 주사위 이동처럼 도착 칸 효과를 반드시 실행해야 한다.
-    /// 감옥, 상대 땅, 빈 땅, 내 땅, 여행칸, 시작칸, 보너스칸, 세금칸, 찬스칸이 전부 여기서 이어진다.
-    /// </summary>
-    public bool MovePlayerByStepByChanceCardForAuthority(int playerIndex, int step)
-    {
-        if (!Object.HasStateAuthority)
-            return false;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return false;
-
-        if (board == null || board.CellCount <= 0)
-            return false;
-
-        PlayerGameSlot actor = Players.Get(playerIndex);
-
-        if (actor.occupied == 0 || actor.bankrupt)
-            return false;
-
-        int cellCount = board.CellCount;
-        int targetCellIndex = actor.tileIndex + step;
-
-        while (targetCellIndex < 0)
-            targetCellIndex += cellCount;
-
-        targetCellIndex %= cellCount;
-
-        return MovePlayerToCellByChanceCardForAuthority(playerIndex, targetCellIndex, true);
-    }
-
-    /// <summary>
-    /// 찬스 카드 효과로 특정 칸으로 이동한다.
-    /// 시작칸 이동, 감옥 이동, 여행칸 이동, 직접 지정 이동에서 공통 사용한다.
-    /// </summary>
-    public bool MovePlayerToCellByChanceCardForAuthority(int playerIndex, int targetCellIndex, bool resolveLanding)
-    {
-        if (!Object.HasStateAuthority)
-            return false;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return false;
-
-        if (board == null || board.CellCount <= 0)
-            return false;
-
-        targetCellIndex = board.ClampCellIndex(targetCellIndex);
-
-        PlayerGameSlot actor = Players.Get(playerIndex);
-
-        if (actor.occupied == 0 || actor.bankrupt)
-            return false;
-
-        int fromIndex = actor.tileIndex;
-
-        actor.tileIndex = targetCellIndex;
-        Players.Set(playerIndex, actor);
-
-        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
-
-        BulmabulCellData targetCell = board.GetCell(targetCellIndex);
-        string cellName = targetCell != null ? targetCell.cellName : $"{targetCellIndex}번 칸";
-
-        LogServer($"{playerIndex}번 플레이어가 카드 효과로 [{cellName}] 칸으로 이동했습니다.");
-
-        BumpRevision();
-
-        if (!resolveLanding)
-            return false;
-
-        return ResolveLanding(playerIndex, targetCellIndex);
-    }
-
-    /// <summary>
-    /// 찬스 카드 효과로 감옥 칸으로 이동한다.
-    /// 보드에서 Jail 타입 칸을 찾아 이동한다.
-    /// </summary>
-    public bool MovePlayerToJailByChanceCardForAuthority(int playerIndex)
-    {
-        int jailIndex = FindJailCellIndex();
-
-        if (jailIndex < 0)
-        {
-            LogServer("감옥 칸을 찾을 수 없습니다.");
-            return false;
-        }
-
-        return MovePlayerToCellByChanceCardForAuthority(playerIndex, jailIndex, true);
-    }
-
-    /// <summary>
-    /// 보드에서 감옥 칸을 찾는다.
-    /// 여러 개 있으면 첫 번째 감옥 칸을 사용한다.
-    /// </summary>
-    private int FindJailCellIndex()
-    {
-        if (board == null)
-            return -1;
-
-        for (int i = 0; i < board.CellCount; i++)
-        {
-            BulmabulCellData cell = board.GetCell(i);
-
-            if (cell == null)
-                continue;
-
-            if (cell.cellType == BulmabulCellType.Jail)
-                return i;
-        }
-
-        return -1;
-    }
-
-    #endregion
-
     #region 적 소유 땅 이동 함수
 
     /// <summary>
     /// 찬스 카드 효과:
     /// 현재 위치 기준으로 앞으로 가장 가까운 적 소유 땅으로 이동한다.
-    /// 
-    /// 중요:
-    /// 이동 후 ResolveLanding()까지 실행해야 천사 카드 선택 / 통행료 처리가 이어진다.
+    ///
+    /// 개인전:
+    /// - 내 땅이 아닌 다른 생존 플레이어의 땅으로 이동한다.
+    /// - 3명 이상 플레이 중이면 여러 상대 중 가장 가까운 상대 땅을 찾는다.
+    ///
+    /// 팀전:
+    /// - 같은 팀의 땅은 제외한다.
+    /// - 상대 팀 플레이어가 소유한 땅 중 가장 가까운 땅을 찾는다.
+    ///
+    /// 반환값:
+    /// - true  = 이동 후 구매/통행료/천사카드 등 플레이어 선택 대기 발생
+    /// - false = 추가 선택 없이 카드 효과 종료
     /// </summary>
     public bool MoveToNearestEnemyOwnedLandByChanceCardForAuthority(int playerIndex)
     {
@@ -2885,7 +2408,29 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
         }
 
-        return MovePlayerToCellByChanceCardForAuthority(playerIndex, targetCellIndex, true);
+        PlayerGameSlot actor = Players.Get(playerIndex);
+
+        int fromIndex = actor.tileIndex;
+
+        actor.tileIndex = targetCellIndex;
+        Players.Set(playerIndex, actor);
+
+        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
+
+        BulmabulCellData targetCell = board.GetCell(targetCellIndex);
+        string cellName = targetCell != null ? targetCell.cellName : $"{targetCellIndex}번 칸";
+
+        LogServer($"{playerIndex}번 플레이어가 찬스 카드 효과로 가장 가까운 적 소유 땅 [{cellName}] 으로 이동했습니다.");
+
+        BumpRevision();
+
+        /*
+         * 중요:
+         * 그냥 위치만 바꾸면 안 된다.
+         * 적 땅에 도착한 것이므로 ApplyLand까지 실행되어야 한다.
+         * 여기서 ResolveLanding을 호출해야 천사 카드 선택 / 통행료 처리가 이어진다.
+         */
+        return ResolveLanding(playerIndex, targetCellIndex);
     }
 
     /// <summary>
@@ -3486,10 +3031,13 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public bool CanLocalUseJailEscapeCard()
     {
-        if (Runner == null || IsPaused || TurnBusy)
+        if (Runner == null)
             return false;
 
-        if (!ShouldShowJailChoicePopupForLocalPlayer())
+        if (IsPaused || TurnBusy)
+            return false;
+
+        if (PendingAction != PendingActionType.None)
             return false;
 
         int idx = FindPlayerIndex(Runner.LocalPlayer);
@@ -3497,7 +3045,20 @@ public class BulmabulGameState : NetworkBehaviour
         if (!IsValidAlivePlayer(idx))
             return false;
 
-        return LocalHasKeptChanceCard(BulmabulChanceCardType.JailEscapeCard);
+        if (!LocalHasKeptChanceCard(BulmabulChanceCardType.JailEscapeCard))
+            return false;
+
+        if (board == null || board.CellCount <= 0)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(idx);
+
+        if (slot.tileIndex < 0 || slot.tileIndex >= board.CellCount)
+            return false;
+
+        BulmabulCellData cell = board.GetCell(slot.tileIndex);
+
+        return cell != null && cell.cellType == BulmabulCellType.Jail;
     }
 
     /// <summary>
@@ -4156,7 +3717,7 @@ public class BulmabulGameState : NetworkBehaviour
         return Players.Get(CurrentTurnIndex).player == player;
     }
 
-    public int FindPlayerIndex(PlayerRef player)
+    private int FindPlayerIndex(PlayerRef player)
     {
         for (int i = 0; i < MaxPlayers; i++)
         {
