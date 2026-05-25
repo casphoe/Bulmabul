@@ -170,7 +170,12 @@ public class BulmabulGameState : NetworkBehaviour
         /// <summary>
         /// 감옥에 갇힌 플레이어의 턴 시작 시 탈출 방법을 선택하는 상태.
         /// </summary>
-        JailChoice = 7
+        JailChoice = 7,
+
+        /// <summary>
+        /// 상대 땅 인수 후, 기존 건물은 유지한 상태로 추가 건설할 수 있는 상태.
+        /// </summary>
+        BuildAfterTakeOver = 8
     }
 
     [Header("Rule")]
@@ -1627,15 +1632,38 @@ public class BulmabulGameState : NetworkBehaviour
 
         /*
          * 중요:
-         * 상대 땅에 도착하면 바로 PayToll 하지 않는다.
-         * 먼저 천사 카드 사용 여부 선택 상태로 넘긴다.
-         *
-         * 로컬 플레이어가 천사 카드를 가지고 있으면 UI 팝업이 뜨고,
-         * 없으면 UI 쪽에서 자동으로 '사용 안 함' 요청을 보내게 만들 수 있다.
+         * 천사 카드가 있을 때만 천사 카드 사용 선택 대기 상태로 들어간다.
+         * 천사 카드가 없으면 대기 UI를 열지 않고 바로 통행료를 지불한다.
          */
-        OpenAngelCardTollChoicePending(playerIndex, cellIndex);
+        PlayerGameSlot payerSlot = Players.Get(playerIndex);
 
-        return true;
+        if (payerSlot.hasAngelCard)
+        {
+            OpenAngelCardTollChoicePending(playerIndex, cellIndex);
+            return true;
+        }
+
+        /*
+         * 천사 카드가 없으면 기존 통행료 처리로 바로 진행한다.
+         * 이러면 "천사 카드 사용 대기" 상태가 아예 발생하지 않는다.
+         */
+        bool canContinue = PayToll(playerIndex, ownerIndex, cellIndex, cell);
+
+        if (!canContinue)
+        {
+            return false;
+        }
+
+        /*
+         * 통행료 지불 후 인수 가능한 땅이면 인수 선택 대기 상태로 들어간다.
+         */
+        if (CanOpenTakeOverPending(playerIndex, ownerIndex, cellIndex, cell))
+        {
+            OpenTakeOverPending(playerIndex, cellIndex);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1660,7 +1688,7 @@ public class BulmabulGameState : NetworkBehaviour
             toll = BulmabulLandSystem.CalculateToll(cell, flags);
         }
 
-        LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어의 땅에 도착했습니다. 천사 카드 사용 선택 대기 중. 통행료 {toll:N0}");
+        LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어의 땅에 도착했습니다. 천사 카드 보유 확인 완료. 사용 선택 대기 중. 통행료 {toll:N0}");
 
         BumpRevision();
     }
@@ -2102,6 +2130,29 @@ public class BulmabulGameState : NetworkBehaviour
         LogServer($"{playerIndex}번 플레이어가 구매한 땅에 건물을 지을 수 있습니다. 작은집/집 중 선택하세요.");
     }
 
+    private void OpenBuildAfterTakeOverPending(int playerIndex, int cellIndex)
+    {
+        PendingAction = PendingActionType.BuildAfterTakeOver;
+        PendingPlayerIndex = playerIndex;
+        PendingCellIndex = cellIndex;
+
+        BulmabulCellData cell = board != null ? board.GetCell(cellIndex) : null;
+        string cellName = cell != null ? cell.cellName : $"Cell {cellIndex}";
+
+        PlayerGameSlot player = Players.Get(playerIndex);
+
+        if (player.lapCount <= 0)
+        {
+            LogServer($"{playerIndex}번 플레이어가 인수한 {cellName}에 추가 건설할 수 있습니다. 아직 한 바퀴 전이라 작은집/집만 가능합니다.");
+        }
+        else
+        {
+            LogServer($"{playerIndex}번 플레이어가 인수한 {cellName}에 추가 건설할 수 있습니다.");
+        }
+
+        BumpRevision();
+    }
+
     private bool TryOpenStartBuildPending(int playerIndex)
     {
         PlayerGameSlot player = Players.Get(playerIndex);
@@ -2139,7 +2190,37 @@ public class BulmabulGameState : NetworkBehaviour
         return false;
     }
 
-    private bool CanBuildAnyOnCell(int playerIndex, int cellIndex)
+    private bool IsBuildRestrictedToSmallHouseAndHouse(int playerIndex)
+    {
+        if (!IsValidAlivePlayer(playerIndex))
+            return true;
+
+        /*
+         * 땅 구매 직후:
+         * 한 바퀴 여부와 상관없이 작은집 / 집만 가능.
+         */
+        if (PendingAction == PendingActionType.InitialBuildAfterBuy)
+            return true;
+
+        /*
+         * 인수 후 추가 건설:
+         * 아직 한 바퀴를 돌지 않았으면 작은집 / 집만 가능.
+         * 한 바퀴 이상 돌았으면 작은집 / 집 / 큰집 / 호텔 가능.
+         */
+        if (PendingAction == PendingActionType.BuildAfterTakeOver)
+        {
+            PlayerGameSlot player = Players.Get(playerIndex);
+            return player.lapCount <= 0;
+        }
+
+        /*
+         * 시작지점 건설:
+         * 이미 한 바퀴를 돈 상태에서만 열리므로 전체 건설 가능.
+         */
+        return false;
+    }
+
+    private bool CanBuildAnyOnCellWithRule(int playerIndex, int cellIndex, bool onlySmallHouseAndHouse)
     {
         if (!IsValidAlivePlayer(playerIndex))
             return false;
@@ -2157,9 +2238,23 @@ public class BulmabulGameState : NetworkBehaviour
         PlayerGameSlot player = Players.Get(playerIndex);
         int flags = LandBuildingFlagsByCell.Get(cellIndex);
 
-        bool initial = PendingAction == PendingActionType.InitialBuildAfterBuy;
+        return BulmabulLandSystem.CanBuildAny(
+            cell,
+            flags,
+            player.cash,
+            onlySmallHouseAndHouse
+        );
+    }
 
-        return BulmabulLandSystem.CanBuildAny(cell, flags, player.cash, initial);
+    private bool CanBuildAnyOnCell(int playerIndex, int cellIndex)
+    {
+        bool onlySmallHouseAndHouse = IsBuildRestrictedToSmallHouseAndHouse(playerIndex);
+
+        return CanBuildAnyOnCellWithRule(
+            playerIndex,
+            cellIndex,
+            onlySmallHouseAndHouse
+        );
     }
 
     private bool CanBuildPart(int playerIndex, int cellIndex, BulmabulBuildPart part)
@@ -2180,9 +2275,15 @@ public class BulmabulGameState : NetworkBehaviour
         PlayerGameSlot player = Players.Get(playerIndex);
         int flags = LandBuildingFlagsByCell.Get(cellIndex);
 
-        bool initial = PendingAction == PendingActionType.InitialBuildAfterBuy;
+        bool onlySmallHouseAndHouse = IsBuildRestrictedToSmallHouseAndHouse(playerIndex);
 
-        return BulmabulLandSystem.CanBuild(cell, flags, player.cash, part, initial);
+        return BulmabulLandSystem.CanBuild(
+            cell,
+            flags,
+            player.cash,
+            part,
+            onlySmallHouseAndHouse
+        );
     }
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
@@ -2220,7 +2321,8 @@ public class BulmabulGameState : NetworkBehaviour
             return;
 
         if (PendingAction != PendingActionType.InitialBuildAfterBuy &&
-            PendingAction != PendingActionType.BuildFromStart)
+            PendingAction != PendingActionType.BuildFromStart &&
+            PendingAction != PendingActionType.BuildAfterTakeOver)
             return;
 
         if (!IsValidAlivePlayer(PendingPlayerIndex))
@@ -2297,7 +2399,8 @@ public class BulmabulGameState : NetworkBehaviour
             return;
 
         if (PendingAction != PendingActionType.InitialBuildAfterBuy &&
-            PendingAction != PendingActionType.BuildFromStart)
+            PendingAction != PendingActionType.BuildFromStart &&
+            PendingAction != PendingActionType.BuildAfterTakeOver)
             return;
 
         if (!IsValidAlivePlayer(PendingPlayerIndex))
@@ -3223,7 +3326,7 @@ public class BulmabulGameState : NetworkBehaviour
 
         int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
 
-        bool initial = PendingAction == PendingActionType.InitialBuildAfterBuy;
+        bool initial = IsBuildRestrictedToSmallHouseAndHouse(PendingPlayerIndex);
 
         // 재화 조건을 제외한 건설 규칙부터 검사한다.
         // 예: 호텔은 작은집+집+큰집이 있어야 가능.
@@ -3360,7 +3463,8 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
 
         if (PendingAction != PendingActionType.InitialBuildAfterBuy &&
-            PendingAction != PendingActionType.BuildFromStart)
+            PendingAction != PendingActionType.BuildFromStart &&
+            PendingAction != PendingActionType.BuildAfterTakeOver)
             return false;
 
         if (!IsValidAlivePlayer(PendingPlayerIndex))
@@ -3405,6 +3509,29 @@ public class BulmabulGameState : NetworkBehaviour
             return
                 $"{cell.cellName}\n" +
                 $"현재 건물: {BulmabulBuildFlags.ToText(flags)}\n" +
+                $"작은집: {cell.smallHouseBuildCost:N0}\n" +
+                $"집: {cell.houseBuildCost:N0}\n" +
+                $"큰집: {cell.bigHouseBuildCost:N0}\n" +
+                $"호텔: {cell.hotelBuildCost:N0}";
+        }
+
+        if (PendingAction == PendingActionType.BuildAfterTakeOver)
+        {
+            if (PendingCellIndex < 0)
+                return "건설할 땅을 선택하세요.";
+
+            BulmabulCellData cell = board.GetCell(PendingCellIndex);
+
+            if (cell == null)
+                return "건설할 땅을 선택하세요.";
+
+            int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+
+            return
+                $"{cell.cellName}\n" +
+                $"인수 완료!\n" +
+                $"현재 건물: {BulmabulBuildFlags.ToText(flags)}\n" +
+                $"추가 건설할 건물을 선택하세요.\n" +
                 $"작은집: {cell.smallHouseBuildCost:N0}\n" +
                 $"집: {cell.houseBuildCost:N0}\n" +
                 $"큰집: {cell.bigHouseBuildCost:N0}\n" +
@@ -3684,20 +3811,49 @@ public class BulmabulGameState : NetworkBehaviour
         );
 
         int finishedPlayer = PendingPlayerIndex;
+        int takenCellIndex = PendingCellIndex;
         bool wasDouble = PendingWasDouble;
+
+        /*
+         * 중요:
+         * 인수 후 기존 건물은 그대로 유지한다.
+         * 소유자만 바뀐 상태에서 추가 건설 가능 여부를 확인한다.
+         */
+        PlayerGameSlot finishedSlot = Players.Get(finishedPlayer);
+
+        /*
+         * 아직 한 바퀴를 돌지 않았으면 작은집/집만 가능.
+         * 한 바퀴 이상 돌았으면 작은집/집/큰집/호텔까지 가능.
+         */
+        bool onlySmallHouseAndHouse = finishedSlot.lapCount <= 0;
+
+        /*
+         * 추가 건설이 하나라도 가능하면 건설 패널을 연다.
+         * 추가 건설이 불가능하면 자동 스킵처럼 바로 턴을 넘긴다.
+         */
+        if (CanBuildAnyOnCellWithRule(finishedPlayer, takenCellIndex, onlySmallHouseAndHouse))
+        {
+            PendingWasDouble = wasDouble;
+            OpenBuildAfterTakeOverPending(finishedPlayer, takenCellIndex);
+            return;
+        }
+
+        /*
+         * 추가 건설할 수 있는 게 없으면 자동 스킵.
+         * 예:
+         * - 돈 부족
+         * - 이미 가능한 건물이 전부 있음
+         * - 호텔 직전 조건이 안 됨
+         * - 관광지/랜드마크라 건설 불가
+         */
+        LogServer($"{finishedPlayer}번 플레이어가 인수한 땅에 추가 건설할 수 없어 자동으로 넘깁니다.");
 
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
 
-        /*
-         * 더블이면 같은 플레이어 턴 유지,
-         * 더블이 아니면 다음 플레이어 턴으로 이동.
-         * 실제 분기는 FinishTurnAfterAction 내부에서 처리.
-         */
         FinishTurnAfterAction(finishedPlayer, wasDouble);
 
-        // Flag 색상 변경 / 재화 변경 / 소유권 변경 화면 반영
         BumpRevision();
     }
 
