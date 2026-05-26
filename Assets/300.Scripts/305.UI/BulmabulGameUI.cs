@@ -154,11 +154,10 @@ public class BulmabulGameUI : MonoBehaviour
     [Tooltip("여행권이 있을 때 표시되는 여행 이동 버튼")]
     [SerializeField] private Button btnTravelMove;
 
-    [Tooltip("목적지 선택 패널")]
-    [SerializeField] private GameObject travelSelectPanel;
+    [Tooltip("GPM InfiniteScroll 기반 여행 목적지 선택 팝업")]
+    [SerializeField] private BulmabulTravelTargetPopup travelTargetPopup;
 
-    [Tooltip("목적지 선택 버튼들. 배열 인덱스 = 칸 인덱스")]
-    [SerializeField] private Button[] btnTravelTargets;
+    private bool _lastTravelReady = false;
 
     [Header("Take Over UI")]
     [Tooltip("상대 땅 인수 선택 패널")]
@@ -579,7 +578,6 @@ public class BulmabulGameUI : MonoBehaviour
             btnSkipTakeOverLand.onClick.AddListener(OnClickSkipTakeOverLand);
         }
 
-        BindTravelTargetButtons();
         BindBuildTargetButtons();
     }
 
@@ -625,31 +623,6 @@ public class BulmabulGameUI : MonoBehaviour
     }
 
     /// <summary>
-    /// 여행 목적지 버튼 연결.
-    /// 버튼 배열 인덱스가 보드 칸 인덱스와 같다고 가정한다.
-    /// </summary>
-    private void BindTravelTargetButtons()
-    {
-        if (btnTravelTargets == null)
-            return;
-
-        for (int i = 0; i < btnTravelTargets.Length; i++)
-        {
-            int cellIndex = i;
-            Button button = btnTravelTargets[i];
-
-            if (button == null)
-                continue;
-
-            button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(() =>
-            {
-                OnClickTravelTarget(cellIndex);
-            });
-        }
-    }
-
-    /// <summary>
     /// 시작지점 건설용 땅 선택 버튼 연결.
     /// 버튼 배열 인덱스가 보드 칸 인덱스와 같다고 가정한다.
     /// </summary>
@@ -684,9 +657,6 @@ public class BulmabulGameUI : MonoBehaviour
 
         if (buildPanel != null)
             buildPanel.SetActive(false);
-
-        if (travelSelectPanel != null)
-            travelSelectPanel.SetActive(false);
 
         if (pauseBlockPanel != null)
             pauseBlockPanel.SetActive(false);
@@ -761,9 +731,6 @@ public class BulmabulGameUI : MonoBehaviour
 
         if (buildPanel != null)
             buildPanel.SetActive(false);
-
-        if (travelSelectPanel != null)
-            travelSelectPanel.SetActive(false);
 
         if (pauseBlockPanel != null)
             pauseBlockPanel.SetActive(false);
@@ -1170,17 +1137,34 @@ public class BulmabulGameUI : MonoBehaviour
     }
 
     /// <summary>
-    /// 여행 이동 패널 상태 갱신.
-    /// 여행 버튼은 RefreshMainButtons에서 처리하고,
-    /// 목적지 패널은 사용자가 버튼을 눌렀을 때 열고 목적지 선택 후 닫는다.
+    /// 여행 이동 UI 갱신.
+    /// 여행 비용을 지불한 다음 자기 턴이 되면
+    /// GPM InfiniteScroll 기반 목적지 선택 팝업을 자동으로 연다.
     /// </summary>
     private void RefreshTravelUI(BulmabulGameState state)
     {
-        if (travelSelectPanel == null)
-            return;
+        bool canTravel = state != null && state.CanLocalUseTravel();
 
-        if (!state.CanLocalUseTravel())
-            travelSelectPanel.SetActive(false);
+        if (btnTravelMove != null)
+        {
+            btnTravelMove.gameObject.SetActive(canTravel);
+            btnTravelMove.interactable = canTravel;
+        }
+
+        if (!canTravel)
+        {
+            _lastTravelReady = false;
+            return;
+        }
+
+        // 여행 가능 상태가 처음 켜진 순간에만 자동 오픈
+        if (!_lastTravelReady)
+        {
+            _lastTravelReady = true;
+
+            if (travelTargetPopup != null)
+                travelTargetPopup.Open();
+        }
     }
 
     /// <summary>
@@ -1893,19 +1877,8 @@ public class BulmabulGameUI : MonoBehaviour
         if (!state.CanLocalUseTravel())
             return;
 
-        if (travelSelectPanel != null)
-            travelSelectPanel.SetActive(true);
-    }
-
-    private void OnClickTravelTarget(int targetCellIndex)
-    {
-        BulmabulGameState state = BulmabulGameState.Instance;
-        if (state == null) return;
-
-        if (travelSelectPanel != null)
-            travelSelectPanel.SetActive(false);
-
-        state.RequestTravelMoveLocal(targetCellIndex);
+        if (travelTargetPopup != null)
+            travelTargetPopup.Open();
     }
 
     private void OnClickPauseResume()

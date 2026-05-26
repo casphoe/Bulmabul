@@ -2016,74 +2016,130 @@ public class BulmabulGameState : NetworkBehaviour
 
     #region 땅 구매 선택
 
+    /// <summary>
+    /// 현재 구매 대기 상태인 땅을 실제로 구매 요청하는 RPC.
+    /// 
+    /// 흐름:
+    /// 1. StateAuthority 서버에서만 처리
+    /// 2. 현재 상태가 BuyLand인지 확인
+    /// 3. 요청한 플레이어가 실제 구매 대기 중인 플레이어인지 검증
+    /// 4. 땅 구매 처리
+    /// 5. 구매 성공 후 초기 건설이 가능하면 건설 대기 상태로 전환
+    /// 6. 건설이 불가능하면 턴 종료 처리
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestBuyLand(RpcInfo info = default)
     {
+        // 네트워크 상태 변경은 반드시 StateAuthority에서만 처리한다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 현재 땅 구매 대기 상태가 아니면 구매 요청을 무시한다.
         if (PendingAction != PendingActionType.BuyLand)
             return;
 
+        // 구매 대기 중인 플레이어 인덱스가 유효한지 확인한다.
         if (!IsValidAlivePlayer(PendingPlayerIndex))
             return;
 
+        // 현재 구매 대기 중인 플레이어 정보를 가져온다.
         PlayerGameSlot actor = Players.Get(PendingPlayerIndex);
 
+        // RPC를 보낸 플레이어가 실제 구매 권한을 가진 플레이어인지 검증한다.
+        // 다른 클라이언트가 남의 턴에 구매 요청을 보내는 것을 방지한다.
         if (info.Source != actor.player)
             return;
 
+        // 구매 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(PendingCellIndex);
 
+        // 칸 데이터가 없으면 더 이상 처리하지 않는다.
         if (cell == null)
             return;
 
+        // 실제 땅 구매 처리.
+        // 구매 가능 조건, 재화 차감, 소유권 등록 등은 TryBuyLand 내부에서 처리된다.
         bool bought = TryBuyLand(PendingPlayerIndex, PendingCellIndex, cell);
 
+        // 구매 처리 이후에도 Pending 값을 초기화하기 전에
+        // 턴 종료에 필요한 플레이어와 칸 인덱스를 별도로 보관한다.
         int finishedPlayer = PendingPlayerIndex;
         int boughtCell = PendingCellIndex;
 
+        // 구매에 성공했고, 구매 직후 초기 건설이 가능하다면
+        // 바로 턴을 넘기지 않고 건설 선택 대기 상태로 전환한다.
         if (bought && CanOpenInitialBuild(finishedPlayer, boughtCell))
         {
             OpenInitialBuildPending(finishedPlayer, boughtCell);
+
+            // UI 갱신 및 네트워크 동기화를 위해 Revision 값을 증가시킨다.
             BumpRevision();
             return;
         }
 
+        // 구매하지 못했거나 초기 건설이 불가능한 경우
+        // 더 이상 대기 상태가 없으므로 Pending 정보를 초기화한다.
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
 
+        // 구매 후 추가 선택지가 없으므로 턴 종료 처리.
+        // PendingWasDouble 값에 따라 더블이면 같은 플레이어가 한 번 더 진행할 수 있다.
         FinishTurnAfterAction(finishedPlayer, PendingWasDouble);
+
+        // 소유권, 재화, UI 상태 변경을 클라이언트에 반영한다.
         BumpRevision();
     }
 
+    /// <summary>
+    /// 현재 구매 대기 상태인 땅의 구매를 패스하는 RPC.
+    /// 
+    /// 흐름:
+    /// 1. StateAuthority 서버에서만 처리
+    /// 2. 현재 상태가 BuyLand인지 확인
+    /// 3. 요청한 플레이어가 실제 구매 대기 중인 플레이어인지 검증
+    /// 4. 구매 대기 상태를 초기화
+    /// 5. 턴 종료 처리
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestSkipBuyLand(RpcInfo info = default)
     {
+        // 네트워크 상태 변경은 반드시 StateAuthority에서만 처리한다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 현재 땅 구매 대기 상태가 아니면 패스 요청을 무시한다.
         if (PendingAction != PendingActionType.BuyLand)
             return;
 
+        // 구매 대기 중인 플레이어 인덱스가 유효한지 확인한다.
         if (!IsValidAlivePlayer(PendingPlayerIndex))
             return;
 
+        // 현재 구매 대기 중인 플레이어 정보를 가져온다.
         PlayerGameSlot actor = Players.Get(PendingPlayerIndex);
 
+        // RPC를 보낸 플레이어가 실제 구매 선택권을 가진 플레이어인지 검증한다.
+        // 다른 클라이언트가 남의 구매 선택을 패스하지 못하도록 막는다.
         if (info.Source != actor.player)
             return;
 
+        // 턴 종료 처리 전에 현재 플레이어 인덱스를 저장한다.
         int finishedPlayer = PendingPlayerIndex;
 
+        // 서버 로그에 구매 패스 내용을 기록한다.
         LogServer($"{finishedPlayer}번 플레이어가 땅 구매를 패스했습니다.");
 
+        // 구매 대기 상태를 초기화한다.
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
 
+        // 구매를 하지 않았으므로 바로 턴 종료 처리.
+        // 더블 여부는 PendingWasDouble 값에 따라 FinishTurnAfterAction 내부에서 처리된다.
         FinishTurnAfterAction(finishedPlayer, PendingWasDouble);
+
+        // UI 갱신 및 네트워크 동기화를 위해 Revision 값을 증가시킨다.
         BumpRevision();
     }
 
@@ -2091,107 +2147,202 @@ public class BulmabulGameState : NetworkBehaviour
 
     #region 건설 시스템
 
+    /// <summary>
+    /// 땅 구매 직후, 해당 땅에 초기 건설 패널을 열 수 있는지 확인한다.
+    /// 
+    /// 규칙:
+    /// 1. 플레이어가 유효해야 한다.
+    /// 2. 해당 땅의 소유자가 현재 플레이어여야 한다.
+    /// 3. 일반 Land 타입이어야 한다.
+    /// 4. 랜드마크는 건설 대상에서 제외한다.
+    /// 5. 이미 건물이 있으면 초기 건설 대상이 아니다.
+    /// 6. 구매 직후에는 작은집 / 집만 건설 가능하다.
+    /// </summary>
     private bool CanOpenInitialBuild(int playerIndex, int cellIndex)
     {
+        // 플레이어 인덱스가 유효하고, 아직 게임에서 살아있는 플레이어인지 확인한다.
         if (!IsValidAlivePlayer(playerIndex))
             return false;
 
+        // 구매 직후 건설은 반드시 본인 소유 땅에서만 가능하다.
         if (LandOwnerByCell.Get(cellIndex) != playerIndex)
             return false;
 
+        // 건설 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(cellIndex);
 
+        // 칸 데이터가 없으면 건설할 수 없다.
         if (cell == null)
             return false;
 
+        // 일반 땅 타입이 아니면 건설할 수 없다.
+        // 예: 시작지점, 여행 칸, 감옥 칸, 찬스 칸 등은 제외.
         if (cell.cellType != BulmabulCellType.Land)
             return false;
 
+        // 랜드마크로 지정된 땅은 일반 건물 건설 대상에서 제외한다.
         if (cell.isLandmark)
             return false;
 
+        // 현재 해당 땅에 지어진 건물 정보를 가져온다.
         int flags = LandBuildingFlagsByCell.Get(cellIndex);
 
+        // 구매 직후 초기 건설은 빈 땅에서만 가능하다.
         if (flags != BulmabulBuildFlags.None)
             return false;
 
+        // 플레이어의 현재 재화 정보를 가져온다.
         PlayerGameSlot player = Players.Get(playerIndex);
 
+        // 구매 직후에는 작은집 또는 집만 건설 가능하다.
+        // 둘 중 하나라도 지을 수 있으면 초기 건설 패널을 열 수 있다.
         return BulmabulLandSystem.CanBuild(cell, flags, player.cash, BulmabulBuildPart.SmallHouse, true) ||
                BulmabulLandSystem.CanBuild(cell, flags, player.cash, BulmabulBuildPart.House, true);
     }
 
+    /// <summary>
+    /// 땅 구매 직후 초기 건설 대기 상태로 전환한다.
+    /// 
+    /// 이 상태에서는 방금 구매한 땅에 작은집 또는 집을 선택해서 건설할 수 있다.
+    /// 구매 직후에는 큰집과 호텔은 건설할 수 없다.
+    /// </summary>
     private void OpenInitialBuildPending(int playerIndex, int cellIndex)
     {
+        // 현재 게임 상태를 구매 직후 초기 건설 상태로 변경한다.
         PendingAction = PendingActionType.InitialBuildAfterBuy;
+
+        // 건설 선택권을 가진 플레이어를 저장한다.
         PendingPlayerIndex = playerIndex;
+
+        // 건설 대상이 되는 땅 인덱스를 저장한다.
         PendingCellIndex = cellIndex;
 
+        // 서버 로그에 현재 상태를 기록한다.
         LogServer($"{playerIndex}번 플레이어가 구매한 땅에 건물을 지을 수 있습니다. 작은집/집 중 선택하세요.");
     }
 
+    /// <summary>
+    /// 상대 땅 인수 후 추가 건설 대기 상태로 전환한다.
+    /// 
+    /// 규칙:
+    /// 1. 기존 건물은 삭제하지 않고 그대로 유지한다.
+    /// 2. 소유권만 인수한 플레이어로 변경된 상태에서 추가 건설을 진행한다.
+    /// 3. 한 바퀴를 돌기 전이면 작은집 / 집만 추가 건설 가능하다.
+    /// 4. 한 바퀴 이상 돌았으면 작은집 / 집 / 큰집 / 호텔까지 조건에 따라 건설 가능하다.
+    /// </summary>
     private void OpenBuildAfterTakeOverPending(int playerIndex, int cellIndex)
     {
+        // 현재 게임 상태를 인수 후 추가 건설 상태로 변경한다.
         PendingAction = PendingActionType.BuildAfterTakeOver;
+
+        // 추가 건설 선택권을 가진 플레이어를 저장한다.
         PendingPlayerIndex = playerIndex;
+
+        // 인수한 땅의 인덱스를 저장한다.
         PendingCellIndex = cellIndex;
 
+        // 로그 출력을 위해 칸 데이터를 가져온다.
         BulmabulCellData cell = board != null ? board.GetCell(cellIndex) : null;
+
+        // 칸 데이터가 없을 경우를 대비해 기본 이름을 만든다.
         string cellName = cell != null ? cell.cellName : $"Cell {cellIndex}";
 
+        // 플레이어의 바퀴 수를 확인하기 위해 슬롯 정보를 가져온다.
         PlayerGameSlot player = Players.Get(playerIndex);
 
+        // 아직 한 바퀴를 돌지 않은 경우, 작은집 / 집만 가능하다는 로그를 남긴다.
         if (player.lapCount <= 0)
         {
             LogServer($"{playerIndex}번 플레이어가 인수한 {cellName}에 추가 건설할 수 있습니다. 아직 한 바퀴 전이라 작은집/집만 가능합니다.");
         }
+        // 한 바퀴 이상 돈 경우, 전체 건설 규칙에 따라 추가 건설 가능하다는 로그를 남긴다.
         else
         {
             LogServer($"{playerIndex}번 플레이어가 인수한 {cellName}에 추가 건설할 수 있습니다.");
         }
 
+        // UI와 클라이언트 상태 갱신을 위해 Revision 값을 증가시킨다.
         BumpRevision();
     }
 
+    /// <summary>
+    /// 시작지점 도착 후, 보유한 땅 중 건설 가능한 땅이 있으면 건설 선택 상태로 전환한다.
+    /// 
+    /// 규칙:
+    /// 1. 한 바퀴를 한 번 이상 돌아야 시작지점 건설 기능이 열린다.
+    /// 2. 본인이 소유한 땅 중 건설 가능한 땅이 하나라도 있어야 한다.
+    /// 3. 이 상태에서는 먼저 건설할 땅을 선택해야 한다.
+    /// </summary>
     private bool TryOpenStartBuildPending(int playerIndex)
     {
+        // 플레이어 정보를 가져온다.
         PlayerGameSlot player = Players.Get(playerIndex);
 
+        // 아직 한 바퀴를 돌지 않았다면 시작지점 건설은 열리지 않는다.
         if (player.lapCount <= 0)
             return false;
 
+        // 보유한 땅 중 건설 가능한 땅이 하나도 없으면 건설 상태로 들어가지 않는다.
         if (!HasAnyBuildableOwnedLand(playerIndex))
             return false;
 
+        // 시작지점 건설 대기 상태로 전환한다.
         PendingAction = PendingActionType.BuildFromStart;
+
+        // 건설 선택권을 가진 플레이어를 저장한다.
         PendingPlayerIndex = playerIndex;
+
+        // 아직 특정 땅을 선택하지 않았으므로 -1로 설정한다.
         PendingCellIndex = -1;
 
+        // 서버 로그에 시작지점 건설 선택 상태를 기록한다.
         LogServer($"{playerIndex}번 플레이어가 시작지점에 도착했습니다. 보유 땅 중 건설할 땅을 선택할 수 있습니다.");
 
+        // UI 갱신을 위해 Revision 값을 증가시킨다.
         BumpRevision();
+
+        // 건설 대기 상태로 전환되었음을 반환한다.
         return true;
     }
 
+    /// <summary>
+    /// 플레이어가 소유한 땅 중 현재 건설 가능한 땅이 하나라도 있는지 확인한다.
+    /// 
+    /// 시작지점 도착 시 건설 패널을 열지 말지 판단할 때 사용된다.
+    /// </summary>
     private bool HasAnyBuildableOwnedLand(int playerIndex)
     {
+        // 보드 정보가 없으면 검사할 수 없다.
         if (board == null)
             return false;
 
+        // 모든 보드 칸을 순회한다.
         for (int i = 0; i < board.CellCount && i < MaxCells; i++)
         {
+            // 현재 칸이 해당 플레이어 소유가 아니면 넘어간다.
             if (LandOwnerByCell.Get(i) != playerIndex)
                 continue;
 
+            // 해당 칸에 건설 가능한 건물이 하나라도 있으면 true.
             if (CanBuildAnyOnCell(playerIndex, i))
                 return true;
         }
 
+        // 소유한 땅 중 건설 가능한 곳이 없다.
         return false;
     }
 
+    /// <summary>
+    /// 현재 건설 상태에서 작은집 / 집까지만 허용해야 하는지 판단한다.
+    /// 
+    /// 규칙:
+    /// 1. 땅 구매 직후 초기 건설은 항상 작은집 / 집만 가능하다.
+    /// 2. 인수 후 추가 건설은 한 바퀴 전이면 작은집 / 집만 가능하다.
+    /// 3. 시작지점 건설은 한 바퀴 이상 돈 상태에서만 열리므로 전체 건설 가능하다.
+    /// </summary>
     private bool IsBuildRestrictedToSmallHouseAndHouse(int playerIndex)
     {
+        // 플레이어가 유효하지 않으면 안전하게 제한 상태로 처리한다.
         if (!IsValidAlivePlayer(playerIndex))
             return true;
 
@@ -2220,24 +2371,40 @@ public class BulmabulGameState : NetworkBehaviour
         return false;
     }
 
+    /// <summary>
+    /// 지정한 건설 제한 규칙을 기준으로 해당 땅에 건설 가능한 건물이 하나라도 있는지 확인한다.
+    /// 
+    /// onlySmallHouseAndHouse가 true이면 작은집 / 집만 검사하고,
+    /// false이면 작은집 / 집 / 큰집 / 호텔까지 검사한다.
+    /// </summary>
     private bool CanBuildAnyOnCellWithRule(int playerIndex, int cellIndex, bool onlySmallHouseAndHouse)
     {
+        // 플레이어가 유효하지 않으면 건설 불가.
         if (!IsValidAlivePlayer(playerIndex))
             return false;
 
+        // 보드가 없으면 건설 불가.
         if (board == null)
             return false;
 
+        // 칸 인덱스가 보드 범위를 벗어나면 건설 불가.
         if (cellIndex < 0 || cellIndex >= board.CellCount || cellIndex >= MaxCells)
             return false;
 
+        // 본인 소유 땅이 아니면 건설 불가.
         if (LandOwnerByCell.Get(cellIndex) != playerIndex)
             return false;
 
+        // 건설 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(cellIndex);
+
+        // 플레이어의 현재 재화 정보를 가져온다.
         PlayerGameSlot player = Players.Get(playerIndex);
+
+        // 현재 해당 땅에 지어진 건물 상태를 가져온다.
         int flags = LandBuildingFlagsByCell.Get(cellIndex);
 
+        // 실제 건설 가능 여부는 BulmabulLandSystem에서 판단한다.
         return BulmabulLandSystem.CanBuildAny(
             cell,
             flags,
@@ -2246,10 +2413,17 @@ public class BulmabulGameState : NetworkBehaviour
         );
     }
 
+    /// <summary>
+    /// 현재 PendingAction 상태를 기준으로 해당 땅에 건설 가능한 건물이 하나라도 있는지 확인한다.
+    /// 
+    /// 구매 직후, 인수 후, 시작지점 건설 상태에 따라 건설 제한 범위가 달라진다.
+    /// </summary>
     private bool CanBuildAnyOnCell(int playerIndex, int cellIndex)
     {
+        // 현재 상태에서 작은집 / 집까지만 허용되는지 확인한다.
         bool onlySmallHouseAndHouse = IsBuildRestrictedToSmallHouseAndHouse(playerIndex);
 
+        // 현재 건설 제한 규칙을 적용해 건설 가능 여부를 확인한다.
         return CanBuildAnyOnCellWithRule(
             playerIndex,
             cellIndex,
@@ -2257,26 +2431,48 @@ public class BulmabulGameState : NetworkBehaviour
         );
     }
 
+    /// <summary>
+    /// 특정 건물 하나를 실제로 지을 수 있는지 확인한다.
+    /// 
+    /// 검사 항목:
+    /// 1. 플레이어 유효성
+    /// 2. 보드 유효성
+    /// 3. 칸 인덱스 범위
+    /// 4. 본인 소유 여부
+    /// 5. 현재 건설 상태에 따른 제한 규칙
+    /// 6. 재화, 선행 건물, 중복 건설 여부
+    /// </summary>
     private bool CanBuildPart(int playerIndex, int cellIndex, BulmabulBuildPart part)
     {
+        // 플레이어가 유효하지 않으면 건설 불가.
         if (!IsValidAlivePlayer(playerIndex))
             return false;
 
+        // 보드가 없으면 건설 불가.
         if (board == null)
             return false;
 
+        // 칸 인덱스가 보드 범위를 벗어나면 건설 불가.
         if (cellIndex < 0 || cellIndex >= board.CellCount || cellIndex >= MaxCells)
             return false;
 
+        // 본인 소유 땅이 아니면 건설 불가.
         if (LandOwnerByCell.Get(cellIndex) != playerIndex)
             return false;
 
+        // 건설 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(cellIndex);
+
+        // 플레이어 재화 정보를 가져온다.
         PlayerGameSlot player = Players.Get(playerIndex);
+
+        // 현재 건물 상태를 가져온다.
         int flags = LandBuildingFlagsByCell.Get(cellIndex);
 
+        // 현재 상태에서 작은집 / 집까지만 허용되는지 확인한다.
         bool onlySmallHouseAndHouse = IsBuildRestrictedToSmallHouseAndHouse(playerIndex);
 
+        // 실제 건설 가능 여부는 BulmabulLandSystem에서 판단한다.
         return BulmabulLandSystem.CanBuild(
             cell,
             flags,
@@ -2286,140 +2482,217 @@ public class BulmabulGameState : NetworkBehaviour
         );
     }
 
+    /// <summary>
+    /// 시작지점 건설 상태에서, 플레이어가 건설할 보유 땅을 선택하는 RPC.
+    /// 
+    /// 흐름:
+    /// 1. StateAuthority 서버에서만 처리
+    /// 2. 현재 상태가 BuildFromStart인지 확인
+    /// 3. 요청자가 실제 건설 선택권을 가진 플레이어인지 검증
+    /// 4. 선택한 땅이 실제로 건설 가능한지 확인
+    /// 5. PendingCellIndex에 선택한 땅을 저장
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestSelectBuildTarget(int cellIndex, RpcInfo info = default)
     {
+        // 네트워크 상태 변경은 반드시 StateAuthority에서만 처리한다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 시작지점 건설 상태가 아니면 땅 선택 요청을 무시한다.
         if (PendingAction != PendingActionType.BuildFromStart)
             return;
 
+        // 건설 선택권을 가진 플레이어가 유효한지 확인한다.
         if (!IsValidAlivePlayer(PendingPlayerIndex))
             return;
 
+        // 현재 건설 선택권을 가진 플레이어 정보를 가져온다.
         PlayerGameSlot player = Players.Get(PendingPlayerIndex);
 
+        // RPC를 보낸 클라이언트가 실제 선택권을 가진 플레이어인지 검증한다.
         if (info.Source != player.player)
             return;
 
+        // 선택한 땅이 실제로 건설 가능한 땅인지 확인한다.
         if (!CanBuildAnyOnCell(PendingPlayerIndex, cellIndex))
             return;
 
+        // 선택한 땅을 현재 건설 대상 칸으로 저장한다.
         PendingCellIndex = cellIndex;
 
+        // 선택한 땅 정보를 로그로 남긴다.
         BulmabulCellData cell = board.GetCell(cellIndex);
         LogServer($"{PendingPlayerIndex}번 플레이어가 건설 대상 땅으로 {cell.cellName} 선택");
 
+        // UI와 클라이언트 상태 갱신을 위해 Revision 값을 증가시킨다.
         BumpRevision();
     }
 
+    /// <summary>
+    /// 현재 건설 대기 상태에서 특정 건물을 건설하는 RPC.
+    /// 
+    /// 처리 가능한 상태:
+    /// 1. InitialBuildAfterBuy - 땅 구매 직후 초기 건설
+    /// 2. BuildFromStart - 시작지점 도착 후 보유 땅 건설
+    /// 3. BuildAfterTakeOver - 상대 땅 인수 후 추가 건설
+    /// 
+    /// 건설 후에도 추가 건설이 가능하면 패널을 유지하고,
+    /// 더 이상 지을 수 없으면 턴을 종료한다.
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestBuild(int buildPartInt, RpcInfo info = default)
     {
+        // 네트워크 상태 변경은 반드시 StateAuthority에서만 처리한다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 현재 건설 가능한 상태가 아니면 요청을 무시한다.
         if (PendingAction != PendingActionType.InitialBuildAfterBuy &&
             PendingAction != PendingActionType.BuildFromStart &&
             PendingAction != PendingActionType.BuildAfterTakeOver)
             return;
 
+        // 건설 선택권을 가진 플레이어가 유효한지 확인한다.
         if (!IsValidAlivePlayer(PendingPlayerIndex))
             return;
 
+        // 현재 건설 선택권을 가진 플레이어 정보를 가져온다.
         PlayerGameSlot player = Players.Get(PendingPlayerIndex);
 
+        // RPC를 보낸 클라이언트가 실제 건설 선택권을 가진 플레이어인지 검증한다.
         if (info.Source != player.player)
             return;
 
+        // 건설 대상 땅이 아직 선택되지 않았다면 처리하지 않는다.
         if (PendingCellIndex < 0)
             return;
 
+        // int 값으로 전달된 건물 타입을 enum으로 변환한다.
         BulmabulBuildPart part = (BulmabulBuildPart)buildPartInt;
 
+        // 현재 규칙상 해당 건물을 실제로 지을 수 있는지 확인한다.
         if (!CanBuildPart(PendingPlayerIndex, PendingCellIndex, part))
             return;
 
+        // 건설 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(PendingCellIndex);
 
+        // 칸 데이터가 없으면 처리하지 않는다.
         if (cell == null)
             return;
 
+        // 건설 비용을 가져온다.
         int cost = BulmabulLandSystem.GetBuildCost(cell, part);
+
+        // 건설 후 저장할 플래그 값을 가져온다.
         int flag = BulmabulLandSystem.GetBuildFlag(part);
 
+        // 플레이어 재화에서 건설 비용을 차감한다.
         player.cash -= cost;
 
+        // 현재 땅의 건물 플래그를 가져온다.
         int flags = LandBuildingFlagsByCell.Get(PendingCellIndex);
+
+        // 새 건물 플래그를 추가한다.
         flags = BulmabulBuildFlags.Add(flags, flag);
 
+        // 변경된 플레이어 재화 정보를 네트워크 배열에 반영한다.
         Players.Set(PendingPlayerIndex, player);
+
+        // 변경된 건물 상태를 네트워크 배열에 반영한다.
         LandBuildingFlagsByCell.Set(PendingCellIndex, flags);
 
+        // 서버 로그에 건설 내용을 기록한다.
         LogServer($"{PendingPlayerIndex}번 플레이어가 {cell.cellName}에 {BulmabulLandSystem.GetBuildName(part)} 건설. 비용 {cost:N0}");
 
+        // 건설 후에도 Pending 값을 초기화하기 전에 현재 플레이어와 땅 인덱스를 저장한다.
         int finishedPlayer = PendingPlayerIndex;
         int builtCellIndex = PendingCellIndex;
 
         /*
          * 중요:
-         * 건물 하나 짓고 바로 턴을 넘기면 안 된다.
+         * 건물 하나를 지었다고 바로 턴을 넘기면 안 된다.
          *
-         * 구매 직후:
-         * - 작은집 / 집 둘 다 가능하면 계속 패널 유지
-         *
-         * 시작지점 건설:
-         * - 작은집 / 집 / 큰집까지 가능하면 계속 패널 유지
-         * - 작은집 + 집 + 큰집이 모두 있으면 호텔까지 가능
+         * 예:
+         * - 구매 직후 작은집을 지었고, 집도 지을 수 있으면 패널 유지
+         * - 시작지점에서 작은집 → 집 → 큰집 순서로 계속 지을 수 있으면 패널 유지
+         * - 작은집 + 집 + 큰집이 모두 있으면 호텔 건설 가능
+         * - 인수 후에도 기존 건물을 유지한 상태에서 추가 건설 가능하면 패널 유지
          */
         if (CanBuildAnyOnCell(finishedPlayer, builtCellIndex))
         {
+            // 같은 플레이어가 같은 땅에 계속 추가 건설할 수 있도록 Pending 정보를 유지한다.
             PendingPlayerIndex = finishedPlayer;
             PendingCellIndex = builtCellIndex;
 
+            // 추가 건설 가능 로그를 남긴다.
             LogServer($"{finishedPlayer}번 플레이어가 {cell.cellName}에 추가 건설을 할 수 있습니다.");
 
+            // UI 갱신을 위해 Revision 값을 증가시킨다.
             BumpRevision();
             return;
         }
 
+        // 더 이상 건설할 수 있는 건물이 없으면 건설 상태를 종료한다.
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
 
+        // 건설 이후 턴 종료 처리.
+        // 더블 여부는 PendingWasDouble 값에 따라 FinishTurnAfterAction 내부에서 처리된다.
         FinishTurnAfterAction(finishedPlayer, PendingWasDouble);
+
+        // UI와 클라이언트 상태 갱신을 위해 Revision 값을 증가시킨다.
         BumpRevision();
     }
 
+    /// <summary>
+    /// 현재 건설 대기 상태에서 건설을 하지 않고 넘기는 RPC.
+    /// 
+    /// 구매 직후 건설, 시작지점 건설, 인수 후 추가 건설 상태에서 사용할 수 있다.
+    /// 건설을 스킵하면 Pending 상태를 초기화하고 턴 흐름을 이어간다.
+    /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestSkipBuild(RpcInfo info = default)
     {
+        // 네트워크 상태 변경은 반드시 StateAuthority에서만 처리한다.
         if (!Object.HasStateAuthority)
             return;
 
+        // 현재 건설 가능한 상태가 아니면 스킵 요청을 무시한다.
         if (PendingAction != PendingActionType.InitialBuildAfterBuy &&
             PendingAction != PendingActionType.BuildFromStart &&
             PendingAction != PendingActionType.BuildAfterTakeOver)
             return;
 
+        // 건설 선택권을 가진 플레이어가 유효한지 확인한다.
         if (!IsValidAlivePlayer(PendingPlayerIndex))
             return;
 
+        // 현재 건설 선택권을 가진 플레이어 정보를 가져온다.
         PlayerGameSlot player = Players.Get(PendingPlayerIndex);
 
+        // RPC를 보낸 클라이언트가 실제 건설 선택권을 가진 플레이어인지 검증한다.
         if (info.Source != player.player)
             return;
 
+        // 턴 종료 처리 전에 현재 플레이어 인덱스를 저장한다.
         int finishedPlayer = PendingPlayerIndex;
 
+        // 서버 로그에 건설 스킵 내용을 기록한다.
         LogServer($"{finishedPlayer}번 플레이어가 건설을 하지 않고 넘겼습니다.");
 
+        // 건설 대기 상태를 초기화한다.
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
 
+        // 건설을 하지 않았으므로 바로 턴 종료 처리.
+        // 더블 여부는 PendingWasDouble 값에 따라 처리된다.
         FinishTurnAfterAction(finishedPlayer, PendingWasDouble);
+
+        // UI와 클라이언트 상태 갱신을 위해 Revision 값을 증가시킨다.
         BumpRevision();
     }
 
@@ -2498,13 +2771,20 @@ public class BulmabulGameState : NetworkBehaviour
         PendingCellIndex = -1;
 
         /*
-         * 주사위로 여행 칸에 도착한 경우:
-         * 더블이면 FinishTurnAfterAction 내부에서 한 번 더 굴릴 수 있게 처리.
+         * 여행 비용 선택 후 턴 처리
          *
-         * 카드로 여행 칸에 이동한 경우:
-         * CoResolveMoveToTravelByCard에서 PendingWasDouble = false로 세팅해야 함.
+         * Yes:
+         * - 비용을 지불하고 다음 자기 턴에 목적지 선택권을 얻는다.
+         * - 더블이었어도 여기서는 추가 주사위를 주지 않고 턴을 넘긴다.
+         *
+         * No:
+         * - 여행을 취소한다.
+         * - 주사위 이동으로 왔고 더블이었다면 다시 주사위 팝업이 열린다.
+         * - 더블이 아니면 턴을 넘긴다.
          */
-        FinishTurnAfterAction(playerIndex, wasDouble);
+        bool giveDoubleTurn = !payTravelCost && wasDouble;
+
+        FinishTurnAfterAction(playerIndex, giveDoubleTurn);
 
         BumpRevision();
     }
@@ -2688,9 +2968,13 @@ public class BulmabulGameState : NetworkBehaviour
     /// <summary>
     /// MoveToTravelCard 사용 처리.
     /// 
-    /// 찬스 카드로 얻은 여행 티켓은 무료 여행권이다.
-    /// 내 말을 여행 칸으로 이동시킨 뒤,
-    /// 여행 비용 없이 다음 자기 턴에 목적지를 선택할 수 있게 한다.
+    /// 여행 카드는 목적지를 바로 고르는 카드가 아니다.
+    /// 먼저 내 말을 여행 칸으로 이동시키고,
+    /// 여행 칸 도착 효과를 실행해서 TravelPopup을 연다.
+    /// 
+    /// TravelPopup에서 Yes를 누르면 비용 차감 + 다음 자기 턴 목적지 선택권 지급.
+    /// TravelPopup에서 No를 누르면 여행 취소.
+    /// 카드 사용 이동은 주사위 더블과 관계없는 행동이므로 PendingWasDouble은 false로 둔다.
     /// </summary>
     private IEnumerator CoResolveMoveToTravelByCard(int playerIndex, int travelCellIndex)
     {
@@ -2700,7 +2984,7 @@ public class BulmabulGameState : NetworkBehaviour
         PlayerGameSlot actor = Players.Get(playerIndex);
         int fromIndex = actor.tileIndex;
 
-        LogServer($"{playerIndex}번 플레이어가 여행 티켓을 사용하여 여행 칸으로 이동합니다.");
+        LogServer($"{playerIndex}번 플레이어가 여행 카드를 사용하여 여행 칸으로 이동합니다.");
 
         RPC_PlayDirectMoveVisual(playerIndex, fromIndex, travelCellIndex);
 
@@ -2709,23 +2993,27 @@ public class BulmabulGameState : NetworkBehaviour
 
         actor = Players.Get(playerIndex);
         actor.tileIndex = travelCellIndex;
-
-        /*
-         * 핵심:
-         * 여행 티켓은 무료이므로 ApplyTravel()을 호출하지 않는다.
-         * ApplyTravel()은 일반 주사위 여행 칸 도착용이며,
-         * 여행 비용 결제 팝업을 여는 함수다.
-         */
-        actor.hasTravelDestinationReady = true;
+        actor.hasTravelDestinationReady = false;
         actor.travelCost = 0;
 
         Players.Set(playerIndex, actor);
 
-        LogServer($"{playerIndex}번 플레이어가 여행 티켓으로 무료 여행 선택권을 얻었습니다. 다음 자기 턴에 목적지를 선택할 수 있습니다.");
-
         /*
-         * 여행 티켓 사용은 주사위 행동 대신 사용한 것으로 보고 턴 종료.
+         * 카드로 여행 칸에 이동한 경우에도 여행 칸 도착 처리를 실행한다.
+         * ApplyTravel()이 실행되면서 TravelCostChoice 상태가 되고,
+         * BulmabulTravelCostPopup이 켜진다.
          */
+        PendingWasDouble = false;
+
+        bool waitsForChoice = ResolveLanding(playerIndex, travelCellIndex);
+
+        if (waitsForChoice)
+        {
+            TurnBusy = false;
+            BumpRevision();
+            yield break;
+        }
+
         AdvanceTurn();
 
         TurnBusy = false;
@@ -4323,6 +4611,24 @@ public class BulmabulGameState : NetworkBehaviour
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// 로컬 플레이어의 현재 보드 칸 인덱스.
+    /// 여행 목적지 목록에서 현재 칸을 제외할 때 사용한다.
+    /// </summary>
+    public int GetLocalPlayerCellIndex()
+    {
+        if (Runner == null)
+            return -1;
+
+        int idx = FindPlayerIndex(Runner.LocalPlayer);
+
+        if (!IsValidAlivePlayer(idx))
+            return -1;
+
+        PlayerGameSlot slot = Players.Get(idx);
+        return slot.tileIndex;
     }
 
     private int FindFirstAlivePlayerIndex()

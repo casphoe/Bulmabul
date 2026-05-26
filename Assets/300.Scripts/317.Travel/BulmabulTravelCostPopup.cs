@@ -3,15 +3,17 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 여행 칸 도착 시 여행 비용을 지불할지 묻는 팝업.
+/// 여행 칸 도착 시 비용을 지불할지 묻는 팝업.
 /// 
-/// 확인:
+/// Yes:
 /// - 여행 비용 차감
-/// - 다음 턴 목적지 선택권 지급
+/// - 다음 자기 턴에 목적지 선택 가능
+/// - 더블이어도 추가 주사위 없이 턴 종료
 /// 
-/// 취소:
+/// No:
 /// - 비용 차감 없음
-/// - 목적지 선택권 없음
+/// - 더블이면 다시 주사위 가능
+/// - 더블이 아니면 턴 종료
 /// </summary>
 public class BulmabulTravelCostPopup : MonoBehaviour
 {
