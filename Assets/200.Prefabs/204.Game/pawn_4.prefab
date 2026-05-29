@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 6502406353352374816}
   - component: {fileID: 7095668045046690037}
   - component: {fileID: 2744590232261824030}
+  - component: {fileID: 4854989634951468855}
   m_Layer: 0
   m_Name: pawn_4
   m_TagString: Untagged
@@ -83,3 +84,25 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &4854989634951468855
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1409550633501374990}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1a9a91e35cfa0247a68591d831e9ac8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  localOffset: {x: 0, y: 4, z: 0}
+  font: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  fontSize: 5
+  textWidth: 15
+  textHeight: 3
+  duration: 1.15
+  riseDistance: 1.2
+  stackGap: 0.35
+  lookAtCamera: 1
+  sortingOrder: 300

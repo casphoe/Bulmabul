@@ -32,7 +32,7 @@ public class BulmabulTravelTargetPopup : MonoBehaviour
     [SerializeField] private bool includeSpecialCells = true;
 
     [Tooltip("false면 현재 서 있는 여행 칸은 목록에서 제외")]
-    [SerializeField] private bool includeCurrentCell = false;
+    [SerializeField] private bool includeCurrentCell = true;
 
     public bool IsOpen => root != null ? root.activeSelf : gameObject.activeSelf;
 

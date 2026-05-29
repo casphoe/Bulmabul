@@ -35,10 +35,16 @@ public class BulmabulTravelCostPopup : MonoBehaviour
     private void Awake()
     {
         if (btnOk != null)
+        {
+            btnOk.onClick.RemoveListener(OnClickOk);
             btnOk.onClick.AddListener(OnClickOk);
+        }
 
         if (btnCancel != null)
+        {
+            btnCancel.onClick.RemoveListener(OnClickCancel);
             btnCancel.onClick.AddListener(OnClickCancel);
+        }
 
         Hide();
     }
@@ -71,6 +77,8 @@ public class BulmabulTravelCostPopup : MonoBehaviour
 
         if (root != null)
             root.SetActive(true);
+        else
+            gameObject.SetActive(true);
 
         RefreshText(state);
     }
@@ -81,6 +89,8 @@ public class BulmabulTravelCostPopup : MonoBehaviour
 
         if (root != null)
             root.SetActive(false);
+        else
+            gameObject.SetActive(false);
     }
 
     private void RefreshText(BulmabulGameState state)
@@ -94,10 +104,10 @@ public class BulmabulTravelCostPopup : MonoBehaviour
             txtMessage.text = state != null ? state.GetPendingTravelCostInfoText() : "";
 
         if (txtOkButton != null)
-            txtOkButton.text = eng ? "OK" : "확인";
+            txtOkButton.text = eng ? "Travel" : "여행하기";
 
         if (txtCancelButton != null)
-            txtCancelButton.text = eng ? "Cancel" : "취소";
+            txtCancelButton.text = eng ? "Cancel Travel" : "여행 취소";
     }
 
     private void OnClickOk()

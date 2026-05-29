@@ -88,7 +88,7 @@ public class BulmabulTravelTargetItem : InfiniteScrollItem
 
         if (txtButton != null)
         {
-            txtButton.text = eng ? "Travel" : "이동";
+            txtButton.text = eng ? "Travel" : "여행하기";
         }
     }
 

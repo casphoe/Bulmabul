@@ -105,10 +105,35 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
             return;
         }
 
+        if (gameState.PendingActionInt != (int)BulmabulGameState.PendingActionType.None)
+        {
+            ShowToast("선택 대기 중에는 테스트 이동할 수 없습니다.", "Cannot debug move while waiting for a choice.");
+            return;
+        }
+
         if (!gameState.IsMyTurn())
         {
             ShowToast("테스트 이동은 내 턴에만 가능합니다.", "Debug move is only allowed on your turn.");
             return;
+        }
+
+        int localIndex = gameState.FindPlayerIndex(Runner.LocalPlayer);
+
+        if (localIndex >= 0)
+        {
+            var localSlot = gameState.Players.Get(localIndex);
+
+            if (localSlot.isInJail)
+            {
+                ShowToast("감옥 상태에서는 테스트 이동할 수 없습니다.", "Cannot debug move while in jail.");
+                return;
+            }
+
+            if (localSlot.hasTravelDestinationReady)
+            {
+                ShowToast("여행 목적지를 먼저 선택해야 합니다.", "Choose your travel destination first.");
+                return;
+            }
         }
 
         RPC_RequestDebugMove((int)moveType, resolveLanding);
@@ -128,6 +153,9 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
         if (gameState.GameFinished || gameState.IsPaused || gameState.TurnBusy)
             return;
 
+        if (gameState.PendingActionInt != (int)BulmabulGameState.PendingActionType.None)
+            return;
+
         int playerIndex = gameState.FindPlayerIndex(info.Source);
 
         if (!IsValidAlivePlayer(playerIndex))
@@ -136,6 +164,20 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
         if (gameState.CurrentTurnIndex != playerIndex)
         {
             Debug.Log("[BulmabulDebugMoveTester] 테스트 이동은 현재 턴 플레이어만 사용할 수 있습니다.");
+            return;
+        }
+
+        var currentSlot = gameState.Players.Get(playerIndex);
+
+        if (currentSlot.isInJail)
+        {
+            Debug.Log("[BulmabulDebugMoveTester] 감옥 상태에서는 테스트 이동할 수 없습니다.");
+            return;
+        }
+
+        if (currentSlot.hasTravelDestinationReady)
+        {
+            Debug.Log("[BulmabulDebugMoveTester] 여행 목적지 선택 대기 중에는 테스트 이동할 수 없습니다.");
             return;
         }
 
@@ -148,7 +190,13 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
             return;
         }
 
-        gameState.MovePlayerToCellByChanceCardForAuthority(playerIndex, targetCellIndex, shouldResolveLanding);
+        bool started = gameState.MovePlayerToCellByDebugForAuthority(playerIndex, targetCellIndex, true);
+
+        if (!started)
+        {
+            Debug.Log("[BulmabulDebugMoveTester] 테스트 이동 시작 실패");
+            return;
+        }
 
         BulmabulCellData cell = board.GetCell(targetCellIndex);
         string cellName = cell != null ? cell.cellName : targetCellIndex.ToString();

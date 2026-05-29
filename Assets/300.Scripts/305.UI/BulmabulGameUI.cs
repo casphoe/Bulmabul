@@ -151,8 +151,6 @@ public class BulmabulGameUI : MonoBehaviour
     [SerializeField] private Button[] btnBuildTargets;
 
     [Header("Travel UI")]
-    [Tooltip("여행권이 있을 때 표시되는 여행 이동 버튼")]
-    [SerializeField] private Button btnTravelMove;
 
     [Tooltip("GPM InfiniteScroll 기반 여행 목적지 선택 팝업")]
     [SerializeField] private BulmabulTravelTargetPopup travelTargetPopup;
@@ -528,12 +526,6 @@ public class BulmabulGameUI : MonoBehaviour
         {
             btnSkipBuild.onClick.RemoveListener(OnClickSkipBuild);
             btnSkipBuild.onClick.AddListener(OnClickSkipBuild);
-        }
-
-        if (btnTravelMove != null)
-        {
-            btnTravelMove.onClick.RemoveListener(OnClickTravelMove);
-            btnTravelMove.onClick.AddListener(OnClickTravelMove);
         }
 
         if (btnPauseResume != null)
@@ -945,12 +937,6 @@ public class BulmabulGameUI : MonoBehaviour
                     diceControlPanel.SetActive(false);
             }
 
-            if (btnTravelMove != null)
-            {
-                btnTravelMove.gameObject.SetActive(false);
-                btnTravelMove.interactable = false;
-            }
-
             return;
         }
 
@@ -968,13 +954,6 @@ public class BulmabulGameUI : MonoBehaviour
         {
             if (!_diceControlOpen && !_waitingRollStateChange)
                 OpenDiceControlPanel();
-        }
-
-        if (btnTravelMove != null)
-        {
-            bool canTravel = state.CanLocalUseTravel();
-            btnTravelMove.gameObject.SetActive(canTravel);
-            btnTravelMove.interactable = canTravel;
         }
     }
 
@@ -1137,27 +1116,28 @@ public class BulmabulGameUI : MonoBehaviour
     }
 
     /// <summary>
-    /// 여행 이동 UI 갱신.
-    /// 여행 비용을 지불한 다음 자기 턴이 되면
-    /// GPM InfiniteScroll 기반 목적지 선택 팝업을 자동으로 연다.
+    /// 여행 목적지 선택 UI 갱신.
+    /// 여행권이 준비되어 있고, 실제로 내 턴에 여행 이동이 가능한 상태일 때만
+    /// GPM InfiniteScroll 목적지 팝업을 자동으로 연다.
+    /// 
+    /// 카드 인벤토리에서 여행 카드를 사용한 직후에는 열리면 안 된다.
+    /// 카드 사용 후 여행 칸으로 이동하고, TravelPopup에서 Yes 처리 후
+    /// 다음 자기 턴이 되었을 때만 열린다.
     /// </summary>
     private void RefreshTravelUI(BulmabulGameState state)
     {
         bool canTravel = state != null && state.CanLocalUseTravel();
 
-        if (btnTravelMove != null)
-        {
-            btnTravelMove.gameObject.SetActive(canTravel);
-            btnTravelMove.interactable = canTravel;
-        }
-
         if (!canTravel)
         {
             _lastTravelReady = false;
+
+            if (travelTargetPopup != null && travelTargetPopup.IsOpen)
+                travelTargetPopup.Close();
+
             return;
         }
 
-        // 여행 가능 상태가 처음 켜진 순간에만 자동 오픈
         if (!_lastTravelReady)
         {
             _lastTravelReady = true;
@@ -1865,20 +1845,6 @@ public class BulmabulGameUI : MonoBehaviour
         if (state == null) return;
 
         state.RequestSelectBuildTargetLocal(cellIndex);
-    }
-
-    private void OnClickTravelMove()
-    {
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        if (state == null)
-            return;
-
-        if (!state.CanLocalUseTravel())
-            return;
-
-        if (travelTargetPopup != null)
-            travelTargetPopup.Open();
     }
 
     private void OnClickPauseResume()

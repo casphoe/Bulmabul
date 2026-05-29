@@ -136,6 +136,16 @@ public class BulmabulPawnMover : MonoBehaviour
 
             pawnVisuals[i] = pawnObj.transform;
 
+            PawnFloatingText floatingText = pawnObj.GetComponent<PawnFloatingText>();
+            if (floatingText == null)
+                floatingText = pawnObj.AddComponent<PawnFloatingText>();
+
+            // 플레이어 이름보다 Y값 1.5 정도 위에 나오게 조정
+            floatingText.localOffset = new Vector3(0f, nameTextYOffset + 1.5f, 0f);
+
+            // Pawn 이름 폰트가 있으면 같은 폰트 사용
+            floatingText.font = pawnNameFont;
+
             EnsureNameTextCreated(i, pawnVisuals[i]);
             RefreshNameText(i);
         }
@@ -153,6 +163,13 @@ public class BulmabulPawnMover : MonoBehaviour
         {
             if (pawnVisuals[i] == null)
                 continue;
+
+            PawnFloatingText floatingText = pawnVisuals[i].GetComponent<PawnFloatingText>();
+            if (floatingText == null)
+                floatingText = pawnVisuals[i].gameObject.AddComponent<PawnFloatingText>();
+
+            floatingText.localOffset = new Vector3(0f, nameTextYOffset + 1.5f, 0f);
+            floatingText.font = pawnNameFont;
 
             pawnVisuals[i].position = GetPawnWorldPosition(0, i);
             UpdateNameTextPosition(i);

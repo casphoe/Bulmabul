@@ -975,11 +975,11 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 보관 중인 여행권 카드를 사용한다.
-    /// 
-    /// 목적지로 바로 이동하지 않는다.
-    /// 내 말을 여행 칸으로 이동시키는 요청이다.
-    /// 실제 카드 제거는 BulmabulChanceInventory에서 처리된다.
+    /// 보관 중인 여행 카드를 사용한다.
+    ///
+    /// 찬스 칸에서 얻은 여행 카드를 카드 인벤토리에서 사용하면,
+    /// 목적지로 바로 이동하지 않고 먼저 여행 칸으로 이동한다.
+    /// 여행 칸 이동 후 다음 자기 턴에 목적지 선택 팝업이 열린다.
     /// </summary>
     public bool RequestUseTravelTicketCardLocal()
     {
@@ -1060,6 +1060,19 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
+        if (current.isInJail)
+        {
+            OpenJailChoicePending(CurrentTurnIndex);
+            return;
+        }
+
+        if (current.hasTravelDestinationReady)
+        {
+            LogServer($"{CurrentTurnIndex}번 플레이어는 여행 목적지를 먼저 선택해야 합니다.");
+            BumpRevision();
+            return;
+        }
+
         parityChoiceInt = Mathf.Clamp(parityChoiceInt, 0, 2);
         gaugePermille = Mathf.Clamp(gaugePermille, 0, 1000);
 
@@ -1104,8 +1117,14 @@ public class BulmabulGameState : NetworkBehaviour
 
         LogServer($"{actorName}님 주사위: {roll.left}, {roll.right} / 이동 {roll.sum}칸{controlText}");
 
+        RPC_ShowPawnFloatingText(
+            turnIndex,
+            $"이동 {roll.sum}칸",
+            $"Move {roll.sum} spaces",
+            0
+        );
+
         // 모든 클라이언트에 주사위 결과를 전달한다.
-        // 각 클라이언트의 DiceRollingUI가 이 결과를 받아 최종 값으로 멈춘다.
         RPC_PlayDiceVisual(roll.left, roll.right);
 
         // 주사위 UI가 완전히 끝날 때까지 기다린 뒤 Pawn 이동 시작.
@@ -1160,6 +1179,13 @@ public class BulmabulGameState : NetworkBehaviour
             Players.Set(playerIndex, actor);
 
             LogServer($"{playerIndex}번 플레이어가 시작 지점을 {passStartCount}회 통과하여 {salary:N0} 획득");
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"+{salary:N0}",
+                $"+{salary:N0}",
+                1
+            );
         }
 
         return targetIndex;
@@ -1324,8 +1350,21 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
+        int jailPlayerIndex = PendingPlayerIndex;
+
+        // 감옥 탈출 주사위 버튼을 누른 순간 팝업을 닫는다.
+        // 기존에는 CoResolveJailRollDice가 끝날 때까지 PendingAction이 JailChoice라서
+        // UI Update에서 감옥 팝업이 계속 살아있었다.
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+        PendingWasDouble = false;
+
+        BumpRevision();
+
+
         StartCoroutine(CoResolveJailRollDice(
-            PendingPlayerIndex,
+            jailPlayerIndex,
             Mathf.Clamp(parityChoiceInt, 0, 2),
             Mathf.Clamp(gaugePermille, 0, 1000)
         ));
@@ -1411,7 +1450,16 @@ public class BulmabulGameState : NetworkBehaviour
         }
 
         if (!freeEscape)
+        {
             slot.cash -= cost;
+
+            RPC_ShowPawnFloatingText(
+                PendingPlayerIndex,
+                $"-{cost:N0}",
+                $"-{cost:N0}",
+                2
+            );
+        }
 
         slot.isInJail = false;
         slot.jailTryCount = 0;
@@ -1429,6 +1477,13 @@ public class BulmabulGameState : NetworkBehaviour
             LogServer($"{finishedPlayer}번 플레이어가 5회 실패 보상으로 무료 감옥 탈출했습니다.");
         else
             LogServer($"{finishedPlayer}번 플레이어가 {cost:N0}원을 지불하고 감옥에서 탈출했습니다.");
+
+        RPC_ShowPawnFloatingText(
+            finishedPlayer,
+            "감옥 탈출",
+            "Escaped Jail",
+            4
+        );
 
         AdvanceTurn();
 
@@ -1712,6 +1767,20 @@ public class BulmabulGameState : NetworkBehaviour
 
         LogServer($"{playerIndex}번 플레이어가 {cell.cellName} 구매. 비용 {cost:N0}");
 
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"{cell.cellName} 구매",
+            $"Bought {cell.cellName}",
+            5
+        );
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"-{cost:N0}",
+            $"-{cost:N0}",
+            2
+        );
+
         BumpRevision();
         return true;
     }
@@ -1726,6 +1795,20 @@ public class BulmabulGameState : NetworkBehaviour
 
         payer.cash -= toll;
         owner.cash += toll;
+
+        RPC_ShowPawnFloatingText(
+            payerIndex,
+            $"-{toll:N0}",
+            $"-{toll:N0}",
+            2
+        );
+
+        RPC_ShowPawnFloatingText(
+            ownerIndex,
+            $"+{toll:N0}",
+            $"+{toll:N0}",
+            1
+        );
 
         if (payer.cash <= 0)
         {
@@ -1799,6 +1882,13 @@ public class BulmabulGameState : NetworkBehaviour
 
         actor.cash -= cost;
 
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"-{cost:N0}",
+            $"-{cost:N0}",
+            2
+        );
+
         if (actor.cash <= 0)
         {
             actor.cash = 0;
@@ -1851,6 +1941,13 @@ public class BulmabulGameState : NetworkBehaviour
 
         slot.cash = SafeAddCash(slot.cash, amount);
         Players.Set(playerIndex, slot);
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"+{amount:N0}",
+            $"+{amount:N0}",
+            1
+        );
 
         LogServer($"{playerIndex + 1}번 플레이어가 보너스 칸에서 {amount:N0}원을 받았습니다.");
     }
@@ -1945,18 +2042,26 @@ public class BulmabulGameState : NetworkBehaviour
 
         LogServer($"{playerIndex}번 플레이어가 {cellName} 칸에 도착하여 감옥에 갇혔습니다. 다음 자기 턴에 탈출 선택 팝업이 열립니다.");
 
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            "감옥에 갇힘",
+            "Sent to Jail",
+            3
+        );
+
         BumpRevision();
     }
 
     /// <summary>
     /// 여행 칸 도착 처리.
-    /// 
-    /// 주사위로 여행 칸에 도착해도 실행되고,
-    /// MoveToTravelCard로 여행 칸에 이동해도 실행된다.
-    /// 
-    /// 여기서 바로 돈을 빼지 않는다.
-    /// 먼저 여행 비용 결제 팝업을 열고,
-    /// 확인을 누르면 그때 비용 차감 + 다음 턴 목적지 선택권 지급.
+    ///
+    /// 주사위로 여행 칸에 도착했을 때만 실행된다.
+    /// 여기서는 바로 목적지를 고르지 않고,
+    /// 먼저 여행 비용을 낼지 / 여행을 취소할지 선택하는 팝업 상태로 들어간다.
+    ///
+    /// 주의:
+    /// 여행 카드 사용으로 여행 칸에 이동하는 경우에는 이 함수를 호출하지 않는다.
+    /// 카드 사용 이동은 CoResolveMoveToTravelByCard()에서 별도로 처리한다.
     /// </summary>
     private bool ApplyTravel(int playerIndex, int cellIndex, BulmabulCellData cell)
     {
@@ -1971,12 +2076,13 @@ public class BulmabulGameState : NetworkBehaviour
 
         OpenTravelCostPending(playerIndex, cellIndex, cell);
 
-        // 팝업 선택 대기 상태이므로 턴 진행을 멈춘다.
+        // 여행 비용 선택 팝업 대기 상태이므로 여기서 턴을 멈춘다.
         return true;
     }
 
     /// <summary>
-    /// 여행 칸 도착 후 여행 비용 결제 선택 상태를 연다.
+    /// 주사위로 여행 칸에 도착했을 때,
+    /// 여행 비용 결제 / 여행 취소 선택 상태를 연다.
     /// </summary>
     private void OpenTravelCostPending(int playerIndex, int cellIndex, BulmabulCellData cell)
     {
@@ -1985,6 +2091,10 @@ public class BulmabulGameState : NetworkBehaviour
         PendingCellIndex = cellIndex;
 
         int travelCost = cell != null ? Mathf.Max(0, cell.travelCost) : 0;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+        slot.travelCost = travelCost;
+        Players.Set(playerIndex, slot);
 
         LogServer($"{playerIndex}번 플레이어가 여행 칸에 도착했습니다. 여행 비용 {travelCost:N0} 결제 선택 대기 중.");
 
@@ -2731,7 +2841,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         int playerIndex = PendingPlayerIndex;
         bool wasDouble = PendingWasDouble;
-
         int travelCost = Mathf.Max(0, cell.travelCost);
 
         if (payTravelCost)
@@ -2740,24 +2849,51 @@ public class BulmabulGameState : NetworkBehaviour
 
             if (player.cash < travelCost)
             {
-                LogServer($"{playerIndex}번 플레이어는 여행 비용 {travelCost:N0}원이 부족해서 여행을 사용할 수 없습니다.");
+                LogServer($"{playerIndex}번 플레이어는 여행 비용 {travelCost:N0}원이 부족해서 여행을 진행할 수 없습니다.");
 
-                player.hasTravelDestinationReady = false;
-                player.travelCost = 0;
-                Players.Set(playerIndex, player);
-            }
-            else
-            {
-                player.cash -= travelCost;
-                player.hasTravelDestinationReady = true;
-                player.travelCost = 0;
+                /*
+                 * 재화 부족이면 선택 상태를 유지한다.
+                 * UI가 잠깐 닫혀도 다음 Update에서 다시 TravelCostPopup이 열린다.
+                 */
+                player.travelCost = travelCost;
                 Players.Set(playerIndex, player);
 
-                LogServer($"{playerIndex}번 플레이어가 여행 비용 {travelCost:N0}원을 지불했습니다. 다음 자기 턴에 목적지를 선택할 수 있습니다.");
+                BumpRevision();
+                return;
             }
+
+            /*
+             * 주사위로 여행 칸에 도착했고, 여행하기를 선택한 경우.
+             * 재화를 차감하고 다음 자기 턴에 목적지 선택 팝업을 열 수 있도록 예약한다.
+             */
+            player.cash -= travelCost;
+            player.hasTravelDestinationReady = true;
+            player.travelCost = 0;
+            Players.Set(playerIndex, player);
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"-{travelCost:N0}",
+                $"-{travelCost:N0}",
+                2
+            );
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                "여행 예약",
+                "Travel Reserved",
+                4
+            );
+
+            LogServer($"{playerIndex}번 플레이어가 여행 비용 {travelCost:N0}원을 지불했습니다. 다음 자기 턴에 여행 목적지를 선택합니다.");
         }
         else
         {
+            /*
+             * 여행 취소.
+             * 재화 차감 없음.
+             * 직전 주사위가 더블이면 다시 주사위를 굴릴 수 있어야 한다.
+             */
             player = Players.Get(playerIndex);
             player.hasTravelDestinationReady = false;
             player.travelCost = 0;
@@ -2771,16 +2907,15 @@ public class BulmabulGameState : NetworkBehaviour
         PendingCellIndex = -1;
 
         /*
-         * 여행 비용 선택 후 턴 처리
+         * 핵심 처리:
          *
-         * Yes:
-         * - 비용을 지불하고 다음 자기 턴에 목적지 선택권을 얻는다.
-         * - 더블이었어도 여기서는 추가 주사위를 주지 않고 턴을 넘긴다.
+         * 여행하기:
+         * - 재화를 내고 다음 자기 턴에 목적지 선택
+         * - 직전 주사위가 더블이어도 추가 주사위 없음
          *
-         * No:
-         * - 여행을 취소한다.
-         * - 주사위 이동으로 왔고 더블이었다면 다시 주사위 팝업이 열린다.
-         * - 더블이 아니면 턴을 넘긴다.
+         * 여행 취소:
+         * - 재화 차감 없음
+         * - 직전 주사위가 더블이면 다시 주사위 가능
          */
         bool giveDoubleTurn = !payTravelCost && wasDouble;
 
@@ -2910,6 +3045,13 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            "여행 카드 사용",
+            "Travel Card Used",
+            4
+        );
+
         StartCoroutine(CoResolveMoveToTravelByCard(playerIndex, travelCellIndex));
     }
 
@@ -2949,6 +3091,13 @@ public class BulmabulGameState : NetworkBehaviour
         slot.isInJail = false;
         slot.jailTryCount = 0;
 
+        RPC_ShowPawnFloatingText(
+            PendingPlayerIndex,
+            "감옥 탈출 카드 사용",
+            "Jail Escape Card Used",
+            4
+        );
+
         Players.Set(PendingPlayerIndex, slot);
 
         int finishedPlayer = PendingPlayerIndex;
@@ -2966,15 +3115,16 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// MoveToTravelCard 사용 처리.
-    /// 
-    /// 여행 카드는 목적지를 바로 고르는 카드가 아니다.
-    /// 먼저 내 말을 여행 칸으로 이동시키고,
-    /// 여행 칸 도착 효과를 실행해서 TravelPopup을 연다.
-    /// 
-    /// TravelPopup에서 Yes를 누르면 비용 차감 + 다음 자기 턴 목적지 선택권 지급.
-    /// TravelPopup에서 No를 누르면 여행 취소.
-    /// 카드 사용 이동은 주사위 더블과 관계없는 행동이므로 PendingWasDouble은 false로 둔다.
+    /// 여행 카드 사용 처리.
+    ///
+    /// 찬스 칸에서 얻은 여행 카드를 카드 인벤토리에서 사용하면,
+    /// Pawn을 여행 칸으로 이동시킨다.
+    ///
+    /// 중요:
+    /// - 카드 사용 이동은 여행 비용 팝업을 띄우지 않는다.
+    /// - ResolveLanding()을 호출하지 않는다.
+    /// - 여행 칸으로 이동한 뒤 현재 턴을 종료한다.
+    /// - 다음 자기 턴에 travelTargetPopup이 자동으로 열린다.
     /// </summary>
     private IEnumerator CoResolveMoveToTravelByCard(int playerIndex, int travelCellIndex)
     {
@@ -2993,37 +3143,39 @@ public class BulmabulGameState : NetworkBehaviour
 
         actor = Players.Get(playerIndex);
         actor.tileIndex = travelCellIndex;
-        actor.hasTravelDestinationReady = false;
-        actor.travelCost = 0;
 
+        /*
+         * 여행 카드 효과.
+         * 카드 사용자는 비용 결제 없이 다음 자기 턴에 목적지 선택 팝업을 띄운다.
+         */
+        actor.hasTravelDestinationReady = true;
+        actor.travelCost = 0;
         Players.Set(playerIndex, actor);
 
         /*
-         * 카드로 여행 칸에 이동한 경우에도 여행 칸 도착 처리를 실행한다.
-         * ApplyTravel()이 실행되면서 TravelCostChoice 상태가 되고,
-         * BulmabulTravelCostPopup이 켜진다.
+         * 카드 이동에서는 여행 칸 도착 효과를 실행하지 않는다.
+         * 즉, ApplyTravel() / TravelCostPopup을 열면 안 된다.
          */
         PendingWasDouble = false;
-
-        bool waitsForChoice = ResolveLanding(playerIndex, travelCellIndex);
-
-        if (waitsForChoice)
-        {
-            TurnBusy = false;
-            BumpRevision();
-            yield break;
-        }
-
-        AdvanceTurn();
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
 
         TurnBusy = false;
+
+        /*
+         * 카드 사용 후 현재 턴 종료.
+         * 바로 목적지 선택 팝업이 뜨면 안 되고,
+         * 다음 자기 턴에 CanLocalUseTravel()이 true가 되면서 열린다.
+         */
+        AdvanceTurn();
+
         BumpRevision();
     }
 
     /// <summary>
-    /// 여행 목적지 선택권을 사용해서 선택한 목적지로 이동한다.
-    /// 
-    /// 비용은 여행 칸에서 이미 지불했으므로 여기서 돈을 다시 빼지 않는다.
+    /// 다음 자기 턴에 열린 여행 목적지 선택 팝업에서
+    /// 선택한 목적지로 이동 요청.
     /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestTravelMove(int targetCellIndex, RpcInfo info = default)
@@ -3057,7 +3209,8 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 여행 목적지 선택권을 소비해서 선택한 목적지로 이동한다.
+    /// 여행 목적지 선택 팝업에서 고른 지역으로 Pawn을 이동시킨다.
+    /// 이동 후에는 해당 칸의 도착 효과를 정상 처리한다.
     /// </summary>
     private IEnumerator CoResolveTravelMove(int playerIndex, int targetCellIndex)
     {
@@ -3068,7 +3221,10 @@ public class BulmabulGameState : NetworkBehaviour
 
         int fromIndex = actor.tileIndex;
 
-        // 목적지 선택권 소비
+        /*
+         * 목적지 선택 가능 상태 소비.
+         * 한 번 여행 목적지를 선택하면 다시 선택할 수 없다.
+         */
         actor.hasTravelDestinationReady = false;
         actor.travelCost = 0;
 
@@ -3085,6 +3241,9 @@ public class BulmabulGameState : NetworkBehaviour
         actor.tileIndex = targetCellIndex;
         Players.Set(playerIndex, actor);
 
+        /*
+         * 여행 목적지 이동은 주사위 더블과 관계없다.
+         */
         PendingWasDouble = false;
 
         bool waitsForChoice = ResolveLanding(playerIndex, targetCellIndex);
@@ -3523,6 +3682,33 @@ public class BulmabulGameState : NetworkBehaviour
             pawnMover.PlayDirectMove(playerIndex, fromIndex, targetIndex);
     }
 
+    #region 플레이어의 대한 플로팅 텍스트
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    public void RPC_ShowPawnFloatingText(int playerIndex, string korMessage, string engMessage, int type)
+    {
+        if (pawnMover == null)
+            return;
+
+        Transform pawn = pawnMover.GetPawnTransform(playerIndex);
+
+        if (pawn == null)
+            return;
+
+        PawnFloatingText floatingText = pawn.GetComponent<PawnFloatingText>();
+
+        if (floatingText == null)
+            floatingText = pawn.gameObject.AddComponent<PawnFloatingText>();
+
+        floatingText.ShowInfoText(
+            korMessage,
+            engMessage,
+            (PawnFloatingText.PawnFloatingTextType)type
+        );
+    }
+
+    #endregion
+
     private void PlaceAllPawnsImmediate()
     {
         if (pawnMover == null)
@@ -3670,13 +3856,43 @@ public class BulmabulGameState : NetworkBehaviour
         if (Runner == null)
             return false;
 
-        if (IsPaused || TurnBusy)
+        if (!IsSpawnReady)
             return false;
 
+        if (GameFinished)
+            return false;
+
+        if (IsPaused)
+            return false;
+
+        if (TurnBusy)
+            return false;
+
+        // 구매 / 건설 / 인수 / 천사카드 / 여행비용 / 감옥 선택 대기 중이면 주사위 불가
         if (PendingAction != PendingActionType.None)
             return false;
 
-        return IsMyTurn(Runner.LocalPlayer);
+        int idx = FindPlayerIndex(Runner.LocalPlayer);
+
+        if (!IsValidAlivePlayer(idx))
+            return false;
+
+        if (idx != CurrentTurnIndex)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(idx);
+
+        // 감옥 상태면 일반 주사위 금지
+        // 감옥 탈출 팝업에서만 감옥 탈출 주사위를 굴려야 한다.
+        if (slot.isInJail)
+            return false;
+
+        // 여행 목적지 선택권이 있으면 일반 주사위 금지
+        // 먼저 여행 목적지를 선택해야 한다.
+        if (slot.hasTravelDestinationReady)
+            return false;
+
+        return true;
     }
 
     public float GetRemainTurnSeconds()
@@ -3916,33 +4132,36 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 여행 버튼을 사용할 수 있는지 확인.
-    /// 
-    /// 이 함수는 보관 카드 사용 여부가 아니라,
-    /// 여행 칸에서 비용을 지불한 뒤
-    /// 다음 턴에 목적지 선택 버튼을 보여줄지 판단한다.
+    /// 여행 목적지 선택 팝업을 열 수 있는지 확인.
+    ///
+    /// true가 되는 경우:
+    /// - 여행 카드를 사용해서 여행 칸으로 이동한 뒤 다음 자기 턴이 되었을 때
+    /// - 주사위로 여행 칸에 도착해서 여행 비용을 지불한 뒤 다음 자기 턴이 되었을 때
+    ///
+    /// false가 되어야 하는 경우:
+    /// - 카드 사용 직후 이동 중
+    /// - TravelCostPopup 선택 중
+    /// - 내 턴이 아님
+    /// - 다른 팝업 대기 중
     /// </summary>
     public bool CanLocalUseTravel()
-    {
-        return CanLocalSelectTravelDestination();
-    }
-
-    /// <summary>
-    /// 로컬 플레이어가 여행 목적지를 선택할 수 있는지 확인.
-    /// 여행 칸에서 비용을 지불해서 hasTravelDestinationReady가 true일 때만 가능.
-    /// </summary>
-    public bool CanLocalSelectTravelDestination()
     {
         if (Runner == null)
             return false;
 
-        if (IsPaused || TurnBusy)
+        if (!IsSpawnReady)
+            return false;
+
+        if (GameFinished)
+            return false;
+
+        if (TurnBusy)
+            return false;
+
+        if (IsPaused)
             return false;
 
         if (PendingAction != PendingActionType.None)
-            return false;
-
-        if (!IsMyTurn(Runner.LocalPlayer))
             return false;
 
         int idx = FindPlayerIndex(Runner.LocalPlayer);
@@ -3950,9 +4169,23 @@ public class BulmabulGameState : NetworkBehaviour
         if (!IsValidAlivePlayer(idx))
             return false;
 
+        if (idx != CurrentTurnIndex)
+            return false;
+
         PlayerGameSlot slot = Players.Get(idx);
 
-        return slot.hasTravelDestinationReady;
+        if (!slot.hasTravelDestinationReady)
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// 여행 목적지 선택 팝업에서 실제 목적지를 누를 수 있는지 확인.
+    /// </summary>
+    public bool CanLocalSelectTravelDestination()
+    {
+        return CanLocalUseTravel();
     }
 
     public bool CanLocalPause()
@@ -4098,6 +4331,27 @@ public class BulmabulGameState : NetworkBehaviour
             $"{PendingPlayerIndex}번 플레이어가 {oldOwnerIndex}번 플레이어의 {cell.cellName} 인수 완료. 인수 비용 {cost:N0}"
         );
 
+        RPC_ShowPawnFloatingText(
+            PendingPlayerIndex,
+            $"{cell.cellName} 인수",
+            $"Took over {cell.cellName}",
+            5
+        );
+
+        RPC_ShowPawnFloatingText(
+            PendingPlayerIndex,
+            $"-{cost:N0}",
+            $"-{cost:N0}",
+            2
+        );
+
+        RPC_ShowPawnFloatingText(
+            oldOwnerIndex,
+            $"+{cost:N0}",
+            $"+{cost:N0}",
+            1
+        );
+
         int finishedPlayer = PendingPlayerIndex;
         int takenCellIndex = PendingCellIndex;
         bool wasDouble = PendingWasDouble;
@@ -4216,6 +4470,13 @@ public class BulmabulGameState : NetworkBehaviour
         if (useAngelCard)
         {
             LogServer($"{payerIndex}번 플레이어가 천사 카드를 사용하여 {cell.cellName} 통행료를 면제받았습니다.");
+
+            RPC_ShowPawnFloatingText(
+                payerIndex,
+                "천사 카드 사용",
+                "Angel Card Used",
+                4
+            );
 
             PendingAction = PendingActionType.None;
             PendingPlayerIndex = -1;
@@ -5106,6 +5367,106 @@ public class BulmabulGameState : NetworkBehaviour
             default:
                 return false;
         }
+    }
+
+    #endregion
+
+    #region 테스트 키 이동 전횽
+
+
+    /// <summary>
+    /// 테스트 키 이동 전용.
+    /// 찬스 카드 이동과 다르게, 이동 후 이번 턴을 반드시 소비한다.
+    /// </summary>
+    public bool MovePlayerToCellByDebugForAuthority(int playerIndex, int targetCellIndex, bool resolveLanding)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        if (board == null || board.CellCount <= 0)
+            return false;
+
+        if (GameFinished)
+            return false;
+
+        if (IsPaused || TurnBusy)
+            return false;
+
+        if (PendingAction != PendingActionType.None)
+            return false;
+
+        if (playerIndex != CurrentTurnIndex)
+            return false;
+
+        PlayerGameSlot actor = Players.Get(playerIndex);
+
+        if (actor.occupied == 0 || actor.bankrupt || actor.leftGame)
+            return false;
+
+        if (actor.isInJail)
+            return false;
+
+        if (actor.hasTravelDestinationReady)
+            return false;
+
+        targetCellIndex = board.ClampCellIndex(targetCellIndex);
+
+        StartCoroutine(CoResolveDebugMove(playerIndex, targetCellIndex, resolveLanding));
+        return true;
+    }
+
+    private IEnumerator CoResolveDebugMove(int playerIndex, int targetCellIndex, bool resolveLanding)
+    {
+        TurnBusy = true;
+        BumpRevision();
+
+        PlayerGameSlot actor = Players.Get(playerIndex);
+        int fromIndex = actor.tileIndex;
+
+        targetCellIndex = board.ClampCellIndex(targetCellIndex);
+
+        BulmabulCellData targetCell = board.GetCell(targetCellIndex);
+        string cellName = targetCell != null ? targetCell.cellName : $"{targetCellIndex}번 칸";
+
+        LogServer($"{playerIndex}번 플레이어가 테스트 이동으로 [{cellName}] 칸으로 이동합니다.");
+
+        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
+
+        float moveWait = pawnMover != null ? pawnMover.DirectMoveSeconds + 0.1f : 0.9f;
+        yield return new WaitForSeconds(moveWait);
+
+        actor = Players.Get(playerIndex);
+        actor.tileIndex = targetCellIndex;
+        Players.Set(playerIndex, actor);
+
+        // 테스트 이동은 주사위 더블이 아니므로 추가 턴을 주면 안 된다.
+        PendingWasDouble = false;
+
+        BumpRevision();
+
+        bool waitsForChoice = false;
+
+        if (resolveLanding)
+            waitsForChoice = ResolveLanding(playerIndex, targetCellIndex);
+
+        if (waitsForChoice)
+        {
+            // 여행 비용 선택, 땅 구매, 인수, 천사 카드 선택 같은 팝업은 여기서 대기한다.
+            // 이후 해당 선택 RPC에서 턴 종료 처리한다.
+            TurnBusy = false;
+            BumpRevision();
+            yield break;
+        }
+
+        // 감옥 칸은 ResolveLanding 내부에서 isInJail = true가 된다.
+        // FinishTurnAfterAction(false)가 감옥 상태를 보고 바로 다음 플레이어로 넘긴다.
+        FinishTurnAfterAction(playerIndex, false);
+
+        TurnBusy = false;
+        BumpRevision();
     }
 
     #endregion

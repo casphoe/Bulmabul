@@ -36,6 +36,8 @@ public class BulmabulJailChoicePopup : MonoBehaviour
     [Header("Game UI")]
     [SerializeField] private BulmabulGameUI gameUI;
 
+    private bool hideWhileJailDiceControlOpen;
+
     private void Awake()
     {
         if (rootPanel == null)
@@ -82,6 +84,25 @@ public class BulmabulJailChoicePopup : MonoBehaviour
 
         bool show = state.ShouldShowJailChoicePopupForLocalPlayer();
 
+        /*
+         * 주사위 탈출 버튼을 누르면 아직 PendingAction은 JailChoice 상태다.
+         * 실제 주사위는 BulmabulGameUI의 DiceControlPanel에서 확정 버튼을 놓을 때 굴린다.
+         * 그래서 이 플래그가 없으면 SetVisible(false)를 해도 다음 Update에서 다시 켜진다.
+         */
+        if (hideWhileJailDiceControlOpen)
+        {
+            // 감옥 선택 상태가 끝났으면 플래그 해제
+            if (!show)
+            {
+                hideWhileJailDiceControlOpen = false;
+            }
+            else
+            {
+                SetVisible(false);
+                return;
+            }
+        }
+
         SetVisible(show);
 
         if (!show)
@@ -89,6 +110,9 @@ public class BulmabulJailChoicePopup : MonoBehaviour
 
         if (txtInfo != null)
             txtInfo.text = state.GetPendingJailInfoText();
+
+        if (txtTitle != null)
+            txtTitle.text = GetByLanguage("감옥 탈출", "Jail Escape");
 
         if (txtRollDiceButton != null)
             txtRollDiceButton.text = GetByLanguage("주사위 굴리기", "Roll Dice");
@@ -135,6 +159,7 @@ public class BulmabulJailChoicePopup : MonoBehaviour
             return;
         }
 
+        hideWhileJailDiceControlOpen = true;
         SetVisible(false);
 
         if (gameUI == null)
@@ -146,6 +171,8 @@ public class BulmabulJailChoicePopup : MonoBehaviour
         }
         else if (ToastMessageManager.instance != null)
         {
+            hideWhileJailDiceControlOpen = false;
+
             ToastMessageManager.instance.ShowToast(
                 "주사위 조작 UI를 찾을 수 없습니다.",
                 "Dice control UI was not found."
