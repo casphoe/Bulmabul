@@ -35,7 +35,7 @@ public class BulmabulCameraFollow : MonoBehaviour
     [SerializeField] private float rotationSpeed = 5f;
 
     [Tooltip("Pawn 따라가기 상태에서 Orthographic 카메라 크기")]
-    [SerializeField] private float followOrthographicSize = 12f;
+    [SerializeField] private float followOrthographicSize = 12;
 
     [Header("Look Settings")]
     [Tooltip("Pawn을 바라보게 할지 여부")]

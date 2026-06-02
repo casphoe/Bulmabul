@@ -47,7 +47,7 @@ public class BulmabulBoardCellView : MonoBehaviour
 
     [Header("3D Text Layout")]
     [Tooltip("텍스트가 발판 위에 떠 있는 높이")]
-    [SerializeField] private float textHeight = 0.65f;
+    [SerializeField] private float textHeight = 1.05f;
 
     [Tooltip("셀 중심에서 이름/가격을 어느 정도 바깥 또는 안쪽으로 뺄지")]
     private float labelDistance = 2.45f;
@@ -70,6 +70,14 @@ public class BulmabulBoardCellView : MonoBehaviour
 
     [Tooltip("전체 텍스트 Z 위치 추가 보정")]
     [SerializeField] private float extraZOffset = 0f;
+
+    [Header("Special Cell Fine Tune")]
+    [SerializeField] private float cell39NameExtraX = -1.35f;
+    [SerializeField] private float cell39PriceExtraX = -1.35f;
+    [SerializeField] private float cell39ExtraZ = -0.35f;
+
+    [SerializeField] private float jailNameExtraX = -1.25f;
+    [SerializeField] private float jailPriceExtraX = -1.25f;
 
     [Header("Font Asset")]
     [Tooltip("전체 텍스트 공통 폰트. 개별 폰트가 비어있으면 이 폰트를 사용")]
@@ -273,52 +281,88 @@ public class BulmabulBoardCellView : MonoBehaviour
 
         CellLabelSide side = ResolveLabelSide();
 
-        Vector3 namePos;
-        Vector3 pricePos;
+        Vector3 nameWorldOffset;
+        Vector3 priceWorldOffset;
 
         switch (side)
         {
-            // 0~39 라인이라고 가정.
-            // 아래쪽 줄이면 텍스트를 위쪽, 즉 +Z 방향으로 보여준다.
+            // 0~39: 아래쪽 줄. 텍스트는 보드 안쪽(+Z)으로 배치
             case CellLabelSide.BottomSide:
-                namePos = new Vector3(extraXOffset, textHeight, labelDistance + lineGap * 0.5f + extraZOffset);
-                pricePos = new Vector3(extraXOffset, textHeight, labelDistance - lineGap * 0.5f + extraZOffset);
+                nameWorldOffset = new Vector3(extraXOffset, textHeight, labelDistance + lineGap * 0.5f + extraZOffset);
+                priceWorldOffset = new Vector3(extraXOffset, textHeight, labelDistance - lineGap * 0.5f + extraZOffset);
                 break;
 
-            // 40~79 라인이라고 가정.
-            // 왼쪽 줄이면 텍스트를 오른쪽, 즉 +X 방향으로 보여준다.
-            case CellLabelSide.LeftSide:
-                namePos = new Vector3(labelDistance + extraXOffset, textHeight, lineGap * 0.5f + extraZOffset);
-                pricePos = new Vector3(labelDistance + extraXOffset, textHeight, -lineGap * 0.5f + extraZOffset);
-                break;
-
-            // 80~119 라인이라고 가정.
-            // 위쪽 줄이면 텍스트를 아래쪽, 즉 -Z 방향으로 보여준다.
-            case CellLabelSide.TopSide:
-                namePos = new Vector3(extraXOffset, textHeight, -labelDistance + lineGap * 0.5f + extraZOffset);
-                pricePos = new Vector3(extraXOffset, textHeight, -labelDistance - lineGap * 0.5f + extraZOffset);
-                break;
-
-            // 120~159 라인이라고 가정.
-            // 오른쪽 줄이면 텍스트를 왼쪽, 즉 -X 방향으로 보여준다.
+            // 40~79: 오른쪽 줄. 텍스트는 보드 안쪽(-X)으로 배치
             case CellLabelSide.RightSide:
-                namePos = new Vector3(-labelDistance + extraXOffset, textHeight, lineGap * 0.5f + extraZOffset);
-                pricePos = new Vector3(-labelDistance + extraXOffset, textHeight, -lineGap * 0.5f + extraZOffset);
+                nameWorldOffset = new Vector3(-labelDistance + extraXOffset, textHeight, lineGap * 0.5f + extraZOffset);
+                priceWorldOffset = new Vector3(-labelDistance + extraXOffset, textHeight, -lineGap * 0.5f + extraZOffset);
+                break;
+
+            // 80~119: 위쪽 줄. 텍스트는 보드 안쪽(-Z)으로 배치
+            case CellLabelSide.TopSide:
+                nameWorldOffset = new Vector3(extraXOffset, textHeight, -labelDistance + lineGap * 0.5f + extraZOffset);
+                priceWorldOffset = new Vector3(extraXOffset, textHeight, -labelDistance - lineGap * 0.5f + extraZOffset);
+                break;
+
+            // 120~159: 왼쪽 줄. 텍스트는 보드 안쪽(+X)으로 배치
+            case CellLabelSide.LeftSide:
+                nameWorldOffset = new Vector3(labelDistance + extraXOffset, textHeight, lineGap * 0.5f + extraZOffset);
+                priceWorldOffset = new Vector3(labelDistance + extraXOffset, textHeight, -lineGap * 0.5f + extraZOffset);
                 break;
 
             default:
-                namePos = new Vector3(extraXOffset, textHeight, labelDistance + lineGap * 0.5f + extraZOffset);
-                pricePos = new Vector3(extraXOffset, textHeight, labelDistance - lineGap * 0.5f + extraZOffset);
+                nameWorldOffset = new Vector3(extraXOffset, textHeight, labelDistance + lineGap * 0.5f + extraZOffset);
+                priceWorldOffset = new Vector3(extraXOffset, textHeight, labelDistance - lineGap * 0.5f + extraZOffset);
                 break;
         }
 
+        ApplySpecialCellOffset(ref nameWorldOffset, ref priceWorldOffset);
+
         if (txtName != null)
-            txtName.transform.localPosition = namePos;
+            txtName.transform.localPosition = WorldOffsetToLocalOffset(nameWorldOffset);
 
         if (txtPrice != null)
-            txtPrice.transform.localPosition = pricePos;
+            txtPrice.transform.localPosition = WorldOffsetToLocalOffset(priceWorldOffset);
 
         ApplyTextRotation();
+    }
+
+    private Vector3 WorldOffsetToLocalOffset(Vector3 worldOffset)
+    {
+        Vector3 s = transform.lossyScale;
+
+        float sx = Mathf.Abs(s.x) > 0.0001f ? s.x : 1f;
+        float sy = Mathf.Abs(s.y) > 0.0001f ? s.y : 1f;
+        float sz = Mathf.Abs(s.z) > 0.0001f ? s.z : 1f;
+
+        return new Vector3(
+            worldOffset.x / sx,
+            worldOffset.y / sy,
+            worldOffset.z / sz
+        );
+    }
+
+    private void ApplySpecialCellOffset(ref Vector3 nameWorldOffset, ref Vector3 priceWorldOffset)
+    {
+        int lastBottomIndex = Mathf.Max(0, cellsPerSide - 1);
+
+        // 39번 칸은 오른쪽 모서리 직전이라 40번 Jail과 겹치기 쉽다.
+        if (cellIndex == lastBottomIndex)
+        {
+            nameWorldOffset.x += cell39NameExtraX;
+            priceWorldOffset.x += cell39PriceExtraX;
+
+            nameWorldOffset.z += cell39ExtraZ;
+            priceWorldOffset.z += cell39ExtraZ;
+        }
+
+        // Jail 칸은 오른쪽 라인의 첫 칸이라 이름이 칸/모서리에 붙는다.
+        // X를 더 음수로 빼서 보드 안쪽으로 확실하게 이동시킨다.
+        if (cellData != null && cellData.cellType == BulmabulCellType.Jail)
+        {
+            nameWorldOffset.x += jailNameExtraX;
+            priceWorldOffset.x += jailPriceExtraX;
+        }
     }
 
     /// <summary>
@@ -335,13 +379,15 @@ public class BulmabulBoardCellView : MonoBehaviour
         if (cellIndex < perSide)
             return CellLabelSide.BottomSide;
 
+        // Generator 기준 40~79는 오른쪽 세로 라인이다.
         if (cellIndex < perSide * 2)
-            return CellLabelSide.LeftSide;
+            return CellLabelSide.RightSide;
 
         if (cellIndex < perSide * 3)
             return CellLabelSide.TopSide;
 
-        return CellLabelSide.RightSide;
+        // Generator 기준 120~159는 왼쪽 세로 라인이다.
+        return CellLabelSide.LeftSide;
     }
 
     /// <summary>

@@ -619,6 +619,11 @@ public class BulmabulBoardGenerator : MonoBehaviour
             GameObject cellObj = Instantiate(prefab, position, rotation, cellRoot);
             cellObj.transform.localScale = GetCellScale(type);
 
+            // 예전 자동 라벨 컴포넌트 제거.
+            // 이 컴포넌트가 BulmabulBoardCellView에서 계산한 텍스트 위치를 다시 덮어써서
+            // 39번, Jail, 42번 이후 오른쪽 라인 텍스트가 안 보이는 문제가 생긴다.
+            RemoveLegacyLabelLayouts(cellObj);
+
             BulmabulCellData data = CreateCellData(i, type, setting);
             data.point = cellObj.transform;
 
@@ -631,6 +636,10 @@ public class BulmabulBoardGenerator : MonoBehaviour
             BulmabulCellLabelLayout labelLayout = cellObj.GetComponent<BulmabulCellLabelLayout>();
             if (labelLayout == null)
                 labelLayout = cellObj.AddComponent<BulmabulCellLabelLayout>();
+
+            // 재배치 스크립트가 현재 셀 번호 / 셀 타입 / 한 변 칸 수를 알 수 있게 넘겨준다.
+            // 이걸 해야 39번 Cell, Jail Cell, 40~79 오른쪽 라인 보정이 가능하다.
+            labelLayout.Setup(i, type, cellsPerSide);
 
             generatedCellDatas.Add(data);
         }
@@ -652,6 +661,25 @@ public class BulmabulBoardGenerator : MonoBehaviour
         board.RefreshAllCellLabelLayouts();
 
         Debug.Log($"[BulmabulBoardGenerator] Board generated. Count = {generatedCellDatas.Count}");
+    }
+
+    private void RemoveLegacyLabelLayouts(GameObject cellObj)
+    {
+        if (cellObj == null)
+            return;
+
+        BulmabulCellLabelLayout[] layouts = cellObj.GetComponentsInChildren<BulmabulCellLabelLayout>(true);
+
+        for (int i = 0; i < layouts.Length; i++)
+        {
+            if (layouts[i] == null)
+                continue;
+
+            if (Application.isPlaying)
+                Destroy(layouts[i]);
+            else
+                DestroyImmediate(layouts[i]);
+        }
     }
 
     [ContextMenu("Clear Board")]

@@ -64,6 +64,10 @@ public class DiceRollingUI : MonoBehaviour
 
     private Coroutine _rollingRoutine;
 
+    private int _finalLeftValue = 1;
+    private int _finalRightValue = 1;
+    private bool _finalResultLocked = false;
+
     private bool _isWaitingForResult;
     private float _rollingElapsed;
 
@@ -135,8 +139,13 @@ public class DiceRollingUI : MonoBehaviour
     {
         SetCurrentDiceGrade(equippedDice);
 
+        _finalResultLocked = false;
+
         if (_rollingRoutine != null)
+        {
             StopCoroutine(_rollingRoutine);
+            _rollingRoutine = null;
+        }
 
         _rollingRoutine = StartCoroutine(CoShowRolling());
     }
@@ -187,17 +196,24 @@ public class DiceRollingUI : MonoBehaviour
     /// </summary>
     public void StopWithResult(int leftValue, int rightValue, OwnedDice equippedDice, Action onComplete = null)
     {
+        leftValue = Mathf.Clamp(leftValue, 1, 6);
+        rightValue = Mathf.Clamp(rightValue, 1, 6);
+
+        _finalLeftValue = leftValue;
+        _finalRightValue = rightValue;
+        _finalResultLocked = true;
+
         SetCurrentDiceGrade(equippedDice);
 
+        _isWaitingForResult = false;
+
         if (_rollingRoutine != null)
+        {
             StopCoroutine(_rollingRoutine);
+            _rollingRoutine = null;
+        }
 
         _rollingRoutine = StartCoroutine(CoStopWithResult(leftValue, rightValue, onComplete));
-    }
-
-    public void StopWithResult(int leftValue, int rightValue, Action onComplete = null)
-    {
-        StopWithResult(leftValue, rightValue, null, onComplete);
     }
 
     private IEnumerator CoStopWithResult(int leftValue, int rightValue, Action onComplete)
@@ -226,13 +242,17 @@ public class DiceRollingUI : MonoBehaviour
 
         _isWaitingForResult = false;
 
-        // 4단계: 최종 결과 이미지로 고정
         SetFace(imgDiceLeft, leftValue);
         SetFace(imgDiceRight, rightValue);
         ApplyDiceGradeColor();
 
-        // 5단계: 살짝 튕기면서 멈춤
         yield return SettleDice();
+
+        // 튕김 연출이 끝난 뒤에도 최종 결과를 다시 고정.
+        // 혹시 중간에 랜덤 면이 덮어써도 여기서 다시 맞춘다.
+        SetFace(imgDiceLeft, leftValue);
+        SetFace(imgDiceRight, rightValue);
+        ApplyDiceGradeColor();
 
         int total = leftValue + rightValue;
 
@@ -448,6 +468,14 @@ public class DiceRollingUI : MonoBehaviour
 
     private void SetRandomFaces()
     {
+        if (_finalResultLocked)
+        {
+            SetFace(imgDiceLeft, _finalLeftValue);
+            SetFace(imgDiceRight, _finalRightValue);
+            ApplyDiceGradeColor();
+            return;
+        }
+
         int left = UnityEngine.Random.Range(1, 7);
         int right = UnityEngine.Random.Range(1, 7);
 

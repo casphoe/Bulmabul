@@ -3,18 +3,7 @@ using UnityEngine;
 
 /// <summary>
 /// 보드 셀의 이름/가격 텍스트 위치를 자동 배치.
-/// 
-/// 구조:
-/// Cell
-///  └── LabelRoot (localPosition = 0,0,0 고정)
-///       ├── TxtName3D
-///       └── TxtPrice3D
-/// 
-/// 규칙:
-/// - 윗줄 셀    : 텍스트를 아래쪽(-Z)으로 배치
-/// - 아랫줄 셀  : 텍스트를 위쪽(+Z)으로 배치
-/// - 왼쪽 줄 셀 : 텍스트를 오른쪽(+X)으로 배치
-/// - 오른쪽 줄 셀: 텍스트를 왼쪽(-X)으로 배치
+/// 기본 재배치는 유지하고, 사진에서 맞춘 셀만 예외 위치를 적용한다.
 /// </summary>
 public class BulmabulCellLabelLayout : MonoBehaviour
 {
@@ -53,8 +42,124 @@ public class BulmabulCellLabelLayout : MonoBehaviour
     [Tooltip("텍스트를 발판 위에 눕혀서 표시")]
     [SerializeField] private bool useHorizontalTextOnBoard = true;
 
+    [Header("Runtime Cell Info")]
+    [SerializeField] private int cellIndex = -1;
+    [SerializeField] private BulmabulCellType cellType = BulmabulCellType.Land;
+    [SerializeField] private int cellsPerSide = 40;
+
+    [System.Serializable]
+    public class CellLabelOverride
+    {
+        public int cellIndex = -1;
+
+        public bool overrideNamePosition = true;
+        public Vector3 nameLocalPosition;
+
+        public bool overridePricePosition = true;
+        public Vector3 priceLocalPosition;
+    }
+
+    [System.Serializable]
+    public class CellLabelRangeOverride
+    {
+        public int startIndex = -1;
+        public int endIndex = -1;
+
+        public bool overrideNamePosition = true;
+        public Vector3 nameLocalPosition;
+
+        public bool overridePricePosition = true;
+        public Vector3 priceLocalPosition;
+    }
+
+    [Header("Only Selected Cell Position Overrides")]
+    [SerializeField]
+    private CellLabelOverride[] cellOverrides =
+    {
+         new CellLabelOverride
+        {
+            cellIndex = 0,
+            overrideNamePosition = true,
+            nameLocalPosition = new Vector3(0f, 0.08f, 0.863f),
+            overridePricePosition = false
+        },
+
+        // Cell 039 - 사진에서 맞춘 값 유지
+        new CellLabelOverride
+        {
+            cellIndex = 39,
+            overrideNamePosition = true,
+            nameLocalPosition = new Vector3(0.049f, 0.08f, -0.717f),
+            overridePricePosition = true,
+            priceLocalPosition = new Vector3(0f, 0.08f, -0.99f)
+        },
+
+    // Cell 040 Jail - 사진 오른쪽 값 기준
+    new CellLabelOverride
+    {
+        cellIndex = 40,
+        overrideNamePosition = true,
+        nameLocalPosition = new Vector3(-1.429f, 0.08f, -0.702f),
+        overridePricePosition = false
+    },
+
+    // Cell 080 Travel - 이전에 맞춘 값 유지
+    new CellLabelOverride
+    {
+        cellIndex = 80,
+        overrideNamePosition = true,
+        nameLocalPosition = new Vector3(0f, 0.08f, -0.749f),
+        overridePricePosition = true,
+        priceLocalPosition = new Vector3(0f, 0.08f, -0.939f)
+    },
+
+    // Cell 119 - 이전에 맞춘 값 유지
+    new CellLabelOverride
+    {
+        cellIndex = 119,
+        overrideNamePosition = true,
+        nameLocalPosition = new Vector3(-0.894f, 0.08f, -0.164f),
+        overridePricePosition = true,
+        priceLocalPosition = new Vector3(-0.91f, 0.08f, 0.16f)
+    },
+
+    // Cell 159 - 사진 오른쪽 값 기준
+    new CellLabelOverride
+    {
+        cellIndex = 159,
+        overrideNamePosition = true,
+        nameLocalPosition = new Vector3(-0.781f, 0.08f, 0.083f),
+        overridePricePosition = true,
+        priceLocalPosition = new Vector3(-0.772f, 0.08f, -0.177f)
+    }
+    };
+
+    [Header("Only Selected Range Position Overrides")]
+    [SerializeField]
+    private CellLabelRangeOverride[] rangeOverrides =
+    {
+        // 속초해수욕장 다음부터 오른쪽 라인 끝까지 안 보이던 구간만 보정.
+        // 나머지 셀은 기존 재배치 그대로 둔다.
+        new CellLabelRangeOverride
+        {
+            startIndex = 48,
+            endIndex = 79,
+            nameLocalPosition = new Vector3(0.988f, 0.08f, 0.14f),
+            priceLocalPosition = new Vector3(0.988f, 0.08f, -0.14f)
+        }
+    };
+
     private void Awake()
     {
+        EnsureReferences();
+    }
+
+    public void Setup(int index, BulmabulCellType type, int perSide)
+    {
+        cellIndex = index;
+        cellType = type;
+        cellsPerSide = Mathf.Max(1, perSide);
+
         EnsureReferences();
     }
 
@@ -65,9 +170,6 @@ public class BulmabulCellLabelLayout : MonoBehaviour
     }
 #endif
 
-    /// <summary>
-    /// LabelRoot / 텍스트 자동 연결.
-    /// </summary>
     private void EnsureReferences()
     {
         if (labelRoot == null)
@@ -93,15 +195,21 @@ public class BulmabulCellLabelLayout : MonoBehaviour
         if (txtLandName == null)
         {
             Transform tr = labelRoot.Find("TxtName3D");
-            if (tr == null) tr = transform.Find("TxtName3D");
-            if (tr != null) txtLandName = tr.GetComponent<TMP_Text>();
+            if (tr == null)
+                tr = transform.Find("TxtName3D");
+
+            if (tr != null)
+                txtLandName = tr.GetComponent<TMP_Text>();
         }
 
         if (txtPrice == null)
         {
             Transform tr = labelRoot.Find("TxtPrice3D");
-            if (tr == null) tr = transform.Find("TxtPrice3D");
-            if (tr != null) txtPrice = tr.GetComponent<TMP_Text>();
+            if (tr == null)
+                tr = transform.Find("TxtPrice3D");
+
+            if (tr != null)
+                txtPrice = tr.GetComponent<TMP_Text>();
         }
 
         if (txtLandName != null)
@@ -113,6 +221,7 @@ public class BulmabulCellLabelLayout : MonoBehaviour
 
     /// <summary>
     /// 보드 중앙 기준으로 텍스트 위치 갱신.
+    /// 단, cellOverrides / rangeOverrides에 등록된 셀은 사진에서 맞춘 위치를 우선 적용한다.
     /// </summary>
     public void RefreshLayout(Vector3 boardCenter)
     {
@@ -168,14 +277,19 @@ public class BulmabulCellLabelLayout : MonoBehaviour
                 break;
         }
 
+        bool usedManualOverride = ApplyOverridePosition(ref namePos, ref pricePos);
+
         if (txtLandName != null)
             txtLandName.transform.localPosition = namePos;
 
         if (txtPrice != null)
             txtPrice.transform.localPosition = pricePos;
 
+        ApplyTextRenderSettings(txtLandName);
+        ApplyTextRenderSettings(txtPrice);
+
         ApplyTextRotation();
-        ApplyTextAlignment(side);
+        ApplyTextAlignment(side, usedManualOverride);
     }
 
     private LabelSide ResolveSide(Vector3 boardCenter)
@@ -191,19 +305,85 @@ public class BulmabulCellLabelLayout : MonoBehaviour
         return delta.z < 0f ? LabelSide.Bottom : LabelSide.Top;
     }
 
-    private void ApplyTextAlignment(LabelSide side)
+    private bool ApplyOverridePosition(ref Vector3 namePos, ref Vector3 pricePos)
+    {
+        if (TryApplyCellOverride(ref namePos, ref pricePos))
+            return true;
+
+        return TryApplyRangeOverride(ref namePos, ref pricePos);
+    }
+
+    private bool TryApplyCellOverride(ref Vector3 namePos, ref Vector3 pricePos)
+    {
+        if (cellOverrides == null)
+            return false;
+
+        for (int i = 0; i < cellOverrides.Length; i++)
+        {
+            CellLabelOverride item = cellOverrides[i];
+
+            if (item == null)
+                continue;
+
+            if (item.cellIndex != cellIndex)
+                continue;
+
+            if (item.overrideNamePosition)
+                namePos = item.nameLocalPosition;
+
+            if (item.overridePricePosition)
+                pricePos = item.priceLocalPosition;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryApplyRangeOverride(ref Vector3 namePos, ref Vector3 pricePos)
+    {
+        if (rangeOverrides == null)
+            return false;
+
+        for (int i = 0; i < rangeOverrides.Length; i++)
+        {
+            CellLabelRangeOverride item = rangeOverrides[i];
+
+            if (item == null)
+                continue;
+
+            if (cellIndex < item.startIndex || cellIndex > item.endIndex)
+                continue;
+
+            if (item.overrideNamePosition)
+                namePos = item.nameLocalPosition;
+
+            if (item.overridePricePosition)
+                pricePos = item.priceLocalPosition;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ApplyTextAlignment(LabelSide side, bool usedManualOverride)
     {
         TextAlignmentOptions align = TextAlignmentOptions.Center;
 
-        switch (side)
+        // 사진에서 직접 맞춘 셀은 정렬까지 다시 흔들지 말고 Center 유지
+        if (!usedManualOverride)
         {
-            case LabelSide.Left:
-                align = TextAlignmentOptions.Left;
-                break;
+            switch (side)
+            {
+                case LabelSide.Left:
+                    align = TextAlignmentOptions.Left;
+                    break;
 
-            case LabelSide.Right:
-                align = TextAlignmentOptions.Right;
-                break;
+                case LabelSide.Right:
+                    align = TextAlignmentOptions.Right;
+                    break;
+            }
         }
 
         if (txtLandName != null)
@@ -220,9 +400,59 @@ public class BulmabulCellLabelLayout : MonoBehaviour
             : Quaternion.identity;
 
         if (txtLandName != null)
+        {
             txtLandName.transform.localRotation = rot;
+            ApplyTextRenderSettings(txtLandName);
+        }
 
         if (txtPrice != null)
+        {
             txtPrice.transform.localRotation = rot;
+            ApplyTextRenderSettings(txtPrice);
+        }
+    }
+
+    private void ApplyTextRenderSettings(TMP_Text text)
+    {
+        if (text == null)
+            return;
+
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Overflow;
+
+        // TextMeshPro 3D는 각도에 따라 뒷면이 안 보일 수 있음.
+        // 그래서 머티리얼을 복사한 뒤 Cull Off로 강제한다.
+        Material mat = text.fontMaterial;
+
+        if (mat != null)
+        {
+            Material instanceMat = new Material(mat);
+
+            // TMP Distance Field 계열 셰이더에서 주로 사용하는 Cull 속성
+            if (instanceMat.HasProperty("_CullMode"))
+                instanceMat.SetFloat("_CullMode", 0f);
+
+            // 일부 셰이더는 _Cull을 사용함
+            if (instanceMat.HasProperty("_Cull"))
+                instanceMat.SetFloat("_Cull", 0f);
+
+            text.fontMaterial = instanceMat;
+        }
+
+        TextMeshPro tmp3D = text as TextMeshPro;
+        if (tmp3D != null)
+        {
+            MeshRenderer renderer = tmp3D.GetComponent<MeshRenderer>();
+
+            if (renderer != null)
+            {
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+            }
+
+            tmp3D.sortingOrder = 100;
+        }
+
+        text.ForceMeshUpdate();
     }
 }
