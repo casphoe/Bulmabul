@@ -15862,7 +15862,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   root: {fileID: 1794764926}
   board: {fileID: 1580395497}
-  infiniteScroll: {fileID: 0}
+  infiniteScroll: {fileID: 1353470503}
   txtTitle: {fileID: 180755390}
   txtInfo: {fileID: 1185131590}
   txtCloseButton: {fileID: 1859525255}

@@ -1191,6 +1191,32 @@ public class BulmabulGameState : NetworkBehaviour
         return targetIndex;
     }
 
+    /// <summary>
+    /// 현재 칸에서 목표 칸까지 보드 진행 방향으로 몇 칸 이동해야 하는지 계산한다.
+    /// 
+    /// 예:
+    /// - 현재 80번, 목표 5번, 보드가 160칸이면
+    ///   80 -> 81 -> ... -> 159 -> 0 -> 1 -> ... -> 5
+    ///   이런 식으로 한 바퀴를 돌아 이동한다.
+    /// </summary>
+    private int CalculateForwardMoveCount(int fromIndex, int targetIndex)
+    {
+        if (board == null || board.CellCount <= 0)
+            return 0;
+
+        int boardCount = board.CellCount;
+
+        fromIndex = board.ClampCellIndex(fromIndex);
+        targetIndex = board.ClampCellIndex(targetIndex);
+
+        int moveCount = targetIndex - fromIndex;
+
+        if (moveCount < 0)
+            moveCount += boardCount;
+
+        return moveCount;
+    }
+
     private void FinishTurnAfterAction(int playerIndex, bool isDouble)
     {
         if (!Object.HasStateAuthority)
@@ -2258,77 +2284,86 @@ public class BulmabulGameState : NetworkBehaviour
     #region 건설 시스템
 
     /// <summary>
-    /// 땅 구매 직후, 해당 땅에 초기 건설 패널을 열 수 있는지 확인한다.
+    /// 땅 구매 직후, 해당 땅에 건설 패널을 열 수 있는지 확인한다.
     /// 
     /// 규칙:
-    /// 1. 플레이어가 유효해야 한다.
-    /// 2. 해당 땅의 소유자가 현재 플레이어여야 한다.
-    /// 3. 일반 Land 타입이어야 한다.
-    /// 4. 랜드마크는 건설 대상에서 제외한다.
-    /// 5. 이미 건물이 있으면 초기 건설 대상이 아니다.
-    /// 6. 구매 직후에는 작은집 / 집만 건설 가능하다.
+    /// - 한 바퀴 전이면 작은집 / 집만 가능.
+    /// - 한 바퀴 이상 돌았으면 구매 직후라도 작은집 / 집 / 큰집 / 호텔까지 가능.
     /// </summary>
     private bool CanOpenInitialBuild(int playerIndex, int cellIndex)
     {
-        // 플레이어 인덱스가 유효하고, 아직 게임에서 살아있는 플레이어인지 확인한다.
         if (!IsValidAlivePlayer(playerIndex))
             return false;
 
-        // 구매 직후 건설은 반드시 본인 소유 땅에서만 가능하다.
+        if (board == null)
+            return false;
+
+        if (cellIndex < 0 || cellIndex >= board.CellCount || cellIndex >= MaxCells)
+            return false;
+
         if (LandOwnerByCell.Get(cellIndex) != playerIndex)
             return false;
 
-        // 건설 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(cellIndex);
 
-        // 칸 데이터가 없으면 건설할 수 없다.
         if (cell == null)
             return false;
 
-        // 일반 땅 타입이 아니면 건설할 수 없다.
-        // 예: 시작지점, 여행 칸, 감옥 칸, 찬스 칸 등은 제외.
         if (cell.cellType != BulmabulCellType.Land)
             return false;
 
-        // 랜드마크로 지정된 땅은 일반 건물 건설 대상에서 제외한다.
         if (cell.isLandmark)
             return false;
 
-        // 현재 해당 땅에 지어진 건물 정보를 가져온다.
         int flags = LandBuildingFlagsByCell.Get(cellIndex);
 
-        // 구매 직후 초기 건설은 빈 땅에서만 가능하다.
+        /*
+         * 구매 직후 초기 건설은 빈 땅에서만 열린다.
+         */
         if (flags != BulmabulBuildFlags.None)
             return false;
 
-        // 플레이어의 현재 재화 정보를 가져온다.
         PlayerGameSlot player = Players.Get(playerIndex);
 
-        // 구매 직후에는 작은집 또는 집만 건설 가능하다.
-        // 둘 중 하나라도 지을 수 있으면 초기 건설 패널을 열 수 있다.
-        return BulmabulLandSystem.CanBuild(cell, flags, player.cash, BulmabulBuildPart.SmallHouse, true) ||
-               BulmabulLandSystem.CanBuild(cell, flags, player.cash, BulmabulBuildPart.House, true);
+        /*
+         * 핵심:
+         * 한 바퀴 전이면 true = 작은집/집만 검사
+         * 한 바퀴 이상이면 false = 큰집/호텔까지 검사
+         */
+        bool onlySmallHouseAndHouse = player.lapCount <= 0;
+
+        return BulmabulLandSystem.CanBuildAny(
+            cell,
+            flags,
+            player.cash,
+            onlySmallHouseAndHouse
+        );
     }
 
     /// <summary>
-    /// 땅 구매 직후 초기 건설 대기 상태로 전환한다.
+    /// 땅 구매 직후 건설 대기 상태로 전환한다.
     /// 
-    /// 이 상태에서는 방금 구매한 땅에 작은집 또는 집을 선택해서 건설할 수 있다.
-    /// 구매 직후에는 큰집과 호텔은 건설할 수 없다.
+    /// 한 바퀴 전이면 작은집 / 집만 가능.
+    /// 한 바퀴 이상 돌았으면 큰집 / 호텔까지 가능.
     /// </summary>
     private void OpenInitialBuildPending(int playerIndex, int cellIndex)
     {
-        // 현재 게임 상태를 구매 직후 초기 건설 상태로 변경한다.
         PendingAction = PendingActionType.InitialBuildAfterBuy;
-
-        // 건설 선택권을 가진 플레이어를 저장한다.
         PendingPlayerIndex = playerIndex;
-
-        // 건설 대상이 되는 땅 인덱스를 저장한다.
         PendingCellIndex = cellIndex;
 
-        // 서버 로그에 현재 상태를 기록한다.
-        LogServer($"{playerIndex}번 플레이어가 구매한 땅에 건물을 지을 수 있습니다. 작은집/집 중 선택하세요.");
+        PlayerGameSlot player = Players.Get(playerIndex);
+
+        if (player.lapCount <= 0)
+        {
+            LogServer($"{playerIndex}번 플레이어가 구매한 땅에 건물을 지을 수 있습니다. 아직 한 바퀴 전이라 작은집/집만 가능합니다.");
+        }
+        else
+        {
+            LogServer($"{playerIndex}번 플레이어가 구매한 땅에 건물을 지을 수 있습니다. 한 바퀴 이상 돌아 큰집/호텔까지 선택할 수 있습니다.");
+        }
+
+        BumpRevision();
     }
 
     /// <summary>
@@ -2446,38 +2481,29 @@ public class BulmabulGameState : NetworkBehaviour
     /// 현재 건설 상태에서 작은집 / 집까지만 허용해야 하는지 판단한다.
     /// 
     /// 규칙:
-    /// 1. 땅 구매 직후 초기 건설은 항상 작은집 / 집만 가능하다.
-    /// 2. 인수 후 추가 건설은 한 바퀴 전이면 작은집 / 집만 가능하다.
-    /// 3. 시작지점 건설은 한 바퀴 이상 돈 상태에서만 열리므로 전체 건설 가능하다.
+    /// 1. 아직 한 바퀴를 돌지 않은 상태면 작은집 / 집만 가능.
+    /// 2. 한 바퀴 이상 돌았으면 구매 직후라도 작은집 / 집 / 큰집 / 호텔까지 가능.
+    /// 3. 시작지점 건설은 한 바퀴 이상 돈 상태에서만 열리므로 전체 건설 가능.
     /// </summary>
     private bool IsBuildRestrictedToSmallHouseAndHouse(int playerIndex)
     {
-        // 플레이어가 유효하지 않으면 안전하게 제한 상태로 처리한다.
         if (!IsValidAlivePlayer(playerIndex))
             return true;
 
+        PlayerGameSlot player = Players.Get(playerIndex);
+
         /*
-         * 땅 구매 직후:
-         * 한 바퀴 여부와 상관없이 작은집 / 집만 가능.
+         * 핵심 수정:
+         * 예전에는 InitialBuildAfterBuy면 무조건 true였다.
+         * 그래서 한 바퀴를 돌아도 새로 산 땅에서는 큰집을 못 지었다.
+         *
+         * 이제는 PendingAction이 무엇이든 lapCount 기준으로 판단한다.
+         * lapCount <= 0 : 작은집 / 집만 가능
+         * lapCount > 0  : 큰집 / 호텔까지 가능
          */
-        if (PendingAction == PendingActionType.InitialBuildAfterBuy)
+        if (player.lapCount <= 0)
             return true;
 
-        /*
-         * 인수 후 추가 건설:
-         * 아직 한 바퀴를 돌지 않았으면 작은집 / 집만 가능.
-         * 한 바퀴 이상 돌았으면 작은집 / 집 / 큰집 / 호텔 가능.
-         */
-        if (PendingAction == PendingActionType.BuildAfterTakeOver)
-        {
-            PlayerGameSlot player = Players.Get(playerIndex);
-            return player.lapCount <= 0;
-        }
-
-        /*
-         * 시작지점 건설:
-         * 이미 한 바퀴를 돈 상태에서만 열리므로 전체 건설 가능.
-         */
         return false;
     }
 
@@ -3210,16 +3236,30 @@ public class BulmabulGameState : NetworkBehaviour
 
     /// <summary>
     /// 여행 목적지 선택 팝업에서 고른 지역으로 Pawn을 이동시킨다.
-    /// 이동 후에는 해당 칸의 도착 효과를 정상 처리한다.
+    /// 
+    /// 중요:
+    /// - 직선 이동이 아니라 주사위 이동처럼 보드 경로를 따라 이동한다.
+    /// - 여행 칸이 시작 지점보다 뒤에 있고, 목적지가 시작 지점 근처라면
+    ///   마지막 칸 -> 시작 지점 -> 목적지 순서로 이동한다.
+    /// - 시작 지점을 통과하면 주사위 이동과 동일하게 보상을 지급한다.
+    /// - 이동 후 목적지 칸의 도착 효과를 정상 처리한다.
     /// </summary>
     private IEnumerator CoResolveTravelMove(int playerIndex, int targetCellIndex)
     {
         TurnBusy = true;
         BumpRevision();
 
+        if (board == null || board.CellCount <= 0)
+        {
+            TurnBusy = false;
+            BumpRevision();
+            yield break;
+        }
+
         PlayerGameSlot actor = Players.Get(playerIndex);
 
         int fromIndex = actor.tileIndex;
+        targetCellIndex = board.ClampCellIndex(targetCellIndex);
 
         /*
          * 목적지 선택 가능 상태 소비.
@@ -3227,18 +3267,35 @@ public class BulmabulGameState : NetworkBehaviour
          */
         actor.hasTravelDestinationReady = false;
         actor.travelCost = 0;
-
         Players.Set(playerIndex, actor);
 
-        LogServer($"{playerIndex}번 플레이어가 여행 목적지를 선택하여 {targetCellIndex}번 칸으로 이동합니다.");
+        int moveCount = CalculateForwardMoveCount(fromIndex, targetCellIndex);
 
-        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
+        BulmabulCellData targetCell = board.GetCell(targetCellIndex);
+        string targetName = targetCell != null ? targetCell.cellName : $"{targetCellIndex}번 칸";
 
-        float moveWait = pawnMover != null ? pawnMover.DirectMoveSeconds + 0.1f : 0.9f;
-        yield return new WaitForSeconds(moveWait);
+        LogServer($"{playerIndex}번 플레이어가 여행 목적지 [{targetName}]를 선택했습니다. {moveCount}칸 이동합니다.");
+
+        /*
+         * 핵심:
+         * 여행 이동도 주사위 이동처럼 보드 진행 방향으로 이동한다.
+         * 이 함수 안에서 시작 지점 통과 보상도 지급된다.
+         */
+        int finalTargetIndex = CalculateTargetIndexAndPaySalary(playerIndex, fromIndex, moveCount);
+
+        if (moveCount > 0)
+        {
+            RPC_PlayPawnMoveVisual(playerIndex, fromIndex, moveCount);
+
+            float moveWait = pawnMover != null
+                ? pawnMover.MoveStepSeconds * moveCount + 0.1f
+                : 0.22f * moveCount + 0.1f;
+
+            yield return new WaitForSeconds(moveWait);
+        }
 
         actor = Players.Get(playerIndex);
-        actor.tileIndex = targetCellIndex;
+        actor.tileIndex = finalTargetIndex;
         Players.Set(playerIndex, actor);
 
         /*
@@ -3246,7 +3303,9 @@ public class BulmabulGameState : NetworkBehaviour
          */
         PendingWasDouble = false;
 
-        bool waitsForChoice = ResolveLanding(playerIndex, targetCellIndex);
+        BumpRevision();
+
+        bool waitsForChoice = ResolveLanding(playerIndex, finalTargetIndex);
 
         if (waitsForChoice)
         {
@@ -3990,12 +4049,26 @@ public class BulmabulGameState : NetworkBehaviour
             if (cell == null)
                 return "건물을 선택하세요.";
 
+            PlayerGameSlot player = Players.Get(PendingPlayerIndex);
+
+            if (player.lapCount <= 0)
+            {
+                return
+                    $"{cell.cellName}\n" +
+                    $"구매한 땅에 건물을 지을 수 있습니다.\n" +
+                    $"아직 한 바퀴를 돌기 전이라 작은집과 집만 건설할 수 있습니다.\n" +
+                    $"작은집 비용: {cell.smallHouseBuildCost:N0}\n" +
+                    $"집 비용: {cell.houseBuildCost:N0}";
+            }
+
             return
                 $"{cell.cellName}\n" +
                 $"구매한 땅에 건물을 지을 수 있습니다.\n" +
-                $"작은집 비용: {cell.smallHouseBuildCost:N0}\n" +
-                $"집 비용: {cell.houseBuildCost:N0}\n" +
-                $"작은집과 집을 건설할 수 있습니다.";
+                $"한 바퀴 이상 돌아 큰집까지 건설할 수 있습니다.\n" +
+                $"작은집: {cell.smallHouseBuildCost:N0}\n" +
+                $"집: {cell.houseBuildCost:N0}\n" +
+                $"큰집: {cell.bigHouseBuildCost:N0}\n" +
+                $"호텔: {cell.hotelBuildCost:N0}";
         }
 
         if (PendingAction == PendingActionType.BuildFromStart)
@@ -5423,6 +5496,13 @@ public class BulmabulGameState : NetworkBehaviour
         TurnBusy = true;
         BumpRevision();
 
+        if (board == null || board.CellCount <= 0)
+        {
+            TurnBusy = false;
+            BumpRevision();
+            yield break;
+        }
+
         PlayerGameSlot actor = Players.Get(playerIndex);
         int fromIndex = actor.tileIndex;
 
@@ -5431,15 +5511,37 @@ public class BulmabulGameState : NetworkBehaviour
         BulmabulCellData targetCell = board.GetCell(targetCellIndex);
         string cellName = targetCell != null ? targetCell.cellName : $"{targetCellIndex}번 칸";
 
-        LogServer($"{playerIndex}번 플레이어가 테스트 이동으로 [{cellName}] 칸으로 이동합니다.");
+        /*
+         * 테스트 이동도 주사위처럼 보드 진행 방향으로 이동해야 한다.
+         * 예:
+         * 현재 70번 칸이고 감옥이 5번 칸이면
+         * 70 -> 71 -> ... -> 마지막 칸 -> 시작 지점 -> 1 -> ... -> 5
+         * 이런 식으로 한 바퀴 돌아서 이동한다.
+         */
+        int moveCount = CalculateForwardMoveCount(fromIndex, targetCellIndex);
 
-        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, targetCellIndex);
+        LogServer($"{playerIndex}번 플레이어가 테스트 이동으로 [{cellName}] 칸까지 {moveCount}칸 이동합니다.");
 
-        float moveWait = pawnMover != null ? pawnMover.DirectMoveSeconds + 0.1f : 0.9f;
-        yield return new WaitForSeconds(moveWait);
+        /*
+         * 핵심 수정:
+         * 기존 DirectMove 제거.
+         * 주사위 이동과 같은 Pawn 경로 이동 RPC 사용.
+         */
+        int finalTargetIndex = CalculateTargetIndexAndPaySalary(playerIndex, fromIndex, moveCount);
+
+        if (moveCount > 0)
+        {
+            RPC_PlayPawnMoveVisual(playerIndex, fromIndex, moveCount);
+
+            float moveWait = pawnMover != null
+                ? pawnMover.MoveStepSeconds * moveCount + 0.1f
+                : 0.22f * moveCount + 0.1f;
+
+            yield return new WaitForSeconds(moveWait);
+        }
 
         actor = Players.Get(playerIndex);
-        actor.tileIndex = targetCellIndex;
+        actor.tileIndex = finalTargetIndex;
         Players.Set(playerIndex, actor);
 
         // 테스트 이동은 주사위 더블이 아니므로 추가 턴을 주면 안 된다.
@@ -5450,7 +5552,7 @@ public class BulmabulGameState : NetworkBehaviour
         bool waitsForChoice = false;
 
         if (resolveLanding)
-            waitsForChoice = ResolveLanding(playerIndex, targetCellIndex);
+            waitsForChoice = ResolveLanding(playerIndex, finalTargetIndex);
 
         if (waitsForChoice)
         {
