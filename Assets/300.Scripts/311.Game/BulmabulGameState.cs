@@ -3288,7 +3288,7 @@ public class BulmabulGameState : NetworkBehaviour
             RPC_PlayPawnMoveVisual(playerIndex, fromIndex, moveCount);
 
             float moveWait = pawnMover != null
-                ? pawnMover.MoveStepSeconds * moveCount + 0.1f
+                ? pawnMover.GetStepMoveTotalSeconds(moveCount) + 0.1f
                 : 0.22f * moveCount + 0.1f;
 
             yield return new WaitForSeconds(moveWait);
@@ -5534,7 +5534,7 @@ public class BulmabulGameState : NetworkBehaviour
             RPC_PlayPawnMoveVisual(playerIndex, fromIndex, moveCount);
 
             float moveWait = pawnMover != null
-                ? pawnMover.MoveStepSeconds * moveCount + 0.1f
+                ? pawnMover.GetStepMoveTotalSeconds(moveCount) + 0.1f
                 : 0.22f * moveCount + 0.1f;
 
             yield return new WaitForSeconds(moveWait);

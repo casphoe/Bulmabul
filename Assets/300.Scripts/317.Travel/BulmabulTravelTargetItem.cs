@@ -13,6 +13,11 @@ public class BulmabulTravelTargetData : InfiniteScrollData
     public int buyCost;
     public int tollCost;
 
+    public int ownerIndex = -1;
+    public string ownerName;
+    public int ownerTeamSideInt = 0;
+    public bool isTeamMode;
+
     public Action<int> onClick;
 }
 
@@ -22,7 +27,15 @@ public class BulmabulTravelTargetItem : InfiniteScrollItem
     [SerializeField] private TMP_Text txtName;
     [SerializeField] private TMP_Text txtType;
     [SerializeField] private TMP_Text txtInfo;
+    [SerializeField] private TMP_Text txtOwner;
     [SerializeField] private TMP_Text txtButton;
+
+    [Header("Team Mode UI")]
+    [Tooltip("팀전일 때만 켜지는 오브젝트")]
+    [SerializeField] private GameObject teamModeObject;
+
+    [Tooltip("팀전 소유 정보 텍스트")]
+    [SerializeField] private TMP_Text txtTeamOwner;
 
     [Header("Button")]
     [SerializeField] private Button btnSelect;
@@ -66,9 +79,7 @@ public class BulmabulTravelTargetItem : InfiniteScrollItem
         }
 
         if (txtType != null)
-        {
             txtType.text = GetCellTypeText(_data.cellType);
-        }
 
         if (txtInfo != null)
         {
@@ -86,10 +97,69 @@ public class BulmabulTravelTargetItem : InfiniteScrollItem
             }
         }
 
+        RefreshOwnerText(eng);
+
         if (txtButton != null)
-        {
             txtButton.text = eng ? "Travel" : "여행하기";
+    }
+
+    private void RefreshOwnerText(bool eng)
+    {
+        bool isLand = _data.cellType == BulmabulCellType.Land;
+        bool hasOwner = isLand && _data.ownerIndex >= 0;
+
+        if (txtOwner != null)
+        {
+            if (!isLand)
+            {
+                txtOwner.text = eng ? "Not purchasable" : "구매 불가 칸";
+            }
+            else if (!hasOwner)
+            {
+                txtOwner.text = eng ? "Owner: None" : "소유자: 없음";
+            }
+            else
+            {
+                string ownerName = string.IsNullOrWhiteSpace(_data.ownerName)
+                    ? $"P{_data.ownerIndex + 1}"
+                    : _data.ownerName;
+
+                txtOwner.text = eng
+                    ? $"Owner: {ownerName}"
+                    : $"소유자: {ownerName}";
+            }
         }
+
+        bool showTeamObject = _data.isTeamMode && hasOwner;
+
+        if (teamModeObject != null)
+            teamModeObject.SetActive(showTeamObject);
+
+        if (txtTeamOwner != null)
+        {
+            if (!showTeamObject)
+            {
+                txtTeamOwner.text = "";
+                return;
+            }
+
+            string teamText = GetTeamText(_data.ownerTeamSideInt, eng);
+
+            txtTeamOwner.text = eng
+                ? $"Team: {teamText}"
+                : $"팀: {teamText}";
+        }
+    }
+
+    private string GetTeamText(int teamSideInt, bool eng)
+    {
+        if (teamSideInt == (int)TeamSide.Red)
+            return eng ? "Red" : "레드팀";
+
+        if (teamSideInt == (int)TeamSide.Blue)
+            return eng ? "Blue" : "블루팀";
+
+        return eng ? "None" : "팀 없음";
     }
 
     private void Clear()
@@ -102,6 +172,15 @@ public class BulmabulTravelTargetItem : InfiniteScrollItem
 
         if (txtInfo != null)
             txtInfo.text = "";
+
+        if (txtOwner != null)
+            txtOwner.text = "";
+
+        if (txtTeamOwner != null)
+            txtTeamOwner.text = "";
+
+        if (teamModeObject != null)
+            teamModeObject.SetActive(false);
 
         if (txtButton != null)
             txtButton.text = "";

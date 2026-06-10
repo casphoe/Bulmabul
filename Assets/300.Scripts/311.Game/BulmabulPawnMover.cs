@@ -79,8 +79,15 @@ public class BulmabulPawnMover : MonoBehaviour
     };
 
     [Header("Animation")]
-    [SerializeField] private float moveStepSeconds = 0.22f;
+    [SerializeField] private float moveStepSeconds = 0.16f;
     [SerializeField] private float directMoveSeconds = 0.8f;
+
+    [Header("Long Step Move Speed")]
+    [Tooltip("이 칸 수 이상 이동하면 칸 이동 시간을 줄입니다. 여행처럼 장거리 이동할 때 사용")]
+    [SerializeField] private int fastStepMoveThreshold = 20;
+
+    [Tooltip("장거리 이동 시 1칸 이동 시간 배율. 0.5면 기존 시간의 절반")]
+    [SerializeField] private float fastStepMoveSecondsMultiplier = 0.5f;
 
     [Header("3D Offset")]
     [Tooltip("말이 발판 위에 살짝 떠 있도록 올리는 Y 오프셋")]
@@ -93,6 +100,30 @@ public class BulmabulPawnMover : MonoBehaviour
 
     public float MoveStepSeconds => moveStepSeconds;
     public float DirectMoveSeconds => directMoveSeconds;
+
+    /// <summary>
+    /// 이동 칸 수에 따라 실제 1칸 이동 시간을 반환한다.
+    /// 예: 20칸 이상 이동하면 moveStepSeconds의 절반 속도로 이동.
+    /// </summary>
+    public float GetStepSecondsForMoveCount(int moveCount)
+    {
+        if (moveCount >= fastStepMoveThreshold)
+            return moveStepSeconds * fastStepMoveSecondsMultiplier;
+
+        return moveStepSeconds;
+    }
+
+    /// <summary>
+    /// 전체 칸 이동 연출 예상 시간.
+    /// GameState에서 WaitForSeconds 계산할 때 사용한다.
+    /// </summary>
+    public float GetStepMoveTotalSeconds(int moveCount)
+    {
+        if (moveCount <= 0)
+            return 0f;
+
+        return GetStepSecondsForMoveCount(moveCount) * moveCount;
+    }
 
     public void SetBoard(BulmabulBoard targetBoard)
     {
@@ -247,6 +278,8 @@ public class BulmabulPawnMover : MonoBehaviour
         int boardCount = board.CellCount;
         int current = board.ClampCellIndex(fromIndex);
 
+        float currentStepSeconds = GetStepSecondsForMoveCount(moveCount);
+
         for (int i = 0; i < moveCount; i++)
         {
             int next = current + 1;
@@ -259,10 +292,10 @@ public class BulmabulPawnMover : MonoBehaviour
 
             float t = 0f;
 
-            while (t < moveStepSeconds)
+            while (t < currentStepSeconds)
             {
                 t += Time.deltaTime;
-                float lerp = Mathf.Clamp01(t / moveStepSeconds);
+                float lerp = Mathf.Clamp01(t / currentStepSeconds);
 
                 pawnVisuals[playerIndex].position = Vector3.Lerp(startPos, endPos, lerp);
                 UpdateNameTextPosition(playerIndex);
