@@ -51,6 +51,17 @@ public class BulmabulAngelCardUsePopup : MonoBehaviour
             return;
         }
 
+        /*
+         * 중요:
+         * Spawned()가 끝나기 전에는 PendingAction, Players 같은
+         * Networked Property를 읽으면 Fusion 오류가 난다.
+         */
+        if (!state.IsSpawnReady)
+        {
+            Hide();
+            return;
+        }
+
         if (!state.ShouldShowAngelCardTollPopupForLocalPlayer())
         {
             Hide();

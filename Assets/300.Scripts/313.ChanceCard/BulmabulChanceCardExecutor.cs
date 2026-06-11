@@ -2,12 +2,17 @@
 
 /// <summary>
 /// 찬스 카드 효과 실행 담당.
-/// 카드 효과 자체는 여기에서 처리한다.
+/// 
+/// 역할:
+/// 1. 보관 카드 지급
+/// 2. 즉시 실행 카드 효과 적용
+/// 3. 보상/세금/이동/감옥/시작 이동 처리
+/// 4. 카드 사용 후 버림 카드 더미 처리
 /// 
 /// 중요:
-/// 이동 카드에서는 절대 여기서 직접 tileIndex만 바꾸면 안 된다.
+/// 이동 카드는 절대 tileIndex만 직접 바꾸면 안 된다.
 /// 반드시 BulmabulGameState의 카드 이동 공통 함수를 호출해야 한다.
-/// 그래야 감옥 / 상대 땅 / 빈 땅 / 내 땅 / 여행칸 / 시작칸 / 보너스칸 / 세금칸 처리가 이어진다.
+/// 그래야 도착 칸의 구매/통행료/여행/감옥/찬스 처리가 이어진다.
 /// </summary>
 public class BulmabulChanceCardExecutor : MonoBehaviour
 {
@@ -27,17 +32,28 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             board = FindFirstObjectByType<BulmabulBoard>();
     }
 
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
     /// <summary>
     /// 찬스 카드 뽑은 직후 실행.
-    /// 즉시 실행 카드는 바로 실행하고,
-    /// 보관 카드는 인벤토리에 저장한다.
+    /// 보관 카드는 인벤토리에 저장하고,
+    /// 즉시 실행 카드는 바로 효과를 처리한다.
     /// </summary>
     public bool HandleDrawnCard(int playerIndex, BulmabulChanceCardData card)
     {
         if (card == null)
             return false;
 
-        if (card.useType == BulmabulChanceCardUseType.Keep)
+        /*
+         * 중요:
+         * Inspector에서 useType을 실수로 Immediate로 둬도
+         * Angel/JailEscape/Travel 타입은 무조건 보관 카드로 처리한다.
+         */
+        if (IsKeepCardType(card.cardType) || card.useType == BulmabulChanceCardUseType.Keep)
         {
             KeepCard(playerIndex, card);
             return false;
@@ -45,10 +61,27 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
         bool waitsForPlayerChoice = ExecuteImmediateCard(playerIndex, card);
 
-        if (BulmabulChanceDeck.Instance != null)
-            BulmabulChanceDeck.Instance.Discard(card);
+        /*
+         * 즉시 실행 카드는 실행 후 버림 카드 더미로 보낸다.
+         * 보관 카드는 실제 사용 완료 시점에 버림 처리한다.
+         */
+        DiscardCard(card);
 
         return waitsForPlayerChoice;
+    }
+
+    private bool IsKeepCardType(BulmabulChanceCardType type)
+    {
+        switch (type)
+        {
+            case BulmabulChanceCardType.AngelCard:
+            case BulmabulChanceCardType.JailEscapeCard:
+            case BulmabulChanceCardType.MoveToTravelCard:
+                return true;
+
+            default:
+                return false;
+        }
     }
 
     private void KeepCard(int playerIndex, BulmabulChanceCardData card)
@@ -69,20 +102,37 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
         if (kept)
         {
+            state.RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"+{card.GetName()}",
+                $"+{card.GetName()}",
+                1
+            );
+
             ShowToast(
                 $"{card.GetName()} 카드를 보관했습니다.",
                 $"Kept {card.GetName()} card."
             );
-        }
-        else
-        {
-            ShowToast(
-                $"{card.GetName()} 카드는 이미 보관 중이거나 보관할 수 없습니다. 새 카드는 버립니다.",
-                $"{card.GetName()} is already kept or cannot be kept. The new card is discarded."
-            );
 
-            DiscardCard(card);
+            state.RequestCardStateRefreshForAuthority();
+
+            if (BulmabulChanceInventory.Instance != null)
+                BulmabulChanceInventory.Instance.ForceRefreshFromNetworkState();
+
+            return;
         }
+
+        /*
+         * 이미 같은 보관 카드가 있으면 새로 뽑은 카드는 버림.
+         * 플레이어당 천사/감옥탈출/여행권은 각각 1장만 보관.
+         */
+        ShowToast(
+            $"{card.GetName()} 카드는 이미 보관 중입니다. 새 카드는 버립니다.",
+            $"{card.GetName()} is already kept. The new card is discarded."
+        );
+
+        DiscardCard(card);
+        state.RequestCardStateRefreshForAuthority();
     }
 
     private bool ExecuteImmediateCard(int playerIndex, BulmabulChanceCardData card)
@@ -90,77 +140,127 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
         if (card == null)
             return false;
 
+        Debug.Log(
+        $"[ChanceExecutor] 즉시 실행 카드 확인 " +
+        $"player={playerIndex}, " +
+        $"name={card.GetName()}, " +
+        $"type={card.cardType}, " +
+        $"useType={card.useType}, " +
+        $"moneyAmount={card.moneyAmount}, " +
+        $"moveStep={card.moveStep}, " +
+        $"cardId={card.cardId}"
+    );
+
+
         BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state == null)
+            return false;
 
         switch (card.cardType)
         {
             case BulmabulChanceCardType.ReceiveMoney:
-                AddCash(playerIndex, card.moneyAmount);
-                ShowToast($"{card.moneyAmount:N0}원을 받았습니다.", $"Received {card.moneyAmount:N0}.");
-                return false;
+                {
+                    int amount = Mathf.Max(0, card.moneyAmount);
+
+                    state.ApplyChanceMoneyForAuthority(
+                        playerIndex,
+                        amount,
+                        true,
+                        "보상 카드로",
+                        "reward card"
+                    );
+
+                    ShowToast(
+                        $"보상 {amount:N0}원을 받았습니다.",
+                        $"Received {amount:N0} reward."
+                    );
+
+                    return false;
+                }
 
             case BulmabulChanceCardType.PayMoney:
-                PayCash(playerIndex, card.moneyAmount);
-                ShowToast($"{card.moneyAmount:N0}원을 지불했습니다.", $"Paid {card.moneyAmount:N0}.");
-                return false;
+                {
+                    int amount = Mathf.Max(0, card.moneyAmount);
+
+                    bool paid = state.PayChanceTaxForAuthority(playerIndex, amount);
+
+                    if (paid)
+                    {
+                        ShowToast(
+                            $"세금 {amount:N0}원을 납부했습니다.",
+                            $"Paid {amount:N0} tax."
+                        );
+                    }
+                    else
+                    {
+                        ShowToast(
+                            $"세금 {amount:N0}원 납부 처리에 실패했습니다.",
+                            $"Failed to pay {amount:N0} tax."
+                        );
+                    }
+
+                    return false;
+                }
 
             case BulmabulChanceCardType.MoveToStart:
                 {
-                    if (state == null)
-                        return false;
-
                     bool waitsForPlayerChoice =
                         state.MovePlayerToCellByChanceCardForAuthority(playerIndex, startCellIndex, true);
 
-                    ShowToast("시작지점으로 이동합니다.", "Move to Start.");
+                    ShowToast(
+                        "시작지점으로 이동합니다.",
+                        "Move to Start."
+                    );
+
                     return waitsForPlayerChoice;
                 }
 
             case BulmabulChanceCardType.MoveToJail:
                 {
-                    if (state == null)
-                        return false;
-
                     bool waitsForPlayerChoice =
                         state.MovePlayerToJailByChanceCardForAuthority(playerIndex);
 
-                    ShowToast("감옥으로 이동합니다.", "Move to Jail.");
+                    ShowToast(
+                        "감옥으로 이동합니다.",
+                        "Move to Jail."
+                    );
+
                     return waitsForPlayerChoice;
                 }
 
             case BulmabulChanceCardType.MoveForward:
                 {
-                    if (state == null)
-                        return false;
-
                     int step = Mathf.Max(0, card.moveStep);
 
                     bool waitsForPlayerChoice =
                         state.MovePlayerByStepByChanceCardForAuthority(playerIndex, step);
 
-                    ShowToast($"{step}칸 앞으로 이동합니다.", $"Move forward {step} spaces.");
+                    ShowToast(
+                        $"{step}칸 앞으로 이동합니다.",
+                        $"Move forward {step} spaces."
+                    );
+
                     return waitsForPlayerChoice;
                 }
 
             case BulmabulChanceCardType.MoveBackward:
                 {
-                    if (state == null)
-                        return false;
-
                     int step = Mathf.Max(0, card.moveStep);
 
                     bool waitsForPlayerChoice =
                         state.MovePlayerByStepByChanceCardForAuthority(playerIndex, -step);
 
-                    ShowToast($"{step}칸 뒤로 이동합니다.", $"Move backward {step} spaces.");
+                    ShowToast(
+                        $"{step}칸 뒤로 이동합니다.",
+                        $"Move backward {step} spaces."
+                    );
+
                     return waitsForPlayerChoice;
                 }
 
             case BulmabulChanceCardType.MoveToNearestEnemyLand:
                 {
-                    if (state == null)
-                        return false;
-
                     bool waitsForPlayerChoice =
                         state.MoveToNearestEnemyOwnedLandByChanceCardForAuthority(playerIndex);
 
@@ -173,53 +273,94 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                 }
 
             case BulmabulChanceCardType.PayToAllPlayers:
-                PayToAllPlayers(playerIndex, card.moneyAmount);
-                ShowToast(
-                    $"모든 플레이어에게 {card.moneyAmount:N0}원씩 지급합니다.",
-                    $"Pay {card.moneyAmount:N0} to all players."
-                );
-                return false;
+                {
+                    int amount = Mathf.Max(0, card.moneyAmount);
+
+                    PayToAllPlayers(playerIndex, amount);
+
+                    ShowToast(
+                        $"모든 플레이어에게 {amount:N0}원씩 지급했습니다.",
+                        $"Paid {amount:N0} to all players."
+                    );
+
+                    return false;
+                }
 
             case BulmabulChanceCardType.ReceiveFromAllPlayers:
-                ReceiveFromAllPlayers(playerIndex, card.moneyAmount);
-                ShowToast(
-                    $"모든 플레이어에게 {card.moneyAmount:N0}원씩 받습니다.",
-                    $"Receive {card.moneyAmount:N0} from all players."
-                );
-                return false;
+                {
+                    int amount = Mathf.Max(0, card.moneyAmount);
+
+                    ReceiveFromAllPlayers(playerIndex, amount);
+
+                    ShowToast(
+                        $"모든 플레이어에게 {amount:N0}원씩 받았습니다.",
+                        $"Received {amount:N0} from all players."
+                    );
+
+                    return false;
+                }
 
             default:
-                Debug.LogWarning($"[ChanceExecutor] 즉시 실행할 수 없는 카드 타입: {card.cardType}");
-                return false;
+                {
+                    Debug.LogError(
+                        $"[ChanceExecutor] 처리되지 않은 찬스 카드입니다. " +
+                        $"name={card.GetName()}, " +
+                        $"type={card.cardType}, " +
+                        $"useType={card.useType}, " +
+                        $"moneyAmount={card.moneyAmount}, " +
+                        $"moveStep={card.moveStep}, " +
+                        $"cardId={card.cardId}"
+                    );
+
+                    ShowToast(
+                        $"처리되지 않은 찬스 카드입니다: {card.GetName()}",
+                        $"Unhandled chance card: {card.GetName()}"
+                    );
+
+                    return false;
+                }
         }
     }
 
     /// <summary>
     /// 보관 중인 카드 사용.
-    /// 천사 카드는 통행료 선택 팝업에서 사용된다.
-    /// 감옥 탈출 카드는 감옥 팝업에서 사용된다.
-    /// 여행권 카드는 여행 칸 이동용으로 사용된다.
+    /// 천사 카드는 통행료 선택 팝업에서 사용.
+    /// 감옥 탈출 카드는 감옥 팝업에서 사용.
+    /// 여행권 카드는 카드 인벤토리에서 사용.
     /// </summary>
     public bool UseKeptCard(int playerIndex, BulmabulChanceCardData card)
     {
         if (card == null)
             return false;
 
+        bool used = false;
+
         switch (card.cardType)
         {
             case BulmabulChanceCardType.AngelCard:
-                return UseAngelCard(playerIndex, card);
+                used = UseAngelCard(playerIndex, card);
+                break;
 
             case BulmabulChanceCardType.JailEscapeCard:
-                return UseJailEscapeCard(playerIndex, card);
+                used = UseJailEscapeCard(playerIndex, card);
+                break;
 
             case BulmabulChanceCardType.MoveToTravelCard:
-                return UseMoveToTravelCard(playerIndex, card);
+                used = UseMoveToTravelCard(playerIndex, card);
+                break;
 
             default:
                 Debug.LogWarning($"[ChanceExecutor] 보관 카드로 사용할 수 없는 타입: {card.cardType}");
                 return false;
         }
+
+        /*
+         * 보관 카드는 실제 사용 성공 시점에 버림 카드 더미로 보낸다.
+         */
+        if (used)
+            DiscardCard(card);
+
+        return used;
     }
 
     private bool UseAngelCard(int playerIndex, BulmabulChanceCardData card)
@@ -228,10 +369,18 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
         if (state == null || !state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard))
         {
-            ShowToast("천사 카드가 없습니다.", "You do not have an Angel Card.");
+            ShowToast(
+                "천사 카드가 없습니다.",
+                "You do not have an Angel Card."
+            );
+
             return false;
         }
 
+        /*
+         * 천사 카드는 인벤토리에서 직접 쓰는 카드가 아니다.
+         * 상대 땅 통행료 선택 팝업에서 사용한다.
+         */
         ShowToast(
             "천사 카드는 상대 땅 통행료 선택 팝업에서 사용할 수 있습니다.",
             "Use the Angel Card from the toll popup."
@@ -259,7 +408,11 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             return false;
         }
 
-        ShowToast("감옥 탈출 카드를 사용했습니다.", "Jail Escape Card used.");
+        ShowToast(
+            "감옥 탈출 카드를 사용했습니다.",
+            "Jail Escape Card used."
+        );
+
         return true;
     }
 
@@ -308,8 +461,24 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
         if (player.occupied == 0 || player.bankrupt)
             return;
 
+        int beforeCash = player.cash;
+
         player.cash = SafeAddCash(player.cash, amount);
         state.Players.Set(playerIndex, player);
+
+        state.RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"+{amount:N0}",
+            $"+{amount:N0}",
+            1
+        );
+
+        state.RequestCardStateRefreshForAuthority();
+
+        Debug.Log(
+            $"[ChanceExecutor] 보상 카드 처리 완료. " +
+            $"player={playerIndex}, before={beforeCash}, add={amount}, after={player.cash}"
+        );
     }
 
     private void PayCash(int playerIndex, int amount)
@@ -330,7 +499,10 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
         if (player.occupied == 0 || player.bankrupt)
             return;
 
-        player.cash -= amount;
+        int beforeCash = player.cash;
+        int payAmount = Mathf.Min(player.cash, amount);
+
+        player.cash -= payAmount;
 
         if (player.cash <= 0)
         {
@@ -339,17 +511,40 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
             state.Players.Set(playerIndex, player);
 
-            /*
-             * ReleaseAllOwnedLands가 private이면 여기서 직접 호출 못 한다.
-             * 이 경우 BulmabulGameState에 public 래퍼 함수를 하나 만들어야 한다.
-             */
             state.ReleaseAllOwnedLandsByCardForAuthority(playerIndex);
 
-            Debug.Log($"[ChanceExecutor] {playerIndex}번 플레이어가 카드 비용 {amount:N0} 지불 후 파산했습니다.");
+            state.RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"-{payAmount:N0}",
+                $"-{payAmount:N0}",
+                2
+            );
+
+            state.RequestCardStateRefreshForAuthority();
+
+            Debug.Log(
+                $"[ChanceExecutor] 세금 카드 납부 후 파산. " +
+                $"player={playerIndex}, before={beforeCash}, pay={payAmount}, after=0"
+            );
+
             return;
         }
 
         state.Players.Set(playerIndex, player);
+
+        state.RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"-{payAmount:N0}",
+            $"-{payAmount:N0}",
+            2
+        );
+
+        state.RequestCardStateRefreshForAuthority();
+
+        Debug.Log(
+            $"[ChanceExecutor] 세금 카드 처리 완료. " +
+            $"player={playerIndex}, before={beforeCash}, pay={payAmount}, after={player.cash}"
+        );
     }
 
     private void PayToAllPlayers(int playerIndex, int amount)
@@ -377,10 +572,24 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             other.cash = SafeAddCash(other.cash, amount);
             state.Players.Set(i, other);
 
+            state.RPC_ShowPawnFloatingText(
+                i,
+                $"+{amount:N0}",
+                $"+{amount:N0}",
+                1
+            );
+
             totalPaid += amount;
         }
 
         PayCash(playerIndex, totalPaid);
+
+        state.RequestCardStateRefreshForAuthority();
+
+        Debug.Log(
+            $"[ChanceExecutor] 전체 지급 카드 처리 완료. " +
+            $"payer={playerIndex}, each={amount}, totalPaid={totalPaid}"
+        );
     }
 
     private void ReceiveFromAllPlayers(int playerIndex, int amount)
@@ -408,12 +617,38 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             int payAmount = Mathf.Min(other.cash, amount);
 
             other.cash -= payAmount;
-            totalReceive += payAmount;
 
-            state.Players.Set(i, other);
+            if (other.cash <= 0)
+            {
+                other.cash = 0;
+                other.bankrupt = true;
+
+                state.Players.Set(i, other);
+                state.ReleaseAllOwnedLandsByCardForAuthority(i);
+            }
+            else
+            {
+                state.Players.Set(i, other);
+            }
+
+            state.RPC_ShowPawnFloatingText(
+                i,
+                $"-{payAmount:N0}",
+                $"-{payAmount:N0}",
+                2
+            );
+
+            totalReceive += payAmount;
         }
 
         AddCash(playerIndex, totalReceive);
+
+        state.RequestCardStateRefreshForAuthority();
+
+        Debug.Log(
+            $"[ChanceExecutor] 전체 수금 카드 처리 완료. " +
+            $"receiver={playerIndex}, each={amount}, totalReceive={totalReceive}"
+        );
     }
 
     private int SafeAddCash(int currentCash, int addAmount)
@@ -435,7 +670,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             return;
 
         if (BulmabulChanceDeck.Instance != null)
-            BulmabulChanceDeck.Instance.Discard(card);
+            BulmabulChanceDeck.Instance.DiscardForAuthority(card);
     }
 
     private void ShowToast(string kor, string eng)

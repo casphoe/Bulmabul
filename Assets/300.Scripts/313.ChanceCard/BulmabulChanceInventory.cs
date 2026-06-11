@@ -111,6 +111,12 @@ public class BulmabulChanceInventory : MonoBehaviour
         BulmabulChanceCardExecutor.Instance.UseKeptCard(playerIndex, card);
     }
 
+    private void OnEnable()
+    {
+        lastSyncedRevision = int.MinValue;
+        SyncFromNetworkStateIfNeeded();
+    }
+
     private void OnDestroy()
     {
         if (Instance == this)
@@ -129,7 +135,13 @@ public class BulmabulChanceInventory : MonoBehaviour
     {
         BulmabulGameState state = BulmabulGameState.Instance;
 
-        if (state == null || state.Runner == null)
+        if (state == null)
+            return;
+
+        if (!state.IsSpawnReady)
+            return;
+
+        if (state.Runner == null)
             return;
 
         if (lastSyncedRevision == state.Revision)
@@ -146,7 +158,13 @@ public class BulmabulChanceInventory : MonoBehaviour
     {
         BulmabulGameState state = BulmabulGameState.Instance;
 
-        if (state == null || state.Runner == null)
+        if (state == null)
+            return;
+
+        if (!state.IsSpawnReady)
+            return;
+
+        if (state.Runner == null)
             return;
 
         lastSyncedRevision = state.Revision;
@@ -157,16 +175,66 @@ public class BulmabulChanceInventory : MonoBehaviour
     {
         keptCards.Clear();
 
-        if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard) && angelCardData != null)
-            keptCards.Add(angelCardData);
+        BulmabulChanceCardData angelData = ResolveKeepCardData(
+            angelCardData,
+            BulmabulChanceCardType.AngelCard
+        );
 
-        if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.JailEscapeCard) && jailEscapeCardData != null)
-            keptCards.Add(jailEscapeCardData);
+        BulmabulChanceCardData jailEscapeData = ResolveKeepCardData(
+            jailEscapeCardData,
+            BulmabulChanceCardType.JailEscapeCard
+        );
 
-        if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.MoveToTravelCard) && travelCardData != null)
-            keptCards.Add(travelCardData);
+        BulmabulChanceCardData travelData = ResolveKeepCardData(
+            travelCardData,
+            BulmabulChanceCardType.MoveToTravelCard
+        );
+
+        if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard))
+        {
+            if (angelData != null)
+                keptCards.Add(angelData);
+            else
+                Debug.LogWarning("[ChanceInventory] 천사 카드를 보유 중이지만 표시용 카드 데이터가 없습니다.");
+        }
+
+        if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.JailEscapeCard))
+        {
+            if (jailEscapeData != null)
+                keptCards.Add(jailEscapeData);
+            else
+                Debug.LogWarning("[ChanceInventory] 감옥 탈출 카드를 보유 중이지만 표시용 카드 데이터가 없습니다.");
+        }
+
+        if (state.LocalHasKeptChanceCard(BulmabulChanceCardType.MoveToTravelCard))
+        {
+            if (travelData != null)
+                keptCards.Add(travelData);
+            else
+                Debug.LogWarning("[ChanceInventory] 여행 카드를 보유 중이지만 표시용 카드 데이터가 없습니다.");
+        }
 
         RefreshInventoryUI();
+    }
+
+    private BulmabulChanceCardData ResolveKeepCardData(
+    BulmabulChanceCardData inspectorData,
+    BulmabulChanceCardType type
+)
+    {
+        if (inspectorData != null && inspectorData.cardType == type)
+            return inspectorData;
+
+        if (BulmabulChanceDeck.Instance != null)
+        {
+            BulmabulChanceCardData deckData =
+                BulmabulChanceDeck.Instance.FindFirstCardByType(type);
+
+            if (deckData != null)
+                return deckData;
+        }
+
+        return inspectorData;
     }
 
     private void RefreshInventoryUI()

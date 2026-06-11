@@ -17310,6 +17310,7 @@ GameObject:
   - component: {fileID: 1580395504}
   - component: {fileID: 1580395505}
   - component: {fileID: 1580395506}
+  - component: {fileID: 1580395507}
   m_Layer: 0
   m_Name: GameSceneManager
   m_TagString: Untagged
@@ -17622,6 +17623,20 @@ MonoBehaviour:
   txtSortForward: {fileID: 1072266362}
   txtSortReverse: {fileID: 97730115}
   isReverseSort: 0
+--- !u!114 &1580395507
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1580395494}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 75bdc08e066d1d743ae494e8dc4463b3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  board: {fileID: 1580395497}
+  startCellIndex: 0
 --- !u!1 &1591368498
 GameObject:
   m_ObjectHideFlags: 0

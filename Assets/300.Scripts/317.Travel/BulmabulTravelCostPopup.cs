@@ -53,7 +53,7 @@ public class BulmabulTravelCostPopup : MonoBehaviour
     {
         BulmabulGameState state = BulmabulGameState.Instance;
 
-        if (state == null)
+        if (state == null || !state.IsSpawnReady)
         {
             Hide();
             return;

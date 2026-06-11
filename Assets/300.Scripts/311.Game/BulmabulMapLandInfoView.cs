@@ -1,6 +1,10 @@
 ﻿using TMPro;
 using UnityEngine;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 /// <summary>
 /// 전체 맵 보기 상태에서 땅 위에 표시되는 정보판.
 /// 
@@ -139,15 +143,17 @@ public class BulmabulMapLandInfoView : MonoBehaviour
 #if UNITY_EDITOR
     private void OnValidate()
     {
-
-        // Prefab Asset 상태에서는 자식 오브젝트 생성/부모 변경을 하면 Unity가 막는다.
-        // 그래서 에디터 검증 중에는 런타임 자동 생성을 하지 않는다.
-        if (!Application.isPlaying)
-            return;
-
-        EnsureCreated();
-        RefreshLayout();
-        ApplyStyle();
+        /*
+         * OnValidate에서는 절대 자동 생성 / SetParent / AddComponent를 하지 않는다.
+         * Prefab Asset 선택 중에도 호출될 수 있어서 Unity가 오류를 낸다.
+         *
+         * 실제 생성은 Play Mode의 Awake(), Setup(), Refresh()에서만 처리한다.
+         */
+        cellsPerSide = Mathf.Max(1, cellsPerSide);
+        fontSize = Mathf.Max(1f, fontSize);
+        textScale = Mathf.Max(0.001f, textScale);
+        textWidth = Mathf.Max(0.1f, textWidth);
+        textHeight = Mathf.Max(0.1f, textHeight);
     }
 #endif
 
@@ -227,9 +233,13 @@ public class BulmabulMapLandInfoView : MonoBehaviour
         if (!autoCreate)
             return;
 
-        // 에디터에서 Prefab Asset 자체를 검사하는 중에는 자식 생성/부모 변경 금지.
         if (!Application.isPlaying)
             return;
+
+#if UNITY_EDITOR
+        if (IsEditingPrefabAsset())
+            return;
+#endif
 
         EnsureRoot();
         EnsureBackground();
@@ -239,9 +249,30 @@ public class BulmabulMapLandInfoView : MonoBehaviour
 
     private void EnsureRoot()
     {
+        if (!Application.isPlaying)
+            return;
+
+#if UNITY_EDITOR
+        if (IsEditingPrefabAsset())
+            return;
+#endif
+
+        /*
+         * root가 Prefab Asset 안의 Transform을 물고 있으면
+         * Play Mode에서도 SetParent 시 Unity 오류가 날 수 있다.
+         * 이 경우 참조를 버리고 씬 인스턴스 기준으로 다시 찾거나 생성한다.
+         */
+#if UNITY_EDITOR
+        if (root != null && PrefabUtility.IsPartOfPrefabAsset(root.gameObject))
+            root = null;
+#endif
+
         if (root != null)
         {
-            root.SetParent(transform, false);
+            if (root.parent != transform)
+                root.SetParent(transform, false);
+
+            root.localScale = Vector3.one;
             return;
         }
 
@@ -263,14 +294,32 @@ public class BulmabulMapLandInfoView : MonoBehaviour
 
     private void EnsureBackground()
     {
+        if (!Application.isPlaying)
+            return;
+
         if (!useBackground)
             return;
 
+#if UNITY_EDITOR
+        if (IsEditingPrefabAsset())
+            return;
+#endif
+
         EnsureRoot();
+
+        if (root == null)
+            return;
+
+#if UNITY_EDITOR
+        if (background != null && PrefabUtility.IsPartOfPrefabAsset(background.gameObject))
+            background = null;
+#endif
 
         if (background != null)
         {
-            background.transform.SetParent(root, false);
+            if (background.transform.parent != root)
+                background.transform.SetParent(root, false);
+
             return;
         }
 
@@ -307,11 +356,29 @@ public class BulmabulMapLandInfoView : MonoBehaviour
 
     private void EnsureText()
     {
+        if (!Application.isPlaying)
+            return;
+
+#if UNITY_EDITOR
+        if (IsEditingPrefabAsset())
+            return;
+#endif
+
         EnsureRoot();
+
+        if (root == null)
+            return;
+
+#if UNITY_EDITOR
+        if (txtInfo != null && PrefabUtility.IsPartOfPrefabAsset(txtInfo.gameObject))
+            txtInfo = null;
+#endif
 
         if (txtInfo != null)
         {
-            txtInfo.transform.SetParent(root, false);
+            if (txtInfo.transform.parent != root)
+                txtInfo.transform.SetParent(root, false);
+
             return;
         }
 
@@ -343,6 +410,14 @@ public class BulmabulMapLandInfoView : MonoBehaviour
     /// </summary>
     private void RefreshLayout()
     {
+        if (!Application.isPlaying)
+            return;
+
+#if UNITY_EDITOR
+        if (IsEditingPrefabAsset())
+            return;
+#endif
+
         EnsureRoot();
 
         if (root == null)
@@ -604,4 +679,14 @@ public class BulmabulMapLandInfoView : MonoBehaviour
 
         return _whiteSprite;
     }
+
+#if UNITY_EDITOR
+    private bool IsEditingPrefabAsset()
+    {
+        if (gameObject == null)
+            return true;
+
+        return PrefabUtility.IsPartOfPrefabAsset(gameObject);
+    }
+#endif
 }

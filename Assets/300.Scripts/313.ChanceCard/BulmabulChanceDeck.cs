@@ -400,6 +400,44 @@ public class BulmabulChanceDeck : MonoBehaviour
         return null;
     }
 
+    public BulmabulChanceCardData FindFirstCardByType(BulmabulChanceCardType type)
+    {
+        if (startCards != null)
+        {
+            for (int i = 0; i < startCards.Count; i++)
+            {
+                BulmabulChanceCardData card = startCards[i];
+
+                if (card != null && card.cardType == type)
+                    return card;
+            }
+        }
+
+        if (drawPile != null)
+        {
+            for (int i = 0; i < drawPile.Count; i++)
+            {
+                BulmabulChanceCardData card = drawPile[i];
+
+                if (card != null && card.cardType == type)
+                    return card;
+            }
+        }
+
+        if (discardPile != null)
+        {
+            for (int i = 0; i < discardPile.Count; i++)
+            {
+                BulmabulChanceCardData card = discardPile[i];
+
+                if (card != null && card.cardType == type)
+                    return card;
+            }
+        }
+
+        return null;
+    }
+
 #if UNITY_EDITOR
     [ContextMenu("테스트 - 자동 덱 목록 만들기")]
     private void ContextBuildStartCards()

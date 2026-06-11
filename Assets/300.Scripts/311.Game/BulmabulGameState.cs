@@ -290,6 +290,8 @@ public class BulmabulGameState : NetworkBehaviour
 
     [Networked] public NetworkString<_128> PendingChanceCardId { get; set; }
 
+    private BulmabulChanceCardData pendingChanceCardData;
+
     private string controlText = "";
 
     private bool _submittedLocalDice;
@@ -1543,6 +1545,9 @@ public class BulmabulGameState : NetworkBehaviour
 
     public bool ShouldShowJailChoicePopupForLocalPlayer()
     {
+        if (!IsSpawnReady)
+            return false;
+
         if (Runner == null)
             return false;
 
@@ -1659,7 +1664,7 @@ public class BulmabulGameState : NetworkBehaviour
                 return false;
 
             case BulmabulCellType.Chance:
-                return ApplyChance(playerIndex, cell);
+                return ApplyChance(playerIndex, cellIndex, cell);
 
             case BulmabulCellType.Jail:
                 ApplyJail(playerIndex, cell);
@@ -2001,10 +2006,12 @@ public class BulmabulGameState : NetworkBehaviour
     /// <summary>
     /// 찬스칸 도착 처리.
     /// 
-    /// 찬스칸에 도착하면 덱의 맨 위 카드 1장을 자동으로 뽑는다.
-    /// DrawTopCard() 내부에서 카드 더미 UI도 자동으로 줄어든다.
+    /// 카드 수는 서버에서 즉시 차감하고,
+    /// 카드 내용은 뽑은 플레이어에게만 보여준다.
+    /// 실제 카드 효과는 확인 버튼을 눌렀을 때
+    /// RPC_RequestConfirmDrawnChanceCard()에서 실행한다.
     /// </summary>
-    private bool ApplyChance(int playerIndex, BulmabulCellData cell)
+    private bool ApplyChance(int playerIndex, int cellIndex, BulmabulCellData cell)
     {
         if (!Object.HasStateAuthority)
             return false;
@@ -2031,21 +2038,40 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
         }
 
+        /*
+         * 카드 수는 어떤 플레이어가 뽑든 전체 공통으로 즉시 감소.
+         */
         ChanceDeckRemainCount = deck.DrawPileCount;
         RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
 
+        /*
+         * 중요:
+         * 여기서 Pending 정보를 저장해야 확인 버튼을 눌렀을 때
+         * RPC_RequestConfirmDrawnChanceCard()가 어떤 카드를 실행할지 알 수 있다.
+         */
         PendingAction = PendingActionType.ChanceCardConfirm;
         PendingPlayerIndex = playerIndex;
-        PendingCellIndex = -1;
+        PendingCellIndex = cellIndex;
         PendingChanceCardId = card.cardId;
+        pendingChanceCardData = card;
 
-        RPC_ShowDrawnChanceCard(card.cardId);
+        LogServer(
+            $"{playerIndex}번 플레이어가 찬스 카드 [{card.GetName()}]를 뽑았습니다. 확인 대기. " +
+            $"cardId={card.cardId}, type={card.cardType}, useType={card.useType}, money={card.moneyAmount}, step={card.moveStep}"
+        );
 
-        LogServer($"{playerIndex}번 플레이어가 찬스 카드 [{card.GetName()}] 를 뽑았습니다. 카드 확인 대기 중.");
+        /*
+         * 뽑은 사람에게만 카드 팝업 표시.
+         * 다른 플레이어는 카드 내용 안 보임.
+         */
+        RPC_ShowDrawnChanceCard(playerIndex, card.cardId);
 
         BumpRevision();
 
-        // 여기서 true를 반환해야 턴이 멈추고 확인 버튼을 기다림
+        /*
+         * true를 반환해야 턴이 바로 넘어가지 않고
+         * 카드 확인 버튼 입력을 기다린다.
+         */
         return true;
     }
 
@@ -2958,6 +2984,9 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public bool ShouldShowTravelCostPopupForLocalPlayer()
     {
+        if (!IsSpawnReady)
+            return false;
+
         if (Runner == null)
             return false;
 
@@ -3356,6 +3385,7 @@ public class BulmabulGameState : NetworkBehaviour
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
         PendingChanceCardId = "";
+        pendingChanceCardData = null;
     }
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
@@ -3365,28 +3395,54 @@ public class BulmabulGameState : NetworkBehaviour
             return;
 
         if (PendingAction != PendingActionType.ChanceCardConfirm)
+        {
+            LogServer($"찬스 카드 확인 요청 무시. 현재 PendingAction={PendingAction}");
             return;
+        }
 
         if (!IsValidAlivePlayer(PendingPlayerIndex))
+        {
+            LogServer("찬스 카드 확인 요청 실패. PendingPlayerIndex가 유효하지 않습니다.");
+            ClearPendingChanceCard();
+            BumpRevision();
             return;
+        }
 
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+        int playerIndex = PendingPlayerIndex;
+        bool wasDouble = PendingWasDouble;
 
-        if (info.Source != slot.player)
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        bool requestFromDrawer = info.Source == slot.player;
+
+        /*
+         * 호스트가 직접 플레이 중일 때 info.Source가 기대와 다르게 들어오는 경우 방어.
+         */
+        if (!requestFromDrawer && Runner != null && slot.player == Runner.LocalPlayer)
+            requestFromDrawer = true;
+
+        if (!requestFromDrawer)
+        {
+            LogServer($"찬스 카드 확인 요청 거부. 요청자={info.Source}, 카드 소유자={slot.player}");
             return;
+        }
 
-        string cardId = PendingChanceCardId.ToString();
-
-        if (string.IsNullOrWhiteSpace(cardId))
-            return;
-
-        BulmabulChanceCardData card = FindChanceCardById(cardId);
+        BulmabulChanceCardData card = pendingChanceCardData;
 
         if (card == null)
         {
-            LogServer($"확인할 찬스 카드를 찾을 수 없습니다. cardId={cardId}");
+            string cardId = PendingChanceCardId.ToString();
+
+            if (!string.IsNullOrWhiteSpace(cardId))
+                card = FindChanceCardById(cardId);
+        }
+
+        if (card == null)
+        {
+            LogServer($"찬스 카드 실행 실패. 카드 데이터를 찾을 수 없습니다. PendingChanceCardId={PendingChanceCardId}");
+
             ClearPendingChanceCard();
-            FinishTurnAfterAction(PendingPlayerIndex, PendingWasDouble);
+            FinishTurnAfterAction(playerIndex, wasDouble);
             BumpRevision();
             return;
         }
@@ -3395,22 +3451,28 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (executor == null)
         {
-            LogServer("찬스 카드 실행기를 찾을 수 없습니다.");
+            LogServer("찬스 카드 실행 실패. BulmabulChanceCardExecutor.Instance가 없습니다.");
 
             BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
+
             if (deck != null)
                 deck.DiscardForAuthority(card);
 
-            int finishedPlayer = PendingPlayerIndex;
-
             ClearPendingChanceCard();
-            FinishTurnAfterAction(finishedPlayer, PendingWasDouble);
+            FinishTurnAfterAction(playerIndex, wasDouble);
             BumpRevision();
             return;
         }
 
-        int playerIndex = PendingPlayerIndex;
+        LogServer(
+            $"{playerIndex}번 플레이어 찬스 카드 실행 시작. " +
+            $"name={card.GetName()}, type={card.cardType}, useType={card.useType}, money={card.moneyAmount}, step={card.moveStep}"
+        );
 
+        /*
+         * 중요:
+         * 카드 효과 실행 전에 Pending을 비워야 이동 카드가 도착 칸 Pending을 새로 열 수 있다.
+         */
         ClearPendingChanceCard();
 
         bool waitsForPlayerChoice = executor.HandleDrawnCard(playerIndex, card);
@@ -3418,17 +3480,21 @@ public class BulmabulGameState : NetworkBehaviour
         BulmabulChanceDeck deckAfter = BulmabulChanceDeck.Instance;
 
         if (deckAfter != null)
+        {
             ChanceDeckRemainCount = deckAfter.DrawPileCount;
-
-        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+            RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+        }
 
         if (waitsForPlayerChoice)
         {
+            LogServer($"{playerIndex}번 플레이어 찬스 카드 실행 후 추가 선택 대기.");
             BumpRevision();
             return;
         }
 
-        FinishTurnAfterAction(playerIndex, PendingWasDouble);
+        LogServer($"{playerIndex}번 플레이어 찬스 카드 실행 완료. 턴 종료 처리.");
+
+        FinishTurnAfterAction(playerIndex, wasDouble);
         BumpRevision();
     }
 
@@ -3468,8 +3534,18 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_ShowDrawnChanceCard(string cardId)
+    private void RPC_ShowDrawnChanceCard(int playerIndex, string cardId)
     {
+        bool isLocalDrawer = IsLocalPlayerIndex(playerIndex);
+
+        if (!isLocalDrawer)
+        {
+            if (BulmabulChanceCellHandler.Instance != null)
+                BulmabulChanceCellHandler.Instance.HideDrawnCardOnly();
+
+            return;
+        }
+
         BulmabulChanceCardData card = FindChanceCardById(cardId);
 
         if (card == null)
@@ -3478,10 +3554,12 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
+        /*
+         * 중요:
+         * true = 확인 버튼을 눌렀을 때 서버에 카드 실행 요청을 보낸다.
+         */
         if (BulmabulChanceCellHandler.Instance != null)
-        {
-            BulmabulChanceCellHandler.Instance.ShowDrawnCardOnly(card);
-        }
+            BulmabulChanceCellHandler.Instance.ShowDrawnCardOnly(card, true, true);
     }
 
     private BulmabulChanceCardData FindChanceCardById(string cardId)
@@ -3500,6 +3578,19 @@ public class BulmabulGameState : NetworkBehaviour
     #endregion
 
     #region 보관 찬스 카드 처리
+
+    private bool IsLocalPlayerIndex(int playerIndex)
+    {
+        if (Runner == null)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        return slot.player == Runner.LocalPlayer;
+    }
 
     public bool CanLocalConfirmDrawnChanceCard()
     {
@@ -3522,17 +3613,13 @@ public class BulmabulGameState : NetworkBehaviour
         if (Runner == null)
             return;
 
-        if (PendingAction != PendingActionType.ChanceCardConfirm)
-            return;
-
-        if (!IsValidAlivePlayer(PendingPlayerIndex))
-            return;
-
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
-
-        if (slot.player != Runner.LocalPlayer)
-            return;
-
+        /*
+         * 로컬 PendingAction 동기화가 RPC 표시 타이밍보다 늦을 수 있으므로,
+         * 클라이언트에서는 과하게 막지 않는다.
+         *
+         * 실제 검증은 RPC_RequestConfirmDrawnChanceCard() 안에서
+         * StateAuthority가 PendingAction, PendingPlayerIndex, info.Source로 처리한다.
+         */
         RPC_RequestConfirmDrawnChanceCard();
     }
 
@@ -3644,6 +3731,9 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public bool LocalHasKeptChanceCard(BulmabulChanceCardType type)
     {
+        if (!IsSpawnReady)
+            return false;
+
         if (Runner == null)
             return false;
 
@@ -4488,6 +4578,9 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public bool CanLocalUseMoveToTravelCard()
     {
+        if (!IsSpawnReady)
+            return false;
+
         if (Runner == null)
             return false;
 
@@ -4501,6 +4594,7 @@ public class BulmabulGameState : NetworkBehaviour
             return false;
 
         int idx = FindPlayerIndex(Runner.LocalPlayer);
+
         if (!IsValidAlivePlayer(idx))
             return false;
 
@@ -4517,7 +4611,13 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public bool CanLocalUseJailEscapeCard()
     {
-        if (Runner == null || IsPaused || TurnBusy)
+        if (!IsSpawnReady)
+            return false;
+
+        if (Runner == null)
+            return false;
+
+        if (IsPaused || TurnBusy)
             return false;
 
         if (!ShouldShowJailChoicePopupForLocalPlayer())
@@ -4648,6 +4748,9 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public void RequestResolveAngelCardTollLocal(bool useAngelCard)
     {
+        if (!IsSpawnReady)
+            return;
+
         if (!ShouldShowAngelCardTollPopupForLocalPlayer())
             return;
 
@@ -4981,6 +5084,9 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public bool ShouldShowAngelCardTollPopupForLocalPlayer()
     {
+        if (!IsSpawnReady)
+            return false;
+
         if (Runner == null)
             return false;
 
@@ -5000,6 +5106,12 @@ public class BulmabulGameState : NetworkBehaviour
     /// </summary>
     public string GetPendingAngelCardTollInfoText()
     {
+        if (!IsSpawnReady)
+            return GetByLanguageForState(
+                "상대 땅 정보를 불러오는 중입니다.",
+                "Loading opponent land information."
+            );
+
         if (board == null)
             return GetByLanguageForState(
                 "상대 땅에 도착했습니다.\n천사 카드를 사용하시겠습니까?",
@@ -5340,6 +5452,161 @@ public class BulmabulGameState : NetworkBehaviour
             return;
 
         Revision++;
+    }
+
+    /// <summary>
+    /// 카드 효과로 플레이어 재화/보관 카드 상태가 바뀌었을 때
+    /// 외부 카드 실행기에서 UI 갱신을 요청하기 위한 public 래퍼.
+    /// </summary>
+    public void RequestCardStateRefreshForAuthority()
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        BumpRevision();
+    }
+
+    public bool ApplyChanceMoneyForAuthority(
+    int playerIndex,
+    int amount,
+    bool isReceive,
+    string logReasonKor,
+    string logReasonEng
+)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        amount = Mathf.Max(0, amount);
+
+        if (amount <= 0)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        int beforeCash = slot.cash;
+
+        if (isReceive)
+        {
+            long result = (long)slot.cash + amount;
+            slot.cash = result > int.MaxValue ? int.MaxValue : (int)result;
+
+            Players.Set(playerIndex, slot);
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"+{amount:N0}",
+                $"+{amount:N0}",
+                1
+            );
+
+            LogServer($"{playerIndex}번 플레이어가 {logReasonKor} {amount:N0}원을 받았습니다. {beforeCash:N0} -> {slot.cash:N0}");
+
+            BumpRevision();
+            return true;
+        }
+
+        int payAmount = Mathf.Min(slot.cash, amount);
+
+        slot.cash -= payAmount;
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"-{payAmount:N0}",
+            $"-{payAmount:N0}",
+            2
+        );
+
+        if (slot.cash <= 0)
+        {
+            slot.cash = 0;
+            slot.bankrupt = true;
+
+            Players.Set(playerIndex, slot);
+
+            ReleaseAllOwnedLandsByCardForAuthority(playerIndex);
+
+            LogServer($"{playerIndex}번 플레이어가 {logReasonKor} {amount:N0}원 납부 후 파산했습니다. {beforeCash:N0} -> 0");
+
+            BumpRevision();
+            return false;
+        }
+
+        Players.Set(playerIndex, slot);
+
+        LogServer($"{playerIndex}번 플레이어가 {logReasonKor} {payAmount:N0}원을 납부했습니다. {beforeCash:N0} -> {slot.cash:N0}");
+
+        BumpRevision();
+        return true;
+    }
+
+    public bool PayChanceTaxForAuthority(int playerIndex, int amount)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        amount = Mathf.Max(0, amount);
+
+        if (amount <= 0)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        if (slot.occupied == 0 || slot.bankrupt)
+            return false;
+
+        int beforeCash = slot.cash;
+        int payAmount = Mathf.Min(beforeCash, amount);
+
+        slot.cash = beforeCash - payAmount;
+
+        if (slot.cash <= 0)
+        {
+            slot.cash = 0;
+            slot.bankrupt = true;
+
+            Players.Set(playerIndex, slot);
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"-{payAmount:N0}",
+                $"-{payAmount:N0}",
+                2
+            );
+
+            ReleaseAllOwnedLandsByCardForAuthority(playerIndex);
+
+            LogServer(
+                $"{playerIndex}번 플레이어가 세금 카드로 {payAmount:N0}원을 납부하고 파산했습니다. " +
+                $"{beforeCash:N0} -> 0"
+            );
+
+            BumpRevision();
+            return true;
+        }
+
+        Players.Set(playerIndex, slot);
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            $"-{payAmount:N0}",
+            $"-{payAmount:N0}",
+            2
+        );
+
+        LogServer(
+            $"{playerIndex}번 플레이어가 세금 카드로 {payAmount:N0}원을 납부했습니다. " +
+            $"{beforeCash:N0} -> {slot.cash:N0}"
+        );
+
+        BumpRevision();
+        return true;
     }
 
     /// <summary>
