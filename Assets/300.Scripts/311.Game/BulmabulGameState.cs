@@ -5,32 +5,25 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// 실제 부루마불 게임 진행 전체를 담당하는 네트워크 상태 오브젝트.
-///
-/// 이 스크립트는 UI/주사위 연출/말 이동 연출을 직접 처리하지 않는다.
-/// - UI 표시: BulmabulGameUI
-/// - 주사위 화면 연출: BulmabulDiceVisual
-/// - 말 이동 연출: BulmabulPawnMover
+/// 부루마불 온라인 보드게임의 핵심 네트워크 게임 상태 컨트롤러입니다.
+/// 
+/// Photon Fusion의 StateAuthority를 기준으로 게임 참여자 초기화, 턴 진행,
+/// 주사위 처리, Pawn 위치 동기화, 칸 도착 이벤트, 땅 구매/건설,
+/// 통행료, 감옥, 여행, 찬스 카드, 일시정지, 이탈 및 승패 처리를 담당합니다.
+/// 
+/// 역할 분리:
+/// - UI 표시 및 입력 처리: BulmabulGameUI 및 각 Popup
+/// - 주사위 연출: BulmabulDiceVisual, DiceRollingUI
+/// - Pawn 이동 연출: BulmabulPawnMover
 /// - 주사위 결과 계산: BulmabulDiceRoller
-/// - 땅/건물 계산: BulmabulLandSystem
-///
-/// 담당 기능:
-/// 1. 게임 참여자 초기화
-/// 2. 현재 턴 관리
-/// 3. 턴 제한시간 60초 관리
-/// 4. 장착 주사위 기준으로 주사위 2개 굴림
-/// 5. 말 위치 네트워크 동기화
-/// 6. 빈 땅 구매
-/// 7. 땅 구매 직후 작은집 / 집 중 하나 건설
-/// 8. 시작지점 도착 시 보유 땅에 작은집 / 집 / 큰집 / 호텔 건설
-/// 9. 관광지/랜드마크 건설 불가
-/// 10. 적 플레이어 땅 도착 시 건물 포함 통행료 지급
-/// 11. 호텔은 통행료 지급 후에도 제거되지 않음
-/// 12. 세금 / 보너스 / 여행 칸 처리
-/// 13. 더블이면 같은 플레이어가 한 번 더 진행
-/// 14. 더블이 아니면 다음 플레이어 턴
-/// 15. 한 유저가 일시정지하면 전체 일시정지
-/// 16. 유저마다 한 게임당 일시정지 5회 제한
+/// - 땅/건물/통행료 계산: BulmabulLandSystem
+/// - 찬스 카드 덱 관리: BulmabulChanceDeck
+/// - 찬스 카드 효과 실행: BulmabulChanceCardExecutor
+/// 
+/// 멀티플레이 주의:
+/// 재화, 위치, 땅 소유권, 건물 상태, 보관 카드, 감옥 상태 등
+/// 게임 결과에 영향을 주는 데이터는 반드시 StateAuthority에서만 변경합니다.
+/// 클라이언트는 로컬 입력을 RPC로 요청하고, 실제 검증과 처리는 StateAuthority에서 수행합니다.
 /// </summary>
 public class BulmabulGameState : NetworkBehaviour
 {
@@ -175,7 +168,13 @@ public class BulmabulGameState : NetworkBehaviour
         /// <summary>
         /// 상대 땅 인수 후, 기존 건물은 유지한 상태로 추가 건설할 수 있는 상태.
         /// </summary>
-        BuildAfterTakeOver = 8
+        BuildAfterTakeOver = 8,
+
+        /// <summary>
+        /// 찬스 카드를 뽑은 뒤, 카드 팝업 확인 버튼 입력을 기다리는 상태.
+        /// 확인 버튼을 누르면 StateAuthority에서 카드 효과를 실행한다.
+        /// </summary>
+        ChanceCardConfirm = 9
     }
 
     [Header("Rule")]
@@ -289,7 +288,9 @@ public class BulmabulGameState : NetworkBehaviour
     [Networked] public int ChanceDeckRemainCount { get; set; }
     [Networked] public NetworkBool ChanceDeckInitialized { get; set; }
 
-    string controlText = "";
+    [Networked] public NetworkString<_128> PendingChanceCardId { get; set; }
+
+    private string controlText = "";
 
     private bool _submittedLocalDice;
     private bool _placedOnce;
@@ -311,6 +312,8 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     public int MaxPauseCountPerPlayer => maxPauseCountPerPlayer;
+
+    #region Unity / Fusion 생명주기
 
     private void Awake()
     {
@@ -557,7 +560,10 @@ public class BulmabulGameState : NetworkBehaviour
         }
     }
 
-    #region 초기화
+    #endregion
+
+
+    #region 게임 초기화
 
     /// <summary>
     /// 게임 시작 시 서버/StateAuthority가 플레이어 슬롯, 땅 소유권, 건물 상태를 초기화한다.
@@ -694,6 +700,7 @@ public class BulmabulGameState : NetworkBehaviour
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
         PendingWasDouble = false;
+        PendingChanceCardId = "";
 
         IsPaused = false;
         PauseOwner = PlayerRef.None;
@@ -904,7 +911,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 로컬 요청 API
+    #region 로컬 입력 요청 API
 
     /// <summary>
     /// 로컬 플레이어가 주사위 굴림을 요청한다.
@@ -1035,7 +1042,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 턴 / 주사위
+    #region 턴 / 주사위 처리
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestRollDice(int parityChoiceInt, int gaugePermille, RpcInfo info = default)
@@ -1272,7 +1279,7 @@ public class BulmabulGameState : NetworkBehaviour
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
         PendingWasDouble = false;
-
+        PendingChanceCardId = "";
         int next = CurrentTurnIndex;
 
         for (int i = 0; i < MaxPlayers; i++)
@@ -1313,7 +1320,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 감옥 
+    #region 감옥 상태 진입 처리 
     // 5회 실패 후 다음 자기 턴 시작 시 자동 탈출시키는 코드다.
     // 기존 "무료 탈출 버튼" 방식이 아니라 팝업 없이 자동으로 감옥 상태를 해제하고 턴을 넘긴다.
 
@@ -1353,7 +1360,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 감옥 탈출
+    #region 감옥 탈출 처리
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestJailRollDice(int parityChoiceInt, int gaugePermille, RpcInfo info = default)
@@ -1622,7 +1629,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 칸 도착 처리
+    #region 칸 도착 이벤트 처리
 
     private bool ResolveLanding(int playerIndex, int cellIndex)
     {
@@ -2027,23 +2034,19 @@ public class BulmabulGameState : NetworkBehaviour
         ChanceDeckRemainCount = deck.DrawPileCount;
         RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
 
-        LogServer($"{playerIndex}번 플레이어가 찬스 카드 [{card.GetName()}] 를 뽑았습니다.");
+        PendingAction = PendingActionType.ChanceCardConfirm;
+        PendingPlayerIndex = playerIndex;
+        PendingCellIndex = -1;
+        PendingChanceCardId = card.cardId;
 
-        BulmabulChanceCardExecutor executor = BulmabulChanceCardExecutor.Instance;
+        RPC_ShowDrawnChanceCard(card.cardId);
 
-        if (executor == null)
-        {
-            LogServer("찬스 카드 실행기를 찾을 수 없습니다.");
-            deck.DiscardForAuthority(card);
-            return false;
-        }
+        LogServer($"{playerIndex}번 플레이어가 찬스 카드 [{card.GetName()}] 를 뽑았습니다. 카드 확인 대기 중.");
 
-        bool waitsForPlayerChoice = executor.HandleDrawnCard(playerIndex, card);
+        BumpRevision();
 
-        ChanceDeckRemainCount = deck.DrawPileCount;
-        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
-
-        return waitsForPlayerChoice;
+        // 여기서 true를 반환해야 턴이 멈추고 확인 버튼을 기다림
+        return true;
     }
 
     private void ApplyJail(int playerIndex, BulmabulCellData cell)
@@ -2150,7 +2153,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 땅 구매 선택
+    #region 땅 구매 선택 처리
 
     /// <summary>
     /// 현재 구매 대기 상태인 땅을 실제로 구매 요청하는 RPC.
@@ -2281,7 +2284,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 건설 시스템
+    #region 건물 건설 처리
 
     /// <summary>
     /// 땅 구매 직후, 해당 땅에 건설 패널을 열 수 있는지 확인한다.
@@ -2834,7 +2837,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 여행 이동
+    #region 여행 처리
 
 
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
@@ -3345,6 +3348,330 @@ public class BulmabulGameState : NetworkBehaviour
     }
     #endregion
 
+    #region 찬스 카드 덱 / 팝업 / 확인 처리
+
+    private void ClearPendingChanceCard()
+    {
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+        PendingChanceCardId = "";
+    }
+
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestConfirmDrawnChanceCard(RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (PendingAction != PendingActionType.ChanceCardConfirm)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        if (info.Source != slot.player)
+            return;
+
+        string cardId = PendingChanceCardId.ToString();
+
+        if (string.IsNullOrWhiteSpace(cardId))
+            return;
+
+        BulmabulChanceCardData card = FindChanceCardById(cardId);
+
+        if (card == null)
+        {
+            LogServer($"확인할 찬스 카드를 찾을 수 없습니다. cardId={cardId}");
+            ClearPendingChanceCard();
+            FinishTurnAfterAction(PendingPlayerIndex, PendingWasDouble);
+            BumpRevision();
+            return;
+        }
+
+        BulmabulChanceCardExecutor executor = BulmabulChanceCardExecutor.Instance;
+
+        if (executor == null)
+        {
+            LogServer("찬스 카드 실행기를 찾을 수 없습니다.");
+
+            BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
+            if (deck != null)
+                deck.DiscardForAuthority(card);
+
+            int finishedPlayer = PendingPlayerIndex;
+
+            ClearPendingChanceCard();
+            FinishTurnAfterAction(finishedPlayer, PendingWasDouble);
+            BumpRevision();
+            return;
+        }
+
+        int playerIndex = PendingPlayerIndex;
+
+        ClearPendingChanceCard();
+
+        bool waitsForPlayerChoice = executor.HandleDrawnCard(playerIndex, card);
+
+        BulmabulChanceDeck deckAfter = BulmabulChanceDeck.Instance;
+
+        if (deckAfter != null)
+            ChanceDeckRemainCount = deckAfter.DrawPileCount;
+
+        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+
+        if (waitsForPlayerChoice)
+        {
+            BumpRevision();
+            return;
+        }
+
+        FinishTurnAfterAction(playerIndex, PendingWasDouble);
+        BumpRevision();
+    }
+
+    /// <summary>
+    /// Photon Fusion 멀티플레이용 찬스 카드 덱 초기화.
+    /// 반드시 StateAuthority에서만 호출한다.
+    /// </summary>
+    private void InitChanceDeckForFusion()
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
+
+        if (deck == null)
+        {
+            LogServer("BulmabulChanceDeck을 찾을 수 없습니다.");
+            return;
+        }
+
+        int seed = System.Guid.NewGuid().GetHashCode();
+
+        ChanceDeckSeed = seed;
+        ChanceDeckRemainCount = deck.ResetDeckForAuthority(seed);
+        ChanceDeckInitialized = true;
+
+        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
+
+        LogServer($"찬스 카드 덱 초기화 완료. seed={seed}, remain={ChanceDeckRemainCount}");
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_SyncChanceDeckUI(int remainCount)
+    {
+        if (BulmabulChanceDeck.Instance != null)
+            BulmabulChanceDeck.Instance.SetCardCountFromServer(remainCount);
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_ShowDrawnChanceCard(string cardId)
+    {
+        BulmabulChanceCardData card = FindChanceCardById(cardId);
+
+        if (card == null)
+        {
+            Debug.LogWarning($"[BulmabulGameState] 표시할 찬스 카드를 찾지 못했습니다. cardId={cardId}");
+            return;
+        }
+
+        if (BulmabulChanceCellHandler.Instance != null)
+        {
+            BulmabulChanceCellHandler.Instance.ShowDrawnCardOnly(card);
+        }
+    }
+
+    private BulmabulChanceCardData FindChanceCardById(string cardId)
+    {
+        if (string.IsNullOrWhiteSpace(cardId))
+            return null;
+
+        BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
+
+        if (deck == null)
+            return null;
+
+        return deck.FindCardById(cardId);
+    }
+
+    #endregion
+
+    #region 보관 찬스 카드 처리
+
+    public bool CanLocalConfirmDrawnChanceCard()
+    {
+        if (Runner == null)
+            return false;
+
+        if (PendingAction != PendingActionType.ChanceCardConfirm)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        return slot.player == Runner.LocalPlayer;
+    }
+
+    public void RequestConfirmDrawnChanceCardLocal()
+    {
+        if (Runner == null)
+            return;
+
+        if (PendingAction != PendingActionType.ChanceCardConfirm)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        if (slot.player != Runner.LocalPlayer)
+            return;
+
+        RPC_RequestConfirmDrawnChanceCard();
+    }
+
+
+    /// <summary>
+    /// StateAuthority에서 보관 카드를 플레이어에게 지급한다.
+    /// 플레이어당 같은 보관 카드는 1장만 가질 수 있다.
+    /// </summary>
+    public bool TryGiveKeptChanceCardForAuthority(int playerIndex, BulmabulChanceCardData card)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        if (card == null)
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        switch (card.cardType)
+        {
+            case BulmabulChanceCardType.AngelCard:
+                if (slot.hasAngelCard)
+                    return false;
+
+                slot.hasAngelCard = true;
+                Players.Set(playerIndex, slot);
+                BumpRevision();
+                return true;
+
+            case BulmabulChanceCardType.JailEscapeCard:
+                if (slot.hasJailEscapeCard)
+                    return false;
+
+                slot.hasJailEscapeCard = true;
+                Players.Set(playerIndex, slot);
+                BumpRevision();
+                return true;
+
+            case BulmabulChanceCardType.MoveToTravelCard:
+                if (slot.hasTravelCard)
+                    return false;
+
+                slot.hasTravelCard = true;
+                Players.Set(playerIndex, slot);
+                BumpRevision();
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// StateAuthority에서 보관 카드를 소비한다.
+    /// 실제 효과 실행 직전에 호출해야 한다.
+    /// </summary>
+    public bool TryConsumeKeptChanceCardForAuthority(int playerIndex, BulmabulChanceCardType type)
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+        bool consumed = false;
+
+        switch (type)
+        {
+            case BulmabulChanceCardType.AngelCard:
+                if (!slot.hasAngelCard)
+                    return false;
+
+                slot.hasAngelCard = false;
+                consumed = true;
+                break;
+
+            case BulmabulChanceCardType.JailEscapeCard:
+                if (!slot.hasJailEscapeCard)
+                    return false;
+
+                slot.hasJailEscapeCard = false;
+                consumed = true;
+                break;
+
+            case BulmabulChanceCardType.MoveToTravelCard:
+                if (!slot.hasTravelCard)
+                    return false;
+
+                slot.hasTravelCard = false;
+                consumed = true;
+                break;
+        }
+
+        if (!consumed)
+            return false;
+
+        Players.Set(playerIndex, slot);
+        BumpRevision();
+        return true;
+    }
+
+    /// <summary>
+    /// 로컬 플레이어가 특정 보관 카드를 가지고 있는지 확인.
+    /// UI는 이 함수로 자기 카드만 보여주면 된다.
+    /// </summary>
+    public bool LocalHasKeptChanceCard(BulmabulChanceCardType type)
+    {
+        if (Runner == null)
+            return false;
+
+        int idx = FindPlayerIndex(Runner.LocalPlayer);
+
+        if (!IsValidAlivePlayer(idx))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(idx);
+
+        switch (type)
+        {
+            case BulmabulChanceCardType.AngelCard:
+                return slot.hasAngelCard;
+
+            case BulmabulChanceCardType.JailEscapeCard:
+                return slot.hasJailEscapeCard;
+
+            case BulmabulChanceCardType.MoveToTravelCard:
+                return slot.hasTravelCard;
+
+            default:
+                return false;
+        }
+    }
+
+    #endregion
+
     #region 찬스 카드 공통 이동 처리
 
     /// <summary>
@@ -3466,7 +3793,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 적 소유 땅 이동 함수
+    #region 찬스 카드 적 소유 땅 이동 처리
 
     /// <summary>
     /// 찬스 카드 효과:
@@ -3579,7 +3906,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 일시정지
+    #region 일시정지 처리
 
     /// <summary>
     /// 게임 일시정지 요청 RPC.
@@ -3741,7 +4068,7 @@ public class BulmabulGameState : NetworkBehaviour
             pawnMover.PlayDirectMove(playerIndex, fromIndex, targetIndex);
     }
 
-    #region 플레이어의 대한 플로팅 텍스트
+    #region Pawn 플로팅 텍스트 RPC
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
     public void RPC_ShowPawnFloatingText(int playerIndex, string korMessage, string engMessage, int type)
@@ -4921,7 +5248,7 @@ public class BulmabulGameState : NetworkBehaviour
     }
     #endregion
 
-    #region 헬퍼
+    #region 헬퍼 함수
 
     private bool IsMyTurn(PlayerRef player)
     {
@@ -5040,9 +5367,19 @@ public class BulmabulGameState : NetworkBehaviour
     }
     #endregion
 
+    #region 게임 결과 공개 API
+
     /// <summary>
     /// 로컬 플레이어가 현재 게임의 승자인지 확인한다.
-    /// UI에서 승리 보상 지급 / 자동 퇴장 처리에 사용한다.
+    /// 
+    /// 사용 위치:
+    /// - BulmabulGameUI
+    /// - 승리 보상 지급 여부 판단
+    /// - 게임 종료 후 ResultPanel 표시 여부 판단
+    /// 
+    /// 주의:
+    /// GameFinished, WinnerIndex, Players 같은 Networked Property는
+    /// Fusion Spawned() 이후에만 접근해야 하므로 IsSpawnReady를 먼저 확인한다.
     /// </summary>
     public bool IsLocalPlayerWinner()
     {
@@ -5061,24 +5398,29 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 현재 승리자 닉네임 반환.
+    /// 현재 승리자의 닉네임을 반환한다.
+    /// 
+    /// WinnerIndex가 유효하지 않거나 닉네임이 비어 있으면
+    /// 현재 언어에 맞는 기본 승리자 이름을 반환한다.
     /// </summary>
     public string GetWinnerNickname()
     {
         if (WinnerIndex < 0 || WinnerIndex >= MaxPlayers)
-            return GetByLanguage("승리자", "Winner");
+            return GetByLanguageForState("승리자", "Winner");
 
         PlayerGameSlot winner = Players.Get(WinnerIndex);
 
-        string nick = winner.nickname.ToString();
+        string nickname = winner.nickname.ToString();
 
-        if (string.IsNullOrWhiteSpace(nick))
-            nick = $"Player {WinnerIndex + 1}";
+        if (string.IsNullOrWhiteSpace(nickname))
+            nickname = $"Player {WinnerIndex + 1}";
 
-        return nick;
+        return nickname;
     }
 
-    #region 플레이어 나가기 / 강제 종료 / 승자 판정
+    #endregion
+
+    #region 플레이어 이탈 / 승패 처리
 
     public enum LeaveReasonType
     {
@@ -5268,183 +5610,7 @@ public class BulmabulGameState : NetworkBehaviour
 
     #endregion
 
-    #region 멀티 플레이 카드 덱 초기화
-
-    /// <summary>
-    /// Photon Fusion 멀티플레이용 찬스 카드 덱 초기화.
-    /// 반드시 StateAuthority에서만 호출한다.
-    /// </summary>
-    private void InitChanceDeckForFusion()
-    {
-        if (!Object.HasStateAuthority)
-            return;
-
-        BulmabulChanceDeck deck = BulmabulChanceDeck.Instance;
-
-        if (deck == null)
-        {
-            LogServer("BulmabulChanceDeck을 찾을 수 없습니다.");
-            return;
-        }
-
-        int seed = System.Guid.NewGuid().GetHashCode();
-
-        ChanceDeckSeed = seed;
-        ChanceDeckRemainCount = deck.ResetDeckForAuthority(seed);
-        ChanceDeckInitialized = true;
-
-        RPC_SyncChanceDeckUI(ChanceDeckRemainCount);
-
-        LogServer($"찬스 카드 덱 초기화 완료. seed={seed}, remain={ChanceDeckRemainCount}");
-    }
-
-    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_SyncChanceDeckUI(int remainCount)
-    {
-        if (BulmabulChanceDeck.Instance != null)
-            BulmabulChanceDeck.Instance.SetCardCountFromServer(remainCount);
-    }
-
-    #endregion
-
-    #region 보관 찬스 카드 네트워크 상태
-
-    /// <summary>
-    /// StateAuthority에서 보관 카드를 플레이어에게 지급한다.
-    /// 플레이어당 같은 보관 카드는 1장만 가질 수 있다.
-    /// </summary>
-    public bool TryGiveKeptChanceCardForAuthority(int playerIndex, BulmabulChanceCardData card)
-    {
-        if (!Object.HasStateAuthority)
-            return false;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return false;
-
-        if (card == null)
-            return false;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        switch (card.cardType)
-        {
-            case BulmabulChanceCardType.AngelCard:
-                if (slot.hasAngelCard)
-                    return false;
-
-                slot.hasAngelCard = true;
-                Players.Set(playerIndex, slot);
-                BumpRevision();
-                return true;
-
-            case BulmabulChanceCardType.JailEscapeCard:
-                if (slot.hasJailEscapeCard)
-                    return false;
-
-                slot.hasJailEscapeCard = true;
-                Players.Set(playerIndex, slot);
-                BumpRevision();
-                return true;
-
-            case BulmabulChanceCardType.MoveToTravelCard:
-                if (slot.hasTravelCard)
-                    return false;
-
-                slot.hasTravelCard = true;
-                Players.Set(playerIndex, slot);
-                BumpRevision();
-                return true;
-
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// StateAuthority에서 보관 카드를 소비한다.
-    /// 실제 효과 실행 직전에 호출해야 한다.
-    /// </summary>
-    public bool TryConsumeKeptChanceCardForAuthority(int playerIndex, BulmabulChanceCardType type)
-    {
-        if (!Object.HasStateAuthority)
-            return false;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return false;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-        bool consumed = false;
-
-        switch (type)
-        {
-            case BulmabulChanceCardType.AngelCard:
-                if (!slot.hasAngelCard)
-                    return false;
-
-                slot.hasAngelCard = false;
-                consumed = true;
-                break;
-
-            case BulmabulChanceCardType.JailEscapeCard:
-                if (!slot.hasJailEscapeCard)
-                    return false;
-
-                slot.hasJailEscapeCard = false;
-                consumed = true;
-                break;
-
-            case BulmabulChanceCardType.MoveToTravelCard:
-                if (!slot.hasTravelCard)
-                    return false;
-
-                slot.hasTravelCard = false;
-                consumed = true;
-                break;
-        }
-
-        if (!consumed)
-            return false;
-
-        Players.Set(playerIndex, slot);
-        BumpRevision();
-        return true;
-    }
-
-    /// <summary>
-    /// 로컬 플레이어가 특정 보관 카드를 가지고 있는지 확인.
-    /// UI는 이 함수로 자기 카드만 보여주면 된다.
-    /// </summary>
-    public bool LocalHasKeptChanceCard(BulmabulChanceCardType type)
-    {
-        if (Runner == null)
-            return false;
-
-        int idx = FindPlayerIndex(Runner.LocalPlayer);
-
-        if (!IsValidAlivePlayer(idx))
-            return false;
-
-        PlayerGameSlot slot = Players.Get(idx);
-
-        switch (type)
-        {
-            case BulmabulChanceCardType.AngelCard:
-                return slot.hasAngelCard;
-
-            case BulmabulChanceCardType.JailEscapeCard:
-                return slot.hasJailEscapeCard;
-
-            case BulmabulChanceCardType.MoveToTravelCard:
-                return slot.hasTravelCard;
-
-            default:
-                return false;
-        }
-    }
-
-    #endregion
-
-    #region 테스트 키 이동 전횽
+    #region 테스트 전용 이동 처리
 
 
     /// <summary>

@@ -20,6 +20,12 @@ public class BulmabulChanceCellHandler : MonoBehaviour
         Instance = this;
     }
 
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
     /// <summary>
     /// 서버에서 이미 뽑힌 카드를 화면에 보여주기만 한다.
     /// 카드 뽑기, 카드 실행은 여기서 하지 않는다.
@@ -30,8 +36,6 @@ public class BulmabulChanceCellHandler : MonoBehaviour
             return;
 
         if (popup != null)
-        {
-            popup.Show(card, null);
-        }
+            popup.Show(card);
     }
 }
