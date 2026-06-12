@@ -267,10 +267,15 @@ public class FireBaseAuthManager : MonoBehaviour
         // 로그인 날짜 갱신
         CurrentAccount.LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
-        // 자동 출석 + 로비에서 1회 열릴 pending 결과 저장
+        // 자동 출석 처리 전에 LoginDate를 먼저 오늘로 갱신하지 않는다.
+        // 그래야 저장되어 있던 최근 로그인 날짜가 어제인지, 오늘인지 출석 서비스에서 판단할 수 있다.
         Debug.Log("[Login] Before HandleAfterLoginAsync");
         await AttendanceLoginSessionBridge.HandleAfterLoginAsync(CurrentAccount);
         Debug.Log("[Login] After HandleAfterLoginAsync");
+
+        // 출석 처리 판단이 끝난 뒤, 이번 로그인 날짜를 오늘로 갱신한다.
+        // 날짜 비교는 AttendanceService에서 yyyy-MM-dd만 사용한다.
+        CurrentAccount.LoginDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
         // 로그인 날짜 갱신분 저장
         await AccountCloudStore.SaveFullAsync(CurrentAccount);
@@ -314,6 +319,7 @@ public class FireBaseAuthManager : MonoBehaviour
             AccountExp = 0,
 
             LastAttendanceDate = "",
+            IsAttendanceCheckedToday = false,
             AttendanceMonthKey = DateTime.Now.ToString("yyyy-MM"),
             AttendanceCountThisMonth = 0,
 

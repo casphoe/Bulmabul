@@ -62,6 +62,13 @@ public class Account
         set => lastAttendanceDate = value;
     }
 
+    [SerializeField] private bool isAttendanceCheckedToday;
+    public bool IsAttendanceCheckedToday
+    {
+        get => isAttendanceCheckedToday;
+        set => isAttendanceCheckedToday = value;
+    }
+
     [SerializeField] private string attendanceMonthKey;
     public string AttendanceMonthKey
     {

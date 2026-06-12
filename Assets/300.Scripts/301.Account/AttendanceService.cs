@@ -219,7 +219,9 @@ public static class AttendanceService
         AddClaimedDay(acc, todayDay);
 
         // 마지막 출석일 및 월 정보 갱신
+        // 날짜는 yyyy-MM-dd만 저장한다. 시간은 저장하지 않는다.
         acc.LastAttendanceDate = todayStr;
+        acc.IsAttendanceCheckedToday = true;
         acc.AttendanceMonthKey = monthKey;
         acc.AttendanceCountThisMonth = acc.ClaimedAttendanceDays.Count;
 
@@ -358,6 +360,7 @@ public static class AttendanceService
             acc.AttendanceCountThisMonth = 0;
             acc.ClaimedAttendanceDays.Clear();
             acc.LastAttendanceDate = "";
+            acc.IsAttendanceCheckedToday = false;
         }
 
         // 현재 달의 실제 일수
@@ -381,27 +384,96 @@ public static class AttendanceService
     /// <summary>
     /// 오늘 이미 출석했는지 검사
     ///
-    /// 검사 기준:
-    /// 1. LastAttendanceDate가 오늘 날짜 문자열과 같은지 확인
-    /// 2. ClaimedAttendanceDays에 오늘 day 값이 있는지 확인
+    /// 핵심 규칙:
+    /// - 시간은 비교하지 않고 yyyy-MM-dd 날짜만 비교한다.
+    /// - 오늘 출석 완료로 인정하려면 아래 3개가 모두 맞아야 한다.
+    ///   1. IsAttendanceCheckedToday == true
+    ///   2. LastAttendanceDate == 오늘 날짜
+    ///   3. LoginDate == 오늘 날짜
     ///
-    /// 둘 중 하나라도 만족하면 오늘 출석한 것으로 판단
+    /// 예외:
+    /// - IsAttendanceCheckedToday가 true이고 LastAttendanceDate도 오늘인데,
+    ///   LoginDate가 어제라면 오늘 출석한 상태로 보지 않는다.
+    /// - 이 경우 꼬인 출석 상태로 판단하고 오늘 체크 상태를 false로 보정한다.
     /// </summary>
     private static bool IsClaimedToday(Account acc, DateTime today)
     {
         EnsureAttendanceCollections(acc);
 
         string todayStr = today.ToString("yyyy-MM-dd");
+        string attendanceDateKey = GetDateKeyOnly(acc.LastAttendanceDate);
+        string loginDateKey = GetDateKeyOnly(acc.LoginDate);
 
-        // 마지막 출석 날짜 문자열로 1차 검사
-        if (!string.IsNullOrWhiteSpace(acc.LastAttendanceDate) &&
-            string.Equals(acc.LastAttendanceDate, todayStr, StringComparison.Ordinal))
+        bool checkedFlag = acc.IsAttendanceCheckedToday;
+        bool attendanceDateIsToday = string.Equals(attendanceDateKey, todayStr, StringComparison.Ordinal);
+        bool loginDateIsToday = string.Equals(loginDateKey, todayStr, StringComparison.Ordinal);
+
+        Debug.Log(
+            $"[AttendanceService] IsClaimedToday Check / " +
+            $"Today={todayStr}, " +
+            $"CheckedFlag={checkedFlag}, " +
+            $"LastAttendanceDate={acc.LastAttendanceDate}, " +
+            $"AttendanceDateKey={attendanceDateKey}, " +
+            $"LoginDate={acc.LoginDate}, " +
+            $"LoginDateKey={loginDateKey}, " +
+            $"AttendanceDateIsToday={attendanceDateIsToday}, " +
+            $"LoginDateIsToday={loginDateIsToday}"
+        );
+
+        // 정상적인 오늘 출석 완료 상태
+        if (checkedFlag && attendanceDateIsToday && loginDateIsToday)
         {
             return true;
         }
 
-        // 이번 달 출석 날짜 목록으로 2차 검사
-        return acc.ClaimedAttendanceDays.Contains(today.Day);
+        // bool은 true이고 출석 날짜도 오늘인데, 최근 로그인 날짜가 오늘이 아니면
+        // 오늘 출석 완료 상태로 보지 않는다.
+        if (checkedFlag && attendanceDateIsToday && !loginDateIsToday)
+        {
+            Debug.LogWarning(
+                "[AttendanceService] Stale attendance state detected. " +
+                "CheckedFlag=true and LastAttendanceDate=today, but LoginDate is not today. " +
+                "Reset today's attendance flag."
+            );
+
+            acc.IsAttendanceCheckedToday = false;
+
+            // 오늘 날짜가 출석 목록에 잘못 들어가 있으면 제거한다.
+            // 그래야 다시 출석 처리할 때 오늘 날짜가 정상적으로 추가된다.
+            acc.ClaimedAttendanceDays.Remove(today.Day);
+            acc.AttendanceCountThisMonth = acc.ClaimedAttendanceDays.Count;
+
+            return false;
+        }
+
+        // 그 외에는 오늘 출석하지 않은 상태
+        return false;
+    }
+
+    /// <summary>
+    /// 날짜 문자열에서 yyyy-MM-dd만 뽑아낸다.
+    /// 
+    /// 지원 예:
+    /// - "2026-06-12"
+    /// - "2026-06-12 13:45:20"
+    /// - "2026-06-12T13:45:20"
+    /// 
+    /// 시간은 출석 비교에 사용하지 않는다.
+    /// </summary>
+    private static string GetDateKeyOnly(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        value = value.Trim();
+
+        if (DateTime.TryParse(value, out DateTime parsed))
+            return parsed.ToString("yyyy-MM-dd");
+
+        if (value.Length >= 10)
+            return value.Substring(0, 10);
+
+        return value;
     }
 
     /// <summary>
