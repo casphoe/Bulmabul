@@ -109,10 +109,11 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                 1
             );
 
-            ShowToast(
-                $"{card.GetName()} 카드를 보관했습니다.",
-                $"Kept {card.GetName()} card."
-            );
+            ShowToastToPlayer(
+               playerIndex,
+               $"{card.GetName()} 카드를 보관했습니다.",
+               $"Kept {card.GetName()} card."
+           );
 
             state.RequestCardStateRefreshForAuthority();
 
@@ -126,7 +127,8 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
          * 이미 같은 보관 카드가 있으면 새로 뽑은 카드는 버림.
          * 플레이어당 천사/감옥탈출/여행권은 각각 1장만 보관.
          */
-        ShowToast(
+        ShowToastToPlayer(
+            playerIndex,
             $"{card.GetName()} 카드는 이미 보관 중입니다. 새 카드는 버립니다.",
             $"{card.GetName()} is already kept. The new card is discarded."
         );
@@ -171,7 +173,8 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                         "reward card"
                     );
 
-                    ShowToast(
+                    ShowToastToPlayer(
+                        playerIndex,
                         $"보상 {amount:N0}원을 받았습니다.",
                         $"Received {amount:N0} reward."
                     );
@@ -193,7 +196,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
                     if (waitsForAngelChoice)
                     {
-                        ShowToast(
+                        ShowToastToPlayer(playerIndex,
                             $"세금 {amount:N0}원 납부 전에 천사 카드 사용 여부를 선택하세요.",
                             $"Choose whether to use Angel Card before paying {amount:N0} tax."
                         );
@@ -201,11 +204,11 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                         return true;
                     }
 
-                    ShowToast(
+                    ShowToastToPlayer(
+                        playerIndex,
                         $"세금 {amount:N0}원을 납부했습니다.",
                         $"Paid {amount:N0} tax."
                     );
-
                     return false;
                 }
 
@@ -214,7 +217,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                     bool waitsForPlayerChoice =
                         state.MovePlayerToCellByChanceCardForAuthority(playerIndex, startCellIndex, true);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         "시작지점으로 이동합니다.",
                         "Move to Start."
                     );
@@ -227,7 +230,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                     bool waitsForPlayerChoice =
                         state.MovePlayerToJailByChanceCardForAuthority(playerIndex);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         "감옥으로 이동합니다.",
                         "Move to Jail."
                     );
@@ -242,7 +245,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                     bool waitsForPlayerChoice =
                         state.MovePlayerByStepByChanceCardForAuthority(playerIndex, step);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         $"{step}칸 앞으로 이동합니다.",
                         $"Move forward {step} spaces."
                     );
@@ -257,7 +260,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                     bool waitsForPlayerChoice =
                         state.MovePlayerByStepByChanceCardForAuthority(playerIndex, -step);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         $"{step}칸 뒤로 이동합니다.",
                         $"Move backward {step} spaces."
                     );
@@ -270,7 +273,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                     bool waitsForPlayerChoice =
                         state.MoveToNearestEnemyOwnedLandByChanceCardForAuthority(playerIndex);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         "가장 가까운 적 소유 땅으로 이동합니다.",
                         "Move to the nearest enemy-owned land."
                     );
@@ -284,7 +287,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
                     PayToAllPlayers(playerIndex, amount);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         $"모든 플레이어에게 {amount:N0}원씩 지급했습니다.",
                         $"Paid {amount:N0} to all players."
                     );
@@ -298,7 +301,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
                     ReceiveFromAllPlayers(playerIndex, amount);
 
-                    ShowToast(
+                    ShowToastToPlayer(playerIndex,
                         $"모든 플레이어에게 {amount:N0}원씩 받았습니다.",
                         $"Received {amount:N0} from all players."
                     );
@@ -375,7 +378,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
         if (state == null || !state.LocalHasKeptChanceCard(BulmabulChanceCardType.AngelCard))
         {
-            ShowToast(
+            ShowToastToPlayer(playerIndex,
                 "천사 카드가 없습니다.",
                 "You do not have an Angel Card."
             );
@@ -387,7 +390,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
          * 천사 카드는 인벤토리에서 직접 쓰는 카드가 아니다.
          * 상대 땅 통행료 선택 팝업에서 사용한다.
          */
-        ShowToast(
+        ShowToastToPlayer(playerIndex,
             "천사 카드는 상대 땅 통행료 선택 팝업에서 사용할 수 있습니다.",
             "Use the Angel Card from the toll popup."
         );
@@ -406,7 +409,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
         if (!requested)
         {
-            ShowToast(
+            ShowToastToPlayer(playerIndex,
                 "지금은 감옥 탈출 카드를 사용할 수 없습니다.",
                 "You cannot use the Jail Escape Card now."
             );
@@ -414,7 +417,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             return false;
         }
 
-        ShowToast(
+        ShowToastToPlayer(playerIndex,
             "감옥 탈출 카드를 사용했습니다.",
             "Jail Escape Card used."
         );
@@ -433,7 +436,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
 
         if (!requested)
         {
-            ShowToast(
+            ShowToastToPlayer(playerIndex,
                 "지금은 여행권 카드를 사용할 수 없습니다.",
                 "You cannot use the Travel Ticket now."
             );
@@ -441,7 +444,7 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
             return false;
         }
 
-        ShowToast(
+        ShowToastToPlayer(playerIndex,
             "여행권 카드를 사용했습니다. 여행 칸으로 이동합니다.",
             "Travel Ticket used. Move to the Travel cell."
         );
@@ -684,6 +687,30 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
         if (ToastMessageManager.instance != null)
         {
             ToastMessageManager.instance.ShowToast(kor, eng);
+            return;
+        }
+
+        Debug.Log(kor);
+    }
+
+    /// <summary>
+    /// 찬스 카드를 뽑은 플레이어에게만 토스트를 보여줍니다.
+    /// 
+    /// HandleDrawnCard()와 ExecuteImmediateCard()는 StateAuthority에서 실행되므로,
+    /// 여기서 ToastMessageManager.instance.ShowToast()를 바로 호출하면
+    /// 호스트 화면 또는 다른 플레이어 화면에 토스트가 표시될 수 있습니다.
+    /// 
+    /// 따라서 GameState의 RPC를 통해 모든 클라이언트에 전달한 뒤,
+    /// 각 클라이언트에서 실제 로컬 플레이어인지 검사하여
+    /// 대상 플레이어에게만 토스트를 표시합니다.
+    /// </summary>
+    private void ShowToastToPlayer(int playerIndex, string kor, string eng)
+    {
+        BulmabulGameState state = BulmabulGameState.Instance;
+
+        if (state != null)
+        {
+            state.RPC_ShowToastToPlayer(playerIndex, kor, eng);
             return;
         }
 

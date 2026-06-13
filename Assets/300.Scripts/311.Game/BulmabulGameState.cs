@@ -4475,6 +4475,25 @@ public class BulmabulGameState : NetworkBehaviour
         );
     }
 
+    /// <summary>
+    /// 특정 플레이어의 로컬 클라이언트에만 토스트 메시지를 표시합니다.
+    /// 
+    /// 찬스 카드 효과는 StateAuthority에서 실행되지만,
+    /// 토스트 메시지는 실제 카드를 뽑은 플레이어에게만 보여야 하므로
+    /// RpcTargets.All로 보낸 뒤 각 클라이언트에서 playerIndex를 비교해 필터링합니다.
+    /// </summary>
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    public void RPC_ShowToastToPlayer(int playerIndex, string korMessage, string engMessage)
+    {
+        if (!IsLocalPlayerIndex(playerIndex))
+            return;
+
+        if (ToastMessageManager.instance == null)
+            return;
+
+        ToastMessageManager.instance.ShowToast(korMessage, engMessage);
+    }
+
     #endregion
 
     private void PlaceAllPawnsImmediate()
