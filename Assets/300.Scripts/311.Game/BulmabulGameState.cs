@@ -134,6 +134,12 @@ public class BulmabulGameState : NetworkBehaviour
         /// </summary>
         public int jailTryCount;
 
+        /// <summary>
+        /// 파산 횟수.
+        /// 1회 파산은 유예, 2회 파산부터 실제 패배 처리.
+        /// </summary>
+        public int bankruptcyCount;
+
     }
 
     /// <summary>
@@ -174,7 +180,13 @@ public class BulmabulGameState : NetworkBehaviour
         /// 찬스 카드를 뽑은 뒤, 카드 팝업 확인 버튼 입력을 기다리는 상태.
         /// 확인 버튼을 누르면 StateAuthority에서 카드 효과를 실행한다.
         /// </summary>
-        ChanceCardConfirm = 9
+        ChanceCardConfirm = 9,
+
+        /// <summary>
+        /// 세금 칸 또는 세금 카드 납부 전에 천사 카드를 사용할지 선택하는 상태.
+        /// 사용하면 세금 면제, 취소하면 세금 납부.
+        /// </summary>
+        AngelCardTaxChoice = 10
     }
 
     [Header("Rule")]
@@ -276,6 +288,18 @@ public class BulmabulGameState : NetworkBehaviour
 
     /// <summary>모든 클라이언트에 표시할 마지막 로그 메시지</summary>
     [Networked] public NetworkString<_256> LastLogMessage { get; set; }
+
+    /// <summary>
+    /// 천사 카드로 막을 수 있는 세금 금액.
+    /// 세금 칸 / 세금 카드 공통으로 사용한다.
+    /// </summary>
+    [Networked] public int PendingTaxAmount { get; set; }
+
+    /// <summary>
+    /// 세금 발생 원인.
+    /// 0=None, 1=TaxCell, 2=TaxChanceCard
+    /// </summary>
+    [Networked] public int PendingTaxSourceInt { get; set; }
 
 
     /// <summary>게임 종료 여부</summary>
@@ -636,6 +660,7 @@ public class BulmabulGameState : NetworkBehaviour
                 diceLevel = 1,
 
                 bankrupt = false,
+                bankruptcyCount = 0,
                 hasTravelDestinationReady = false,
                 hasAngelCard = false,
                 hasJailEscapeCard = false,
@@ -703,7 +728,8 @@ public class BulmabulGameState : NetworkBehaviour
         PendingCellIndex = -1;
         PendingWasDouble = false;
         PendingChanceCardId = "";
-
+        PendingTaxAmount = 0;
+        PendingTaxSourceInt = 0;
         IsPaused = false;
         PauseOwner = PlayerRef.None;
         PausedRemainSeconds = 0f;
@@ -1183,8 +1209,17 @@ public class BulmabulGameState : NetworkBehaviour
         {
             PlayerGameSlot actor = Players.Get(playerIndex);
             int salary = ClampLongToInt(rule.SalaryOnStart) * passStartCount;
-            actor.cash += salary;
+
+            actor.cash = SafeAddCash(actor.cash, salary);
             actor.lapCount += passStartCount;
+
+            RecoverBankruptcyWarningIfNeededForAuthority(
+                playerIndex,
+                ref actor,
+                $"시작 지점을 {passStartCount}회 통과하여 {salary:N0}원을 받아",
+                $"received salary by passing Start"
+            );
+
             Players.Set(playerIndex, actor);
 
             LogServer($"{playerIndex}번 플레이어가 시작 지점을 {passStartCount}회 통과하여 {salary:N0} 획득");
@@ -1229,6 +1264,14 @@ public class BulmabulGameState : NetworkBehaviour
     private void FinishTurnAfterAction(int playerIndex, bool isDouble)
     {
         if (!Object.HasStateAuthority)
+            return;
+
+        if (GameFinished)
+            return;
+
+        CheckWinnerByRemainingPlayers();
+
+        if (GameFinished)
             return;
 
         if (GetAlivePlayerCount() <= 1)
@@ -1282,6 +1325,8 @@ public class BulmabulGameState : NetworkBehaviour
         PendingCellIndex = -1;
         PendingWasDouble = false;
         PendingChanceCardId = "";
+        PendingTaxAmount = 0;
+        PendingTaxSourceInt = 0;
         int next = CurrentTurnIndex;
 
         for (int i = 0; i < MaxPlayers; i++)
@@ -1656,8 +1701,7 @@ public class BulmabulGameState : NetworkBehaviour
                 return ApplyLand(playerIndex, cellIndex, cell);
 
             case BulmabulCellType.Tax:
-                ApplyTax(playerIndex, cell);
-                return false;
+                return ApplyTax(playerIndex, cell);
 
             case BulmabulCellType.Bonus:
                 ApplyBonus(playerIndex, cell);
@@ -1834,6 +1878,13 @@ public class BulmabulGameState : NetworkBehaviour
         payer.cash -= toll;
         owner.cash += toll;
 
+        RecoverBankruptcyWarningIfNeededForAuthority(
+            ownerIndex,
+            ref owner,
+            $"{payerIndex}번 플레이어에게 통행료 {toll:N0}원을 받아",
+            $"received toll"
+        );
+
         RPC_ShowPawnFloatingText(
             payerIndex,
             $"-{toll:N0}",
@@ -1850,17 +1901,15 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (payer.cash <= 0)
         {
-            payer.cash = 0;
-            payer.bankrupt = true;
-
-            Players.Set(payerIndex, payer);
             Players.Set(ownerIndex, owner);
 
-            ReleaseAllOwnedLands(payerIndex);
+            HandleBankruptcyForAuthority(
+                payerIndex,
+                ref payer,
+                $"{ownerIndex}번 플레이어에게 통행료 {toll:N0}원을 지불했다가",
+                $"paid toll to player {ownerIndex}"
+            );
 
-            LogServer($"{payerIndex}번 플레이어가 {ownerIndex}번 플레이어에게 통행료 {toll:N0} 지불 후 파산했습니다.");
-
-            BumpRevision();
             return false;
         }
 
@@ -1913,35 +1962,50 @@ public class BulmabulGameState : NetworkBehaviour
         BumpRevision();
     }
 
-    private void ApplyTax(int playerIndex, BulmabulCellData cell)
+    private bool ApplyTax(int playerIndex, BulmabulCellData cell)
     {
-        PlayerGameSlot actor = Players.Get(playerIndex);
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        if (cell == null)
+            return false;
+
         int cost = Mathf.Max(0, cell.taxCost);
 
-        actor.cash -= cost;
+        if (cost <= 0)
+            return false;
 
-        RPC_ShowPawnFloatingText(
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        /*
+         * 천사 카드가 있으면 세금 납부 전에 사용 여부를 묻는다.
+         */
+        if (slot.hasAngelCard)
+        {
+            OpenAngelCardTaxChoicePending(
+                playerIndex,
+                -1,
+                cost,
+                1
+            );
+
+            return true;
+        }
+
+        /*
+         * 천사 카드가 없으면 기존처럼 바로 세금 납부.
+         */
+        PayTaxAmountForAuthority(
             playerIndex,
-            $"-{cost:N0}",
-            $"-{cost:N0}",
-            2
+            cost,
+            "세금",
+            "Tax"
         );
 
-        if (actor.cash <= 0)
-        {
-            actor.cash = 0;
-            actor.bankrupt = true;
-            ReleaseAllOwnedLands(playerIndex);
-
-            LogServer($"{playerIndex}번 플레이어가 세금 {cost:N0} 지불 후 파산했습니다.");
-        }
-        else
-        {
-            LogServer($"{playerIndex}번 플레이어가 세금 {cost:N0} 지불");
-        }
-
-        Players.Set(playerIndex, actor);
-        BumpRevision();
+        return false;
     }
 
     /// <summary>
@@ -1978,6 +2042,14 @@ public class BulmabulGameState : NetworkBehaviour
         int amount = UnityEngine.Random.Range(min, max + 1);
 
         slot.cash = SafeAddCash(slot.cash, amount);
+
+        RecoverBankruptcyWarningIfNeededForAuthority(
+            playerIndex,
+            ref slot,
+            $"보너스 칸에서 {amount:N0}원을 받아",
+            $"received bonus"
+        );
+
         Players.Set(playerIndex, slot);
 
         RPC_ShowPawnFloatingText(
@@ -2163,6 +2235,147 @@ public class BulmabulGameState : NetworkBehaviour
 
         ReleaseAllOwnedLands(playerIndex);
         BumpRevision();
+    }
+
+    /// <summary>
+    /// 재화 지불 후 cash가 0 이하가 되었을 때 호출한다.
+    /// 
+    /// 규칙:
+    /// - 1회 파산: 패배가 아니라 파산 위기 상태. cash=0, bankrupt=false, bankruptcyCount=1.
+    /// - 이후 재화를 얻으면 파산 위기에서 회복되지만 bankruptcyCount는 유지.
+    /// - 2회 파산: 실제 파산 패배. bankrupt=true, 땅 해제, 남은 플레이어 검사.
+    /// </summary>
+    private bool HandleBankruptcyForAuthority(
+        int playerIndex,
+        ref PlayerGameSlot slot,
+        string reasonKor,
+        string reasonEng
+    )
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (playerIndex < 0 || playerIndex >= MaxPlayers)
+            return false;
+
+        slot.cash = 0;
+        slot.bankruptcyCount = Mathf.Max(0, slot.bankruptcyCount) + 1;
+
+        int count = slot.bankruptcyCount;
+
+        if (count < 2)
+        {
+            /*
+             * 1회 파산은 패배가 아니다.
+             * bankrupt를 true로 만들면 IsValidAlivePlayer()에서 제외되어
+             * 턴이 스킵되고 패배자처럼 처리되므로 반드시 false 유지.
+             */
+            slot.bankrupt = false;
+            Players.Set(playerIndex, slot);
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                $"파산 {count}회",
+                $"Bankruptcy {count}/2",
+                2
+            );
+
+            LogServer(
+                $"{playerIndex}번 플레이어가 {reasonKor} 파산 {count}회 당했습니다. " +
+                "재화를 얻으면 파산 위기 상태에서 벗어납니다."
+            );
+
+            BumpRevision();
+            return false;
+        }
+
+        /*
+         * 2회 파산부터 실제 패배 처리.
+         */
+        slot.bankrupt = true;
+        slot.hasTravelDestinationReady = false;
+        slot.hasAngelCard = false;
+        slot.hasJailEscapeCard = false;
+        slot.hasTravelCard = false;
+        slot.travelCost = 0;
+        slot.isInJail = false;
+        slot.jailTryCount = 0;
+
+        Players.Set(playerIndex, slot);
+
+        ReleaseAllOwnedLands(playerIndex);
+
+        if (PendingPlayerIndex == playerIndex)
+        {
+            PendingAction = PendingActionType.None;
+            PendingPlayerIndex = -1;
+            PendingCellIndex = -1;
+            PendingWasDouble = false;
+            PendingChanceCardId = "";
+            pendingChanceCardData = null;
+        }
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            "파산 패배",
+            "Bankrupt Defeat",
+            2
+        );
+
+        LogServer($"{playerIndex}번 플레이어가 {reasonKor} 두 번째 파산으로 패배 처리되었습니다.");
+
+        /*
+         * 현재 턴 플레이어가 파산 패배했다면 다음 생존자에게 넘긴다.
+         * 단, 남은 플레이어가 1명이면 아래 CheckWinnerByRemainingPlayers에서 게임 종료.
+         */
+        if (CurrentTurnIndex == playerIndex)
+        {
+            TurnBusy = false;
+
+            if (GetAlivePlayerCount() > 1)
+                AdvanceTurn();
+        }
+
+        CheckWinnerByRemainingPlayers();
+
+        BumpRevision();
+        return true;
+    }
+
+    /// <summary>
+    /// 파산 1회 상태인 플레이어가 보상/월급/카드 보상 등으로 재화를 얻었을 때 호출한다.
+    /// bankruptcyCount는 유지하고, cash가 1 이상이면 파산 위기 상태에서 벗어났다는 안내만 한다.
+    /// </summary>
+    private void RecoverBankruptcyWarningIfNeededForAuthority(
+        int playerIndex,
+        ref PlayerGameSlot slot,
+        string reasonKor,
+        string reasonEng
+    )
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (slot.bankruptcyCount <= 0)
+            return;
+
+        if (slot.bankrupt)
+            return;
+
+        if (slot.cash <= 0)
+            return;
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            "파산 회복",
+            "Recovered",
+            1
+        );
+
+        LogServer(
+            $"{playerIndex}번 플레이어가 {reasonKor} 재화를 얻어 파산 상태에서 벗어났습니다. " +
+            $"현재 파산 횟수는 {slot.bankruptcyCount}/2회입니다."
+        );
     }
 
     private void ReleaseAllOwnedLands(int ownerIndex)
@@ -3115,7 +3328,12 @@ public class BulmabulGameState : NetworkBehaviour
 
     /// <summary>
     /// 감옥 탈출 카드 사용 요청.
-    /// 카드 보유 여부와 현재 감옥 칸 여부를 서버(StateAuthority)가 최종 검증한 뒤 소비한다.
+    /// 카드 보유 여부와 현재 감옥 상태를 서버(StateAuthority)가 최종 검증한 뒤 소비한다.
+    /// 
+    /// 중요:
+    /// TryConsumeKeptChanceCardForAuthority()가 hasJailEscapeCard=false로 저장한 뒤,
+    /// 이전에 가져온 slot을 다시 Players.Set()하면 카드 소비 상태가 true로 되돌아갈 수 있다.
+    /// 그래서 카드 소비 후에는 반드시 Players.Get()으로 최신 slot을 다시 가져와서 감옥 상태만 수정한다.
     /// </summary>
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestUseJailEscapeCard(RpcInfo info = default)
@@ -3132,7 +3350,9 @@ public class BulmabulGameState : NetworkBehaviour
         if (!IsValidAlivePlayer(PendingPlayerIndex))
             return;
 
-        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+        int playerIndex = PendingPlayerIndex;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
 
         if (info.Source != slot.player)
             return;
@@ -3140,67 +3360,135 @@ public class BulmabulGameState : NetworkBehaviour
         if (!slot.isInJail)
             return;
 
-        if (!TryConsumeKeptChanceCardForAuthority(PendingPlayerIndex, BulmabulChanceCardType.JailEscapeCard))
+        if (!slot.hasJailEscapeCard)
         {
-            LogServer($"{PendingPlayerIndex}번 플레이어는 감옥 탈출 카드를 가지고 있지 않습니다.");
+            LogServer($"{playerIndex}번 플레이어는 감옥 탈출 카드를 가지고 있지 않습니다.");
+            BumpRevision();
             return;
         }
 
+        /*
+         * 핵심:
+         * 카드 소비와 감옥 상태 해제를 같은 최신 slot에서 한 번에 처리한다.
+         * 이렇게 해야 hasJailEscapeCard=false가 다시 true로 덮어써지지 않는다.
+         */
+        slot.hasJailEscapeCard = false;
         slot.isInJail = false;
         slot.jailTryCount = 0;
 
-        RPC_ShowPawnFloatingText(
-            PendingPlayerIndex,
-            "감옥 탈출 카드 사용",
-            "Jail Escape Card Used",
-            4
-        );
+        Players.Set(playerIndex, slot);
 
-        Players.Set(PendingPlayerIndex, slot);
-
-        int finishedPlayer = PendingPlayerIndex;
+        int finishedPlayer = playerIndex;
 
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
         PendingWasDouble = false;
 
-        LogServer($"{finishedPlayer}번 플레이어가 감옥 탈출 카드를 사용해 감옥에서 탈출했습니다.");
+        RPC_ShowPawnFloatingText(
+            finishedPlayer,
+            "감옥 탈출 카드 사용",
+            "Jail Escape Card Used",
+            4
+        );
 
-        AdvanceTurn();
+        LogServer($"{finishedPlayer}번 플레이어가 감옥 탈출 카드를 사용하여 감옥에서 탈출했습니다. 카드가 소비되었습니다.");
 
+        /*
+         * 카드 인벤토리 UI가 Revision을 보고 갱신하므로 반드시 올린다.
+         */
         BumpRevision();
+
+        /*
+         * 감옥 탈출 카드는 사용 후 현재 턴 종료.
+         */
+        AdvanceTurn();
     }
 
     /// <summary>
     /// 여행 카드 사용 처리.
     ///
     /// 찬스 칸에서 얻은 여행 카드를 카드 인벤토리에서 사용하면,
-    /// Pawn을 여행 칸으로 이동시킨다.
+    /// Pawn을 현재 위치에서 여행 칸까지 보드 진행 방향으로 이동시킨다.
     ///
     /// 중요:
-    /// - 카드 사용 이동은 여행 비용 팝업을 띄우지 않는다.
+    /// - 직선 이동 / 순간 이동이 아니라 주사위 이동처럼 한 칸씩 이동한다.
+    /// - 여행 칸으로 이동해도 여행 비용 팝업은 띄우지 않는다.
     /// - ResolveLanding()을 호출하지 않는다.
-    /// - 여행 칸으로 이동한 뒤 현재 턴을 종료한다.
-    /// - 다음 자기 턴에 travelTargetPopup이 자동으로 열린다.
+    /// - 여행 칸 도착 후 hasTravelDestinationReady = true로 만들어
+    ///   다음 자기 턴에 여행 목적지 선택 팝업이 열리게 한다.
     /// </summary>
     private IEnumerator CoResolveMoveToTravelByCard(int playerIndex, int travelCellIndex)
     {
         TurnBusy = true;
         BumpRevision();
 
+        if (board == null || board.CellCount <= 0)
+        {
+            TurnBusy = false;
+            BumpRevision();
+            yield break;
+        }
+
+        if (!IsValidAlivePlayer(playerIndex))
+        {
+            TurnBusy = false;
+            BumpRevision();
+            yield break;
+        }
+
         PlayerGameSlot actor = Players.Get(playerIndex);
+
         int fromIndex = actor.tileIndex;
+        travelCellIndex = board.ClampCellIndex(travelCellIndex);
 
-        LogServer($"{playerIndex}번 플레이어가 여행 카드를 사용하여 여행 칸으로 이동합니다.");
+        /*
+         * 핵심:
+         * 여행 카드 이동도 주사위 이동처럼 보드 진행 방향 기준으로 몇 칸 이동할지 계산한다.
+         * 예:
+         * 현재 120번, 여행 칸 80번이면
+         * 120 -> 121 -> ... -> 159 -> 0 -> ... -> 80 순서로 이동한다.
+         */
+        int moveCount = CalculateForwardMoveCount(fromIndex, travelCellIndex);
 
-        RPC_PlayDirectMoveVisual(playerIndex, fromIndex, travelCellIndex);
+        BulmabulCellData travelCell = board.GetCell(travelCellIndex);
+        string travelCellName = travelCell != null ? travelCell.cellName : $"{travelCellIndex}번 칸";
 
-        float moveWait = pawnMover != null ? pawnMover.DirectMoveSeconds + 0.1f : 0.9f;
-        yield return new WaitForSeconds(moveWait);
+        LogServer(
+            $"{playerIndex}번 플레이어가 여행 카드를 사용했습니다. " +
+            $"현재 위치 {fromIndex}번에서 여행 칸 [{travelCellName}]까지 {moveCount}칸 이동합니다."
+        );
+
+        RPC_ShowPawnFloatingText(
+            playerIndex,
+            "여행 카드 사용",
+            "Travel Card Used",
+            4
+        );
+
+        /*
+         * 주사위 이동과 동일하게 시작 지점을 지나가면 보상을 지급한다.
+         * 단, travelCellIndex로 정확히 도착하도록 moveCount 기준으로 계산한다.
+         */
+        int finalTargetIndex = CalculateTargetIndexAndPaySalary(playerIndex, fromIndex, moveCount);
+
+        if (moveCount > 0)
+        {
+            /*
+             * DirectMove가 아니라 PawnMoveVisual 사용.
+             * 이게 주사위 이동처럼 한 칸씩 이동하는 연출이다.
+             */
+            RPC_PlayPawnMoveVisual(playerIndex, fromIndex, moveCount);
+
+            float moveWait = pawnMover != null
+                ? pawnMover.GetStepMoveTotalSeconds(moveCount) + 0.1f
+                : 0.22f * moveCount + 0.1f;
+
+            yield return new WaitForSeconds(moveWait);
+        }
 
         actor = Players.Get(playerIndex);
-        actor.tileIndex = travelCellIndex;
+        actor.tileIndex = finalTargetIndex;
 
         /*
          * 여행 카드 효과.
@@ -3208,11 +3496,13 @@ public class BulmabulGameState : NetworkBehaviour
          */
         actor.hasTravelDestinationReady = true;
         actor.travelCost = 0;
+
         Players.Set(playerIndex, actor);
 
         /*
-         * 카드 이동에서는 여행 칸 도착 효과를 실행하지 않는다.
-         * 즉, ApplyTravel() / TravelCostPopup을 열면 안 된다.
+         * 여행 카드로 여행 칸에 도착한 경우에는
+         * ApplyTravel() / TravelCostPopup을 열면 안 된다.
+         * 이미 여행 카드를 소비했으므로 다음 자기 턴에 목적지만 선택하면 된다.
          */
         PendingWasDouble = false;
         PendingAction = PendingActionType.None;
@@ -3224,7 +3514,7 @@ public class BulmabulGameState : NetworkBehaviour
         /*
          * 카드 사용 후 현재 턴 종료.
          * 바로 목적지 선택 팝업이 뜨면 안 되고,
-         * 다음 자기 턴에 CanLocalUseTravel()이 true가 되면서 열린다.
+         * 다음 자기 턴에 hasTravelDestinationReady 상태로 목적지 선택 팝업이 열린다.
          */
         AdvanceTurn();
 
@@ -3384,6 +3674,8 @@ public class BulmabulGameState : NetworkBehaviour
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
+        PendingTaxAmount = 0;
+        PendingTaxSourceInt = 0;
         PendingChanceCardId = "";
         pendingChanceCardData = null;
     }
@@ -5029,6 +5321,87 @@ public class BulmabulGameState : NetworkBehaviour
         BumpRevision();
     }
 
+    public void RequestResolveAngelCardTaxLocal(bool useAngelCard)
+    {
+        if (!ShouldShowAngelCardTaxPopupForLocalPlayer())
+            return;
+
+        RPC_RequestResolveAngelCardTax(useAngelCard);
+    }
+
+    [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+    public void RPC_RequestResolveAngelCardTax(bool useAngelCard, RpcInfo info = default)
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        if (PendingAction != PendingActionType.AngelCardTaxChoice)
+            return;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        if (info.Source != slot.player)
+            return;
+
+        int playerIndex = PendingPlayerIndex;
+        int taxAmount = Mathf.Max(0, PendingTaxAmount);
+        int taxSource = PendingTaxSourceInt;
+        bool wasDouble = PendingWasDouble;
+
+        if (useAngelCard)
+        {
+            bool consumed = TryConsumeKeptChanceCardForAuthority(
+                playerIndex,
+                BulmabulChanceCardType.AngelCard
+            );
+
+            if (!consumed)
+            {
+                LogServer($"{playerIndex}번 플레이어는 천사 카드를 가지고 있지 않습니다. 세금을 납부합니다.");
+                useAngelCard = false;
+            }
+        }
+
+        PendingAction = PendingActionType.None;
+        PendingPlayerIndex = -1;
+        PendingCellIndex = -1;
+        PendingTaxAmount = 0;
+        PendingTaxSourceInt = 0;
+
+        if (useAngelCard)
+        {
+            LogServer($"{playerIndex}번 플레이어가 천사 카드를 사용하여 세금 {taxAmount:N0}원을 면제받았습니다.");
+
+            RPC_ShowPawnFloatingText(
+                playerIndex,
+                "천사 카드 사용",
+                "Angel Card Used",
+                4
+            );
+
+            BumpRevision();
+
+            FinishTurnAfterAction(playerIndex, wasDouble);
+            return;
+        }
+
+        string reasonKor = taxSource == 2 ? "세금 카드로" : "세금";
+        string reasonEng = taxSource == 2 ? "Tax card" : "Tax";
+
+        PayTaxAmountForAuthority(
+            playerIndex,
+            taxAmount,
+            reasonKor,
+            reasonEng
+        );
+
+        FinishTurnAfterAction(playerIndex, wasDouble);
+        BumpRevision();
+    }
+
     [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
     public void RPC_RequestSkipTakeOverLand(RpcInfo info = default)
     {
@@ -5077,6 +5450,41 @@ public class BulmabulGameState : NetworkBehaviour
 
         PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
         return slot.player == Runner.LocalPlayer;
+    }
+
+    public bool ShouldShowAngelCardTaxPopupForLocalPlayer()
+    {
+        if (!IsSpawnReady)
+            return false;
+
+        if (Runner == null)
+            return false;
+
+        if (PendingAction != PendingActionType.AngelCardTaxChoice)
+            return false;
+
+        if (!IsValidAlivePlayer(PendingPlayerIndex))
+            return false;
+
+        PlayerGameSlot slot = Players.Get(PendingPlayerIndex);
+
+        return slot.player == Runner.LocalPlayer && slot.hasAngelCard;
+    }
+
+    public string GetPendingAngelCardTaxInfoText()
+    {
+        if (!IsSpawnReady)
+            return GetByLanguageForState(
+                "세금 정보를 불러오는 중입니다.",
+                "Loading tax information."
+            );
+
+        int amount = Mathf.Max(0, PendingTaxAmount);
+
+        return GetByLanguageForState(
+            $"세금 {amount:N0}원을 납부해야 합니다.\n천사 카드를 사용하여 세금 납부를 막으시겠습니까?",
+            $"You must pay {amount:N0} tax.\nUse Angel Card to block this tax?"
+        );
     }
 
     /// <summary>
@@ -5487,12 +5895,21 @@ public class BulmabulGameState : NetworkBehaviour
 
         PlayerGameSlot slot = Players.Get(playerIndex);
 
+        if (slot.occupied == 0 || slot.bankrupt)
+            return false;
+
         int beforeCash = slot.cash;
 
         if (isReceive)
         {
-            long result = (long)slot.cash + amount;
-            slot.cash = result > int.MaxValue ? int.MaxValue : (int)result;
+            slot.cash = SafeAddCash(slot.cash, amount);
+
+            RecoverBankruptcyWarningIfNeededForAuthority(
+                playerIndex,
+                ref slot,
+                $"{logReasonKor} {amount:N0}원을 받아",
+                logReasonEng
+            );
 
             Players.Set(playerIndex, slot);
 
@@ -5510,7 +5927,6 @@ public class BulmabulGameState : NetworkBehaviour
         }
 
         int payAmount = Mathf.Min(slot.cash, amount);
-
         slot.cash -= payAmount;
 
         RPC_ShowPawnFloatingText(
@@ -5522,17 +5938,14 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (slot.cash <= 0)
         {
-            slot.cash = 0;
-            slot.bankrupt = true;
+            bool eliminated = HandleBankruptcyForAuthority(
+                playerIndex,
+                ref slot,
+                $"{logReasonKor} {payAmount:N0}원을 지불했다가",
+                logReasonEng
+            );
 
-            Players.Set(playerIndex, slot);
-
-            ReleaseAllOwnedLandsByCardForAuthority(playerIndex);
-
-            LogServer($"{playerIndex}번 플레이어가 {logReasonKor} {amount:N0}원 납부 후 파산했습니다. {beforeCash:N0} -> 0");
-
-            BumpRevision();
-            return false;
+            return !eliminated;
         }
 
         Players.Set(playerIndex, slot);
@@ -5543,6 +5956,14 @@ public class BulmabulGameState : NetworkBehaviour
         return true;
     }
 
+    /// <summary>
+    /// 찬스 카드 세금 납부 처리.
+    /// 천사 카드가 있으면 바로 납부하지 않고 천사 카드 사용 여부를 묻는다.
+    /// 
+    /// 반환값:
+    /// true  = 플레이어 선택 대기 상태가 열림
+    /// false = 즉시 처리 완료
+    /// </summary>
     public bool PayChanceTaxForAuthority(int playerIndex, int amount)
     {
         if (!Object.HasStateAuthority)
@@ -5561,37 +5982,62 @@ public class BulmabulGameState : NetworkBehaviour
         if (slot.occupied == 0 || slot.bankrupt)
             return false;
 
+        /*
+         * 천사 카드가 있으면 세금 카드도 막을 수 있다.
+         */
+        if (slot.hasAngelCard)
+        {
+            OpenAngelCardTaxChoicePending(
+                playerIndex,
+                -1,
+                amount,
+                2
+            );
+
+            return true;
+        }
+
+        PayTaxAmountForAuthority(
+            playerIndex,
+            amount,
+            "세금 카드로",
+            "Tax card"
+        );
+
+        return false;
+    }
+
+    /// <summary>
+    /// 실제 세금 납부 처리.
+    /// 천사 카드 선택이 끝난 뒤, 또는 천사 카드가 없을 때만 호출한다.
+    /// </summary>
+    private bool PayTaxAmountForAuthority(
+        int playerIndex,
+        int amount,
+        string reasonKor,
+        string reasonEng
+    )
+    {
+        if (!Object.HasStateAuthority)
+            return false;
+
+        if (!IsValidAlivePlayer(playerIndex))
+            return false;
+
+        amount = Mathf.Max(0, amount);
+
+        if (amount <= 0)
+            return true;
+
+        PlayerGameSlot slot = Players.Get(playerIndex);
+
+        if (slot.occupied == 0 || slot.bankrupt)
+            return false;
+
         int beforeCash = slot.cash;
         int payAmount = Mathf.Min(beforeCash, amount);
 
         slot.cash = beforeCash - payAmount;
-
-        if (slot.cash <= 0)
-        {
-            slot.cash = 0;
-            slot.bankrupt = true;
-
-            Players.Set(playerIndex, slot);
-
-            RPC_ShowPawnFloatingText(
-                playerIndex,
-                $"-{payAmount:N0}",
-                $"-{payAmount:N0}",
-                2
-            );
-
-            ReleaseAllOwnedLandsByCardForAuthority(playerIndex);
-
-            LogServer(
-                $"{playerIndex}번 플레이어가 세금 카드로 {payAmount:N0}원을 납부하고 파산했습니다. " +
-                $"{beforeCash:N0} -> 0"
-            );
-
-            BumpRevision();
-            return true;
-        }
-
-        Players.Set(playerIndex, slot);
 
         RPC_ShowPawnFloatingText(
             playerIndex,
@@ -5600,13 +6046,47 @@ public class BulmabulGameState : NetworkBehaviour
             2
         );
 
+        if (slot.cash <= 0)
+        {
+            HandleBankruptcyForAuthority(
+               playerIndex,
+               ref slot,
+               $"{reasonKor} {payAmount:N0}원을 지불했다가",
+               $"{reasonEng} paid"
+           );
+
+            return false;
+        }
+
+        Players.Set(playerIndex, slot);
+
         LogServer(
-            $"{playerIndex}번 플레이어가 세금 카드로 {payAmount:N0}원을 납부했습니다. " +
+            $"{playerIndex}번 플레이어가 {reasonKor} {payAmount:N0}원을 납부했습니다. " +
             $"{beforeCash:N0} -> {slot.cash:N0}"
         );
 
         BumpRevision();
         return true;
+    }
+
+    private void OpenAngelCardTaxChoicePending(
+    int playerIndex,
+    int cellIndex,
+    int taxAmount,
+    int taxSourceInt
+)
+    {
+        PendingAction = PendingActionType.AngelCardTaxChoice;
+        PendingPlayerIndex = playerIndex;
+        PendingCellIndex = cellIndex;
+        PendingTaxAmount = Mathf.Max(0, taxAmount);
+        PendingTaxSourceInt = taxSourceInt;
+
+        LogServer(
+            $"{playerIndex}번 플레이어가 세금 {PendingTaxAmount:N0}원 납부 전에 천사 카드 사용 선택 대기 중입니다."
+        );
+
+        BumpRevision();
     }
 
     /// <summary>

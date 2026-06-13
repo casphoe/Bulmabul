@@ -183,22 +183,28 @@ public class BulmabulChanceCardExecutor : MonoBehaviour
                 {
                     int amount = Mathf.Max(0, card.moneyAmount);
 
-                    bool paid = state.PayChanceTaxForAuthority(playerIndex, amount);
+                    /*
+                     * PayChanceTaxForAuthority가 true를 반환하면
+                     * 천사 카드 사용 여부 선택 Pending이 열린 상태다.
+                     * 이 경우 턴을 끝내면 안 되므로 true를 그대로 반환한다.
+                     */
+                    bool waitsForAngelChoice =
+                        state.PayChanceTaxForAuthority(playerIndex, amount);
 
-                    if (paid)
+                    if (waitsForAngelChoice)
                     {
                         ShowToast(
-                            $"세금 {amount:N0}원을 납부했습니다.",
-                            $"Paid {amount:N0} tax."
+                            $"세금 {amount:N0}원 납부 전에 천사 카드 사용 여부를 선택하세요.",
+                            $"Choose whether to use Angel Card before paying {amount:N0} tax."
                         );
+
+                        return true;
                     }
-                    else
-                    {
-                        ShowToast(
-                            $"세금 {amount:N0}원 납부 처리에 실패했습니다.",
-                            $"Failed to pay {amount:N0} tax."
-                        );
-                    }
+
+                    ShowToast(
+                        $"세금 {amount:N0}원을 납부했습니다.",
+                        $"Paid {amount:N0} tax."
+                    );
 
                     return false;
                 }
