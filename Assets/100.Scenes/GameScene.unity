@@ -945,59 +945,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bd24d5dd396fc3144858accee7d64d66, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  landPriceTiers:
-  - startIndex: 1
-    endIndex: 39
-    buyCost: 100000
-    tollCost: 20000
-    smallHouseBuildCost: 30000
-    houseBuildCost: 50000
-    bigHouseBuildCost: 80000
-    hotelBuildCost: 120000
-    smallHouseToll: 10000
-    houseToll: 30000
-    bigHouseToll: 60000
-    hotelToll: 100000
-    lineId: 0
-  - startIndex: 41
-    endIndex: 79
-    buyCost: 180000
-    tollCost: 35000
-    smallHouseBuildCost: 50000
-    houseBuildCost: 80000
-    bigHouseBuildCost: 120000
-    hotelBuildCost: 180000
-    smallHouseToll: 20000
-    houseToll: 50000
-    bigHouseToll: 90000
-    hotelToll: 160000
-    lineId: 1
-  - startIndex: 81
-    endIndex: 119
-    buyCost: 300000
-    tollCost: 60000
-    smallHouseBuildCost: 80000
-    houseBuildCost: 120000
-    bigHouseBuildCost: 180000
-    hotelBuildCost: 260000
-    smallHouseToll: 40000
-    houseToll: 90000
-    bigHouseToll: 160000
-    hotelToll: 280000
-    lineId: 2
-  - startIndex: 121
-    endIndex: 159
-    buyCost: 500000
-    tollCost: 100000
-    smallHouseBuildCost: 120000
-    houseBuildCost: 180000
-    bigHouseBuildCost: 260000
-    hotelBuildCost: 380000
-    smallHouseToll: 70000
-    houseToll: 150000
-    bigHouseToll: 280000
-    hotelToll: 450000
-    lineId: 3
   koreaLandNamesKor:
   - "\uACBD\uBCF5\uAD81"
   - "\uCC3D\uB355\uAD81"
@@ -5526,6 +5473,7 @@ GameObject:
   - component: {fileID: 386039201}
   - component: {fileID: 386039203}
   - component: {fileID: 386039204}
+  - component: {fileID: 386039205}
   - component: {fileID: 386039202}
   m_Layer: 0
   m_Name: BulmabulGameManger
@@ -5582,7 +5530,10 @@ MonoBehaviour:
   maxPauseCountPerPlayer: 5
   jailEscapeCost: 50000
   maxJailDoubleFailCount: 5
+  maxConsecutiveDoubleBeforeJail: 5
+  jailCellIndex: 40
   autoBuyLand: 0
+  lineMonopolyWinCount: 2
   _Players: []
   _LandOwnerByCell: 
   _LandBuildingFlagsByCell: 
@@ -5637,6 +5588,7 @@ MonoBehaviour:
   - {fileID: 386039201}
   - {fileID: 386039203}
   - {fileID: 386039204}
+  - {fileID: 386039205}
   ForceRemoteRenderTimeframe: 0
 --- !u!114 &386039203
 MonoBehaviour:
@@ -5671,6 +5623,26 @@ MonoBehaviour:
   onlyMyTurn: 1
   blockWhenPaused: 1
   blockWhenTurnBusy: 0
+--- !u!114 &386039205
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 386039198}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc994223f33cdd6428a3cb3e8730805f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  gameState: {fileID: 386039201}
+  board: {fileID: 1580395497}
+  enableDebugKeys: 1
+  enableBankruptcyKey: 1
+  enableLineAcquireKey: 1
+  lineMonopolyWinCount: 2
+  ignoreSameTeamLand: 1
+  forceTakeOverEvenHotel: 0
 --- !u!1 &387700386
 GameObject:
   m_ObjectHideFlags: 0
@@ -7864,6 +7836,16 @@ MonoBehaviour:
   autoFullMapOrthographicSize: 1
   fullMapOrthographicPadding: 8
   minFullMapOrthographicSize: 45
+  enableFullMapMouseWheelZoom: 1
+  enableFullMapKeyboardMove: 1
+  fullMapZoomSpeed: 35
+  minFullMapZoomOrthographicSize: 12
+  fullMapKeyboardMoveSpeed: 55
+  fullMapPanPadding: 4
+  fullMapExtraPanX: 35
+  fullMapExtraPanZ: 20
+  recalculateFullMapSizeEveryFrame: 0
+  resetFullMapViewStateOnEnter: 1
   useClamp: 0
   minXZ: {x: -100, y: -100}
   maxXZ: {x: 100, y: 100}
@@ -17573,6 +17555,8 @@ MonoBehaviour:
   autoAddInfoView: 1
   showNoOwnerLand: 1
   refreshInterval: 0.35
+  defaultFontAsset: {fileID: 11400000, guid: b940691ec5a7b3c4d8a503bd0bed910e, type: 2}
+  forceApplyFontEveryRefresh: 1
 --- !u!114 &1580395504
 MonoBehaviour:
   m_ObjectHideFlags: 0

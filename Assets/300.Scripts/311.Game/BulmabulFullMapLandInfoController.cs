@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
 
 /// <summary>
 /// BulmabulCameraFollow의 전체 맵 보기 상태와
@@ -33,6 +34,13 @@ public class BulmabulFullMapLandInfoController : MonoBehaviour
     [SerializeField] private float refreshInterval = 0.35f;
 
     private readonly List<BulmabulMapLandInfoView> infoViews = new List<BulmabulMapLandInfoView>();
+
+    [Header("Text Style")]
+    [Tooltip("전체맵 땅 정보판에 공통으로 적용할 TMP Font Asset")]
+    [SerializeField] private TMP_FontAsset defaultFontAsset;
+
+    [Tooltip("Refresh 때마다 전체맵 정보판 폰트를 다시 강제 적용")]
+    [SerializeField] private bool forceApplyFontEveryRefresh = true;
 
     private bool _initialized;
     private float _refreshTimer;
@@ -144,7 +152,15 @@ public class BulmabulFullMapLandInfoController : MonoBehaviour
 
             BulmabulCellData cellData = board.GetCell(i);
 
+            // 컨트롤러에 등록한 공통 폰트를 모든 정보판에 먼저 주입한다.
+            // null이어도 SetDefaultFontAsset 내부에서 TMP 기본 폰트 fallback을 처리하게 한다.
+            infoView.SetDefaultFontAsset(defaultFontAsset);
+
             infoView.Setup(i, cellData);
+
+            // Setup 내부에서 TxtMapInfo가 다시 생성될 수 있으므로 Setup 이후에도 한 번 더 강제 적용
+            infoView.SetDefaultFontAsset(defaultFontAsset);
+
             infoView.SetVisible(false);
 
             if (!infoViews.Contains(infoView))
@@ -177,6 +193,13 @@ public class BulmabulFullMapLandInfoController : MonoBehaviour
             if (infoView == null)
                 continue;
 
+            // 중요:
+            // BulmabulMapLandInfoView / TxtMapInfo는 런타임에 자동 생성될 수 있다.
+            // 그래서 Refresh 때마다 Controller의 공통 Font Asset을 다시 주입해야
+            // 폰트가 TMP 기본 폰트로 돌아가거나 사라지는 문제를 막을 수 있다.
+            if (forceApplyFontEveryRefresh)
+                infoView.SetDefaultFontAsset(defaultFontAsset);
+
             BulmabulCellData data = infoView.CellData;
 
             bool visible = isFullMap;
@@ -198,7 +221,14 @@ public class BulmabulFullMapLandInfoController : MonoBehaviour
             infoView.SetVisible(visible);
 
             if (visible)
+            {
+                // Refresh 내부에서도 ApplyStyle()이 호출되므로,
+                // 그 전에 폰트를 한 번 더 주입해두는 것이 안전하다.
+                if (forceApplyFontEveryRefresh)
+                    infoView.SetDefaultFontAsset(defaultFontAsset);
+
                 infoView.Refresh(state);
+            }
         }
     }
 
