@@ -30,15 +30,23 @@ public class BulmabulDebugGrantKeptCardsHotkey : NetworkBehaviour
     [Tooltip("true면 턴 처리 중에는 지급 불가")]
     [SerializeField] private bool blockWhenTurnBusy = false;
 
+    [Header("References")]
+    [SerializeField] private BulmabulCameraFollow cameraFollow;
+
     private void Update()
     {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (!enableDebugHotkey)
             return;
 
-        if (!Input.GetKeyDown(grantKey))
+        bool pressed =
+            Input.GetKeyDown(grantKey) ||
+            Input.GetKeyDown(KeyCode.Keypad7);
+
+        if (!pressed)
             return;
 
+        ForceExitFullMapViewForDebugKey();
         TryRequestGrantKeptCards();
 #endif
     }
@@ -200,5 +208,27 @@ public class BulmabulDebugGrantKeptCardsHotkey : NetworkBehaviour
             $"[DebugGrantCards] {requestPlayerIndex}번 플레이어에게 테스트 보관 카드 지급 완료. " +
             "Angel=1, JailEscape=1, Travel=1"
         );
+    }
+
+    private void CacheReferences()
+    {
+        if (cameraFollow == null)
+            cameraFollow = FindFirstObjectByType<BulmabulCameraFollow>();
+    }
+
+    /// <summary>
+    /// 테스트 카드 지급 키 입력 시 전체맵 보기 상태라면 즉시 해제한다.
+    /// </summary>
+    private void ForceExitFullMapViewForDebugKey()
+    {
+        CacheReferences();
+
+        if (cameraFollow == null)
+            return;
+
+        if (!cameraFollow.IsFullMapView)
+            return;
+
+        cameraFollow.ForceFollowView(false);
     }
 }

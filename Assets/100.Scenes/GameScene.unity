@@ -5604,6 +5604,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   gameState: {fileID: 386039201}
   board: {fileID: 1580395497}
+  cameraFollow: {fileID: 591816120}
   enableDebugMove: 1
   resolveLanding: 1
 --- !u!114 &386039204
@@ -5623,6 +5624,7 @@ MonoBehaviour:
   onlyMyTurn: 1
   blockWhenPaused: 1
   blockWhenTurnBusy: 0
+  cameraFollow: {fileID: 591816120}
 --- !u!114 &386039205
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5637,6 +5639,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   gameState: {fileID: 386039201}
   board: {fileID: 1580395497}
+  cameraFollow: {fileID: 591816120}
   enableDebugKeys: 1
   enableBankruptcyKey: 1
   enableLineAcquireKey: 1
@@ -17372,6 +17375,9 @@ MonoBehaviour:
   - {fileID: 379453484}
   - {fileID: 2013847045}
   - {fileID: 99961207}
+  cardUiRoot: {fileID: 1438936672}
+  hideDiceUiOnFullMap: 1
+  hideCardUiOnFullMap: 1
   diceControlPanel: {fileID: 314319428}
   btnDiceOdd: {fileID: 1507235785}
   btnDiceEven: {fileID: 189753245}

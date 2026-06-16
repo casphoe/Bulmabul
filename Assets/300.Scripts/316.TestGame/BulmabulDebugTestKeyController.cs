@@ -26,6 +26,7 @@ public class BulmabulDebugTestKeyController : NetworkBehaviour
     [Header("References")]
     [SerializeField] private BulmabulGameState gameState;
     [SerializeField] private BulmabulBoard board;
+    [SerializeField] private BulmabulCameraFollow cameraFollow;
 
     [Header("Debug Key Settings")]
     [SerializeField] private bool enableDebugKeys = true;
@@ -56,6 +57,9 @@ public class BulmabulDebugTestKeyController : NetworkBehaviour
 
         if (board == null)
             board = FindObjectOfType<BulmabulBoard>();
+
+        if (cameraFollow == null)
+            cameraFollow = FindFirstObjectByType<BulmabulCameraFollow>();
     }
 
     private void Update()
@@ -78,12 +82,14 @@ public class BulmabulDebugTestKeyController : NetworkBehaviour
 
         if (enableBankruptcyKey && (Input.GetKeyDown(KeyCode.Alpha8) || Input.GetKeyDown(KeyCode.Keypad8)))
         {
+            ForceExitFullMapViewForDebugKey();
             RPC_RequestDebugAddBankruptcy();
             return;
         }
 
         if (enableLineAcquireKey && (Input.GetKeyDown(KeyCode.Alpha9) || Input.GetKeyDown(KeyCode.Keypad9)))
         {
+            ForceExitFullMapViewForDebugKey();
             RPC_RequestDebugAcquireCurrentLine();
             return;
         }
@@ -683,5 +689,25 @@ public class BulmabulDebugTestKeyController : NetworkBehaviour
     private void BumpGameStateRevision()
     {
         gameState.Revision = gameState.Revision + 1;
+    }
+
+    /// <summary>
+    /// 테스트 키 입력 시 전체맵 보기 상태라면 즉시 해제한다.
+    /// 
+    /// 전체맵은 로컬 카메라 상태이므로 RPC 안에서 처리하지 않고,
+    /// 키 입력을 받은 클라이언트에서 먼저 해제한다.
+    /// </summary>
+    private void ForceExitFullMapViewForDebugKey()
+    {
+        if (cameraFollow == null)
+            cameraFollow = FindFirstObjectByType<BulmabulCameraFollow>();
+
+        if (cameraFollow == null)
+            return;
+
+        if (!cameraFollow.IsFullMapView)
+            return;
+
+        cameraFollow.ForceFollowView(false);
     }
 }

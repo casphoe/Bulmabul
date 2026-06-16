@@ -46,6 +46,20 @@ public class BulmabulGameUI : MonoBehaviour
     [Tooltip("0~3번 플레이어 정보 UI. Element 0 = 1번째 턴 플레이어")]
     [SerializeField] private BulmabulPlayerInfoUI[] playerInfoUis = new BulmabulPlayerInfoUI[4];
 
+    [Header("Full Map Hide UI")]
+    [Tooltip("전체맵 보기 중 숨길 카드 UI 루트. CardDeckUI 또는 카드 인벤토리 루트 오브젝트를 넣는다.")]
+    [SerializeField] private GameObject cardUiRoot;
+
+    [Tooltip("전체맵 보기 중 주사위 굴리기 UI를 숨길지 여부")]
+    [SerializeField] private bool hideDiceUiOnFullMap = true;
+
+    [Tooltip("전체맵 보기 중 카드 UI를 숨길지 여부")]
+    [SerializeField] private bool hideCardUiOnFullMap = true;
+
+    private bool _lastFullMapUiState;
+    private bool _diceUiWasActiveBeforeFullMap;
+    private bool _cardUiWasActiveBeforeFullMap;
+
     [Header("Dice Control UI")]
     [Tooltip("주사위 홀/짝 선택 및 게이지 조작 패널. 예: DiceRoll/RollPanel")]
     [SerializeField] private GameObject diceControlPanel;
@@ -233,6 +247,9 @@ public class BulmabulGameUI : MonoBehaviour
     private void Update()
     {
         RefreshUI();
+
+        HandleFullMapUiVisibility();
+
         RefreshDiceControlGauge();
         RefreshDiceRollResult();
         RefreshMapViewButtonText();
@@ -1229,6 +1246,22 @@ public class BulmabulGameUI : MonoBehaviour
     /// </summary>
     private void RefreshMainButtons(BulmabulGameState state)
     {
+
+        // 전체맵 보기 중에는 주사위 굴리기 UI를 강제로 숨긴다.
+        // RefreshUI가 매 프레임 호출되어도 여기서 다시 열리지 않게 막는다.
+        if (hideDiceUiOnFullMap && cameraFollow != null && cameraFollow.IsFullMapView)
+        {
+            _waitingRollStateChange = false;
+            _diceGaugeHolding = false;
+
+            if (_diceControlOpen)
+                CloseDiceControlPanel();
+            else if (diceControlPanel != null)
+                diceControlPanel.SetActive(false);
+
+            return;
+        }
+
         bool isJailDiceMode = _diceControlRequestMode == DiceControlRequestMode.JailEscapeRoll;
         bool canNormalRoll = state.CanLocalRollDice();
         bool canJailRoll = state.CanLocalJailRollDice();
@@ -2209,7 +2242,96 @@ public class BulmabulGameUI : MonoBehaviour
             return;
 
         cameraFollow.ToggleFullMapView();
+
+        // 버튼 클릭 직후 바로 UI 숨김/복구 처리.
+        // Update까지 기다리지 않아도 즉시 반응하게 한다.
+        HandleFullMapUiVisibility();
+
         RefreshMapViewButtonText();
+    }
+
+    /// <summary>
+    /// 전체맵 보기 상태에서는 주사위 굴리기 UI와 Card UI를 숨기고,
+    /// 다시 말 보기로 돌아오면 현재 게임 상태에 맞게 복구한다.
+    /// 
+    /// 목적:
+    /// - 전체맵을 볼 때 DiceControlPanel이 화면을 가려서 불편한 문제 해결.
+    /// - CardDeckUI / Card UI도 전체맵 보기 중에는 숨김.
+    /// </summary>
+    private void HandleFullMapUiVisibility()
+    {
+        if (cameraFollow == null)
+            return;
+
+        bool isFullMap = cameraFollow.IsFullMapView;
+
+        if (_lastFullMapUiState == isFullMap)
+            return;
+
+        _lastFullMapUiState = isFullMap;
+
+        if (isFullMap)
+        {
+            HideGameplayUiForFullMap();
+        }
+        else
+        {
+            RestoreGameplayUiAfterFullMap();
+        }
+    }
+
+    /// <summary>
+    /// 전체맵 진입 시 주사위 UI / 카드 UI를 숨긴다.
+    /// </summary>
+    private void HideGameplayUiForFullMap()
+    {
+        if (hideDiceUiOnFullMap && diceControlPanel != null)
+        {
+            _diceUiWasActiveBeforeFullMap = diceControlPanel.activeSelf;
+
+            if (_diceControlOpen)
+                CloseDiceControlPanel();
+            else
+                diceControlPanel.SetActive(false);
+
+            _diceGaugeHolding = false;
+            _waitingRollStateChange = false;
+        }
+
+        if (hideCardUiOnFullMap && cardUiRoot != null)
+        {
+            _cardUiWasActiveBeforeFullMap = cardUiRoot.activeSelf;
+            cardUiRoot.SetActive(false);
+        }
+    }
+
+    /// <summary>
+    /// 전체맵에서 말 보기로 복귀했을 때 UI를 현재 게임 상태 기준으로 다시 복구한다.
+    /// 
+    /// 주사위 UI는 단순히 이전 activeSelf만 복구하지 않는다.
+    /// 내 차례이고 실제로 주사위를 굴릴 수 있을 때만 RefreshMainButtons가 다시 열게 한다.
+    /// </summary>
+    private void RestoreGameplayUiAfterFullMap()
+    {
+        if (hideCardUiOnFullMap && cardUiRoot != null)
+        {
+            if (_cardUiWasActiveBeforeFullMap)
+                cardUiRoot.SetActive(true);
+        }
+
+        if (hideDiceUiOnFullMap)
+        {
+            _diceGaugeHolding = false;
+            _waitingRollStateChange = false;
+
+            BulmabulGameState state = BulmabulGameState.Instance;
+
+            if (state != null && state.IsSpawnReady)
+            {
+                // 내 차례이고 굴릴 수 있으면 RefreshMainButtons 내부에서 다시 OpenDiceControlPanel() 호출됨.
+                RefreshMainButtons(state);
+            }
+        }
     }
 
     /// <summary>

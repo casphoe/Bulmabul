@@ -18,6 +18,7 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
     [Header("References")]
     [SerializeField] private BulmabulGameState gameState;
     [SerializeField] private BulmabulBoard board;
+    [SerializeField] private BulmabulCameraFollow cameraFollow;
 
     [Header("Debug Options")]
     [SerializeField] private bool enableDebugMove = true;
@@ -57,18 +58,36 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
         if (!gameState.IsSpawnReady)
             return;
 
-        if (Input.GetKeyDown(KeyCode.Alpha1))
+        if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1))
+        {
+            ForceExitFullMapViewForDebugKey();
             RequestDebugMove(DebugMoveType.NearestEnemyLand);
-        else if (Input.GetKeyDown(KeyCode.Alpha2))
+        }
+        else if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2))
+        {
+            ForceExitFullMapViewForDebugKey();
             RequestDebugMove(DebugMoveType.NearestTeamLand);
-        else if (Input.GetKeyDown(KeyCode.Alpha3))
+        }
+        else if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3))
+        {
+            ForceExitFullMapViewForDebugKey();
             RequestDebugMove(DebugMoveType.NearestChance);
-        else if (Input.GetKeyDown(KeyCode.Alpha4))
+        }
+        else if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4))
+        {
+            ForceExitFullMapViewForDebugKey();
             RequestDebugMove(DebugMoveType.Start);
-        else if (Input.GetKeyDown(KeyCode.Alpha5))
+        }
+        else if (Input.GetKeyDown(KeyCode.Alpha5) || Input.GetKeyDown(KeyCode.Keypad5))
+        {
+            ForceExitFullMapViewForDebugKey();
             RequestDebugMove(DebugMoveType.NearestJail);
-        else if (Input.GetKeyDown(KeyCode.Alpha6))
+        }
+        else if (Input.GetKeyDown(KeyCode.Alpha6) || Input.GetKeyDown(KeyCode.Keypad6))
+        {
+            ForceExitFullMapViewForDebugKey();
             RequestDebugMove(DebugMoveType.NearestTravel);
+        }
 #endif
     }
 
@@ -82,6 +101,9 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
 
         if (board == null)
             board = FindFirstObjectByType<BulmabulBoard>();
+
+        if (cameraFollow == null)
+            cameraFollow = FindFirstObjectByType<BulmabulCameraFollow>();
     }
 
     private void RequestDebugMove(DebugMoveType moveType)
@@ -415,5 +437,25 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
         }
 
         Debug.Log("[BulmabulDebugMoveTester] " + kor);
+    }
+
+    /// <summary>
+    /// 테스트 키 입력 시 전체맵 보기 상태라면 즉시 해제한다.
+    /// 
+    /// 전체맵은 로컬 카메라 상태이므로 RPC 안에서 처리하지 않고,
+    /// 키 입력을 받은 클라이언트에서 먼저 해제한다.
+    /// </summary>
+    private void ForceExitFullMapViewForDebugKey()
+    {
+        if (cameraFollow == null)
+            cameraFollow = FindFirstObjectByType<BulmabulCameraFollow>();
+
+        if (cameraFollow == null)
+            return;
+
+        if (!cameraFollow.IsFullMapView)
+            return;
+
+        cameraFollow.ForceFollowView(false);
     }
 }
