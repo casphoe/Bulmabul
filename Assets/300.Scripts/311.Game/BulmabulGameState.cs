@@ -140,12 +140,6 @@ public class BulmabulGameState : NetworkBehaviour
         /// </summary>
         public int bankruptcyCount;
 
-        /// <summary>
-        /// 현재 턴에서 연속으로 나온 주사위 더블 횟수.
-        /// 5회 연속 더블이 나오면 즉시 감옥으로 이동한다.
-        /// </summary>
-        public int consecutiveDoubleCount;
-
     }
 
     /// <summary>
@@ -230,18 +224,9 @@ public class BulmabulGameState : NetworkBehaviour
 
     [SerializeField] private int maxJailDoubleFailCount = 5;
 
-    [Tooltip("연속 더블 몇 회 이상이면 감옥으로 보낼지 설정합니다. 기본값 5")]
-    [SerializeField] private int maxConsecutiveDoubleBeforeJail = 5;
-
-    [Tooltip("연속 더블 패널티로 이동할 감옥 칸 인덱스")]
-    [SerializeField] private int jailCellIndex = 40;
-
     [Header("Land Settings")]
     [Tooltip("true면 빈 땅 도착 시 구매 패널 없이 자동 구매. false면 구매/패스 UI를 기다림")]
     [SerializeField] private bool autoBuyLand = false;
-
-    [Tooltip("몇 개 라인을 독점하면 즉시 승리할지 설정합니다. 기본값 2 = 라인 독점 2회 이상 승리")]
-    [SerializeField] private int lineMonopolyWinCount = 2;
 
     /// <summary>게임 참여자 슬롯</summary>
     [Networked, Capacity(MaxPlayers)]
@@ -596,8 +581,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (TurnTimer.Expired(Runner))
         {
-            ForceExitFullMapViewForLocalCamera(false);
-
             LogServer("턴 시간 초과. 다음 플레이어 턴으로 넘어갑니다.");
             AdvanceTurn();
         }
@@ -686,8 +669,7 @@ public class BulmabulGameState : NetworkBehaviour
                 leftGame = false,
                 leaveReasonInt = 0,
                 isInJail = false,
-                jailTryCount = 0,
-                consecutiveDoubleCount = 0
+                jailTryCount = 0
             };
 
             if (i < orderedPlayers.Count)
@@ -1126,10 +1108,6 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
-        ResetTurnTimerByButtonClickForAuthority();
-
-        ForceExitFullMapViewForLocalCamera(false);
-
         parityChoiceInt = Mathf.Clamp(parityChoiceInt, 0, 2);
         gaugePermille = Mathf.Clamp(gaugePermille, 0, 1000);
 
@@ -1167,23 +1145,12 @@ public class BulmabulGameState : NetworkBehaviour
         LastDiceRight = roll.right;
         PendingWasDouble = roll.isDouble;
 
-        int doubleCount = UpdateConsecutiveDoubleCountForAuthority(turnIndex, roll.isDouble);
-
         // UI가 최근 주사위 결과를 받을 수 있도록 버전을 올린다.
         OnDiceRollResolved(roll.left, roll.right);
 
         string actorName = GetPlayerDisplayName(turnIndex);
 
-        if (roll.isDouble)
-        {
-            LogServer(
-                $"{actorName}님 주사위: {roll.left}, {roll.right} / 더블 {doubleCount}/{maxConsecutiveDoubleBeforeJail} / 이동 {roll.sum}칸{controlText}"
-            );
-        }
-        else
-        {
-            LogServer($"{actorName}님 주사위: {roll.left}, {roll.right} / 이동 {roll.sum}칸{controlText}");
-        }
+        LogServer($"{actorName}님 주사위: {roll.left}, {roll.right} / 이동 {roll.sum}칸{controlText}");
 
         RPC_ShowPawnFloatingText(
             turnIndex,
@@ -1196,19 +1163,9 @@ public class BulmabulGameState : NetworkBehaviour
         RPC_PlayDiceVisual(roll.left, roll.right);
 
         // 주사위 UI가 완전히 끝날 때까지 기다린 뒤 Pawn 이동 시작.
+        // 즉, 결과 표시 → UI 꺼짐 → Pawn 이동 순서가 된다.
         float diceWait = GetDicePresentationWaitSeconds();
         yield return new WaitForSeconds(diceWait);
-
-        /*
-         * 중요:
-         * 연속 더블이 제한 횟수에 도달하면 이동 결과를 적용하지 않고 바로 감옥으로 보낸다.
-         * 5번째 더블이 나온 순간 감옥 이동 처리.
-         */
-        if (roll.isDouble && doubleCount >= Mathf.Max(1, maxConsecutiveDoubleBeforeJail))
-        {
-            yield return CoSendPlayerToJailByConsecutiveDouble(turnIndex);
-            yield break;
-        }
 
         int targetIndex = CalculateTargetIndexAndPaySalary(turnIndex, fromIndex, roll.sum);
 
@@ -1358,64 +1315,10 @@ public class BulmabulGameState : NetworkBehaviour
         }
     }
 
-    /// <summary>
-    /// 플레이어의 연속 더블 횟수를 초기화한다.
-    /// 턴이 다른 플레이어에게 넘어가거나, 더블이 아닌 주사위가 나오면 호출한다.
-    /// </summary>
-    private void ResetConsecutiveDoubleCount(int playerIndex)
-    {
-        if (!Object.HasStateAuthority)
-            return;
-
-        if (playerIndex < 0 || playerIndex >= MaxPlayers)
-            return;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        if (slot.occupied == 0)
-            return;
-
-        if (slot.consecutiveDoubleCount == 0)
-            return;
-
-        slot.consecutiveDoubleCount = 0;
-        Players.Set(playerIndex, slot);
-    }
-
-    /// <summary>
-    /// 주사위 결과가 더블인지에 따라 연속 더블 횟수를 갱신한다.
-    /// 더블이면 +1, 더블이 아니면 0으로 초기화한다.
-    /// </summary>
-    private int UpdateConsecutiveDoubleCountForAuthority(int playerIndex, bool isDouble)
-    {
-        if (!Object.HasStateAuthority)
-            return 0;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return 0;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        if (isDouble)
-            slot.consecutiveDoubleCount++;
-        else
-            slot.consecutiveDoubleCount = 0;
-
-        int result = slot.consecutiveDoubleCount;
-
-        Players.Set(playerIndex, slot);
-
-        return result;
-    }
-
     private void AdvanceTurn()
     {
         if (!Object.HasStateAuthority)
             return;
-
-        ForceExitFullMapViewForLocalCamera(false);
-
-        ResetConsecutiveDoubleCount(CurrentTurnIndex);
 
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
@@ -1460,50 +1363,6 @@ public class BulmabulGameState : NetworkBehaviour
         // 카메라는 항상 자기 로컬 플레이어 말 기준
         if (IsSpawnReady)
             UpdateCameraTargetToLocalPlayer(false);
-    }
-
-    /// <summary>
-    /// 현재 턴/선택 대기 중인 플레이어가 버튼을 정상 클릭했을 때
-    /// 턴 제한 시간을 처음 값으로 되돌린다.
-    ///
-    /// 주의:
-    /// - StateAuthority에서만 실행한다.
-    /// - 게임 종료, 일시정지 상태에서는 리셋하지 않는다.
-    /// - Runner가 없으면 TickTimer를 만들 수 없으므로 리셋하지 않는다.
-    /// </summary>
-    private void ResetTurnTimerByButtonClickForAuthority()
-    {
-        if (!Object.HasStateAuthority)
-            return;
-
-        if (Runner == null)
-            return;
-
-        if (GameFinished)
-            return;
-
-        if (IsPaused)
-            return;
-
-        TurnTimer = TickTimer.CreateFromSeconds(Runner, turnSeconds);
-
-        BumpRevision();
-    }
-
-    /// <summary>
-    /// 전체 맵 보기 상태를 강제로 해제하고 Pawn 따라가기 카메라로 되돌린다.
-    /// 
-    /// 사용 시점:
-    /// - 주사위를 굴렸을 때
-    /// - 턴 시간이 끝나서 다음 턴으로 넘어갈 때
-    /// - 선택 버튼으로 턴 흐름이 진행될 때
-    /// </summary>
-    private void ForceExitFullMapViewForLocalCamera(bool instant = false)
-    {
-        if (cameraFollow == null)
-            return;
-
-        cameraFollow.ForceFollowView(instant);
     }
 
     #endregion
@@ -1570,8 +1429,6 @@ public class BulmabulGameState : NetworkBehaviour
             BumpRevision();
             return;
         }
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         int jailPlayerIndex = PendingPlayerIndex;
 
@@ -1671,8 +1528,6 @@ public class BulmabulGameState : NetworkBehaviour
             BumpRevision();
             return;
         }
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         if (!freeEscape)
         {
@@ -2008,14 +1863,6 @@ public class BulmabulGameState : NetworkBehaviour
             2
         );
 
-        CheckWinnerByLineMonopoly(playerIndex);
-
-        if (GameFinished)
-        {
-            BumpRevision();
-            return true;
-        }
-
         BumpRevision();
         return true;
     }
@@ -2333,99 +2180,6 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 연속 더블 제한 횟수에 도달했을 때 감옥으로 보낸다.
-    /// 
-    /// 중요:
-    /// - 연속 더블 패널티 이동은 일반 주사위 이동이 아니다.
-    /// - 감옥으로 가는 도중 시작 칸을 지나가도 시작 보너스/월급을 지급하지 않는다.
-    /// - CalculateTargetIndexAndPaySalary()를 사용하면 안 된다.
-    /// - CalculateForwardMoveCount()만 사용해서 이동 칸 수만 계산한다.
-    /// </summary>
-    private IEnumerator CoSendPlayerToJailByConsecutiveDouble(int playerIndex)
-    {
-        if (!Object.HasStateAuthority)
-            yield break;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            yield break;
-
-        if (board == null || board.CellCount <= 0)
-            yield break;
-
-        PlayerGameSlot slot = Players.Get(playerIndex);
-
-        int fromIndex = slot.tileIndex;
-        int targetJailIndex = board.ClampCellIndex(jailCellIndex);
-
-        /*
-         * 중요:
-         * 여기서는 CalculateTargetIndexAndPaySalary()를 쓰면 안 된다.
-         * 그 함수는 시작 칸을 지나갈 때 월급/보너스를 지급한다.
-         *
-         * 연속 더블 5회 패널티로 감옥에 가는 이동은 강제 이동이므로,
-         * 시작 칸을 지나가도 보상을 지급하지 않는다.
-         */
-        int moveCount = CalculateForwardMoveCount(fromIndex, targetJailIndex);
-
-        LogServer(
-            $"{playerIndex}번 플레이어가 연속 더블 {maxConsecutiveDoubleBeforeJail}회로 감옥에 이동합니다. " +
-            "패널티 이동이므로 시작 칸을 지나가도 보너스는 지급되지 않습니다."
-        );
-
-        RPC_ShowPawnFloatingText(
-            playerIndex,
-            $"연속 더블 {maxConsecutiveDoubleBeforeJail}회",
-            $"{maxConsecutiveDoubleBeforeJail} Doubles",
-            3
-        );
-
-        RPC_ShowPawnFloatingText(
-            playerIndex,
-            "감옥 이동",
-            "Go to Jail",
-            3
-        );
-
-        if (moveCount > 0)
-        {
-            RPC_PlayPawnMoveVisual(playerIndex, fromIndex, moveCount);
-
-            float moveWait = pawnMover != null
-                ? pawnMover.MoveStepSeconds * moveCount + 0.1f
-                : 0.22f * moveCount + 0.1f;
-
-            yield return new WaitForSeconds(moveWait);
-        }
-
-        slot = Players.Get(playerIndex);
-
-        slot.tileIndex = targetJailIndex;
-        slot.isInJail = true;
-        slot.jailTryCount = 0;
-        slot.consecutiveDoubleCount = 0;
-
-        Players.Set(playerIndex, slot);
-
-        PendingAction = PendingActionType.None;
-        PendingPlayerIndex = -1;
-        PendingCellIndex = -1;
-        PendingWasDouble = false;
-        PendingChanceCardId = "";
-        PendingTaxAmount = 0;
-        PendingTaxSourceInt = 0;
-
-        TurnBusy = false;
-
-        LogServer(
-            $"{playerIndex}번 플레이어가 연속 더블 {maxConsecutiveDoubleBeforeJail}회로 감옥에 갇혔습니다. " +
-            "추가 턴 없이 다음 플레이어로 넘어갑니다."
-        );
-
-        AdvanceTurn();
-        BumpRevision();
-    }
-
-    /// <summary>
     /// 여행 칸 도착 처리.
     ///
     /// 주사위로 여행 칸에 도착했을 때만 실행된다.
@@ -2681,8 +2435,6 @@ public class BulmabulGameState : NetworkBehaviour
         if (cell == null)
             return;
 
-        ResetTurnTimerByButtonClickForAuthority();
-
         // 실제 땅 구매 처리.
         // 구매 가능 조건, 재화 차감, 소유권 등록 등은 TryBuyLand 내부에서 처리된다.
         bool bought = TryBuyLand(PendingPlayerIndex, PendingCellIndex, cell);
@@ -2749,8 +2501,6 @@ public class BulmabulGameState : NetworkBehaviour
         // 다른 클라이언트가 남의 구매 선택을 패스하지 못하도록 막는다.
         if (info.Source != actor.player)
             return;
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         // 턴 종료 처리 전에 현재 플레이어 인덱스를 저장한다.
         int finishedPlayer = PendingPlayerIndex;
@@ -3146,8 +2896,6 @@ public class BulmabulGameState : NetworkBehaviour
         if (!CanBuildAnyOnCell(PendingPlayerIndex, cellIndex))
             return;
 
-        ResetTurnTimerByButtonClickForAuthority();
-
         // 선택한 땅을 현재 건설 대상 칸으로 저장한다.
         PendingCellIndex = cellIndex;
 
@@ -3204,8 +2952,6 @@ public class BulmabulGameState : NetworkBehaviour
         // 현재 규칙상 해당 건물을 실제로 지을 수 있는지 확인한다.
         if (!CanBuildPart(PendingPlayerIndex, PendingCellIndex, part))
             return;
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         // 건설 대상 칸 데이터를 가져온다.
         BulmabulCellData cell = board.GetCell(PendingCellIndex);
@@ -3308,8 +3054,6 @@ public class BulmabulGameState : NetworkBehaviour
         // RPC를 보낸 클라이언트가 실제 건설 선택권을 가진 플레이어인지 검증한다.
         if (info.Source != player.player)
             return;
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         // 턴 종료 처리 전에 현재 플레이어 인덱스를 저장한다.
         int finishedPlayer = PendingPlayerIndex;
@@ -3425,8 +3169,6 @@ public class BulmabulGameState : NetworkBehaviour
 
             LogServer($"{playerIndex}번 플레이어가 여행을 취소했습니다.");
         }
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         PendingAction = PendingActionType.None;
         PendingPlayerIndex = -1;
@@ -3574,8 +3316,6 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
-        ResetTurnTimerByButtonClickForAuthority();
-
         RPC_ShowPawnFloatingText(
             playerIndex,
             "여행 카드 사용",
@@ -3626,8 +3366,6 @@ public class BulmabulGameState : NetworkBehaviour
             BumpRevision();
             return;
         }
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         /*
          * 핵심:
@@ -3815,8 +3553,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         targetCellIndex = board.ClampCellIndex(targetCellIndex);
 
-        ResetTurnTimerByButtonClickForAuthority();
-
         StartCoroutine(CoResolveTravelMove(CurrentTurnIndex, targetCellIndex));
     }
 
@@ -3982,8 +3718,6 @@ public class BulmabulGameState : NetworkBehaviour
             LogServer($"찬스 카드 확인 요청 거부. 요청자={info.Source}, 카드 소유자={slot.player}");
             return;
         }
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         BulmabulChanceCardData card = pendingChanceCardData;
 
@@ -5389,8 +5123,6 @@ public class BulmabulGameState : NetworkBehaviour
             return;
         }
 
-        ResetTurnTimerByButtonClickForAuthority();
-
         PlayerGameSlot oldOwner = Players.Get(oldOwnerIndex);
 
         // 인수하는 사람은 인수 비용 지불
@@ -5433,18 +5165,6 @@ public class BulmabulGameState : NetworkBehaviour
             $"+{cost:N0}",
             1
         );
-
-        CheckWinnerByLineMonopoly(PendingPlayerIndex);
-
-        if (GameFinished)
-        {
-            PendingAction = PendingActionType.None;
-            PendingPlayerIndex = -1;
-            PendingCellIndex = -1;
-            PendingWasDouble = false;
-            BumpRevision();
-            return;
-        }
 
         int finishedPlayer = PendingPlayerIndex;
         int takenCellIndex = PendingCellIndex;
@@ -5520,8 +5240,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (cell == null || cell.cellType != BulmabulCellType.Land)
             return;
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         int payerIndex = PendingPlayerIndex;
         int cellIndex = PendingCellIndex;
@@ -5652,8 +5370,6 @@ public class BulmabulGameState : NetworkBehaviour
         int taxSource = PendingTaxSourceInt;
         bool wasDouble = PendingWasDouble;
 
-        ResetTurnTimerByButtonClickForAuthority();
-
         if (useAngelCard)
         {
             bool consumed = TryConsumeKeptChanceCardForAuthority(
@@ -5721,8 +5437,6 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (info.Source != player.player)
             return;
-
-        ResetTurnTimerByButtonClickForAuthority();
 
         int finishedPlayer = PendingPlayerIndex;
         bool wasDouble = PendingWasDouble;
@@ -6450,85 +6164,6 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 로컬 플레이어가 게임 종료 시 패배자인지 확인한다.
-    /// 
-    /// 승리자가 아니면서 현재 룸 슬롯에 남아있는 플레이어면 패배자로 본다.
-    /// 이 값은 ResultPanel 표시와 로비 이동 처리에 사용한다.
-    /// </summary>
-    public bool IsLocalPlayerLoser()
-    {
-        if (!IsSpawnReady)
-            return false;
-
-        if (Runner == null)
-            return false;
-
-        if (!GameFinished)
-            return false;
-
-        int localIndex = FindPlayerIndex(Runner.LocalPlayer);
-
-        return localIndex >= 0 && localIndex != WinnerIndex;
-    }
-
-    /// <summary>
-    /// 로컬 플레이어가 게임을 직접 나가지 않고 정상 게임 진행으로 패배했는지 확인한다.
-    /// 
-    /// 이탈 패배(leftGame=true)는 BulmabulPenaltyService에서 별도 처리하므로
-    /// 정상 패배 경험치/재화 보상 지급 대상에서 제외한다.
-    /// </summary>
-    public bool IsLocalPlayerNormalDefeat()
-    {
-        if (!IsLocalPlayerLoser())
-            return false;
-
-        int localIndex = FindPlayerIndex(Runner.LocalPlayer);
-
-        if (localIndex < 0 || localIndex >= MaxPlayers)
-            return false;
-
-        PlayerGameSlot slot = Players.Get(localIndex);
-
-        // 게임을 직접 나가지 않고 끝까지 있다가 패배한 유저는 정상 패배 보상 대상이다.
-        // 파산 패배뿐 아니라, 다른 플레이어의 승리로 인해 패배한 유저도 포함한다.
-        return !slot.leftGame;
-    }
-
-    /// <summary>
-    /// 로컬 플레이어가 게임 도중 파산으로 개인 패배 상태인지 확인한다.
-    /// 
-    /// 중요:
-    /// - GameFinished가 false여도 true가 될 수 있다.
-    /// - 4인 게임에서 한 명만 파산하면 전체 게임은 계속 진행되지만,
-    ///   파산한 유저는 패배 보상 지급 후 방에서 나가야 한다.
-    /// </summary>
-    public bool IsLocalPlayerBankruptDefeat()
-    {
-        if (!IsSpawnReady)
-            return false;
-
-        if (Runner == null)
-            return false;
-
-        int localIndex = FindPlayerIndex(Runner.LocalPlayer);
-
-        if (localIndex < 0 || localIndex >= MaxPlayers)
-            return false;
-
-        PlayerGameSlot slot = Players.Get(localIndex);
-
-        if (slot.occupied == 0)
-            return false;
-
-        // 직접 나간 유저는 보상 지급 대상이 아니다.
-        if (slot.leftGame)
-            return false;
-
-        // 파산 패배 상태
-        return slot.bankrupt;
-    }
-
-    /// <summary>
     /// 현재 승리자의 닉네임을 반환한다.
     /// 
     /// WinnerIndex가 유효하지 않거나 닉네임이 비어 있으면
@@ -6547,94 +6182,6 @@ public class BulmabulGameState : NetworkBehaviour
             nickname = $"Player {WinnerIndex + 1}";
 
         return nickname;
-    }
-
-    /// <summary>
-    /// 현재 게임 종료의 승리 이유를 반환한다.
-    /// LastLogMessage에 승리 사유가 들어있으면 그 내용을 사용한다.
-    /// </summary>
-    public string GetWinReasonText()
-    {
-        if (!IsSpawnReady)
-            return GetByLanguageForState("승리 이유를 불러오는 중입니다.", "Loading win reason.");
-
-        if (!string.IsNullOrWhiteSpace(LastLogMessage.ToString()))
-            return LastLogMessage.ToString();
-
-        string winnerName = GetWinnerNickname();
-
-        return GetByLanguageForState(
-            $"{winnerName}님이 승리했습니다.",
-            $"{winnerName} won the game."
-        );
-    }
-
-    /// <summary>
-    /// 로컬 플레이어의 패배 이유를 반환한다.
-    /// </summary>
-    public string GetLocalDefeatReasonText()
-    {
-        if (!IsSpawnReady)
-            return GetByLanguageForState("패배 이유를 불러오는 중입니다.", "Loading defeat reason.");
-
-        if (Runner == null)
-            return GetByLanguageForState("패배했습니다.", "You were defeated.");
-
-        int localIndex = FindPlayerIndex(Runner.LocalPlayer);
-
-        if (localIndex < 0 || localIndex >= MaxPlayers)
-            return GetByLanguageForState("패배했습니다.", "You were defeated.");
-
-        PlayerGameSlot slot = Players.Get(localIndex);
-
-        if (slot.leftGame)
-        {
-            LeaveReasonType leaveReason = (LeaveReasonType)slot.leaveReasonInt;
-
-            if (leaveReason == LeaveReasonType.ExitButton)
-            {
-                return GetByLanguageForState(
-                    "게임에서 직접 나가 이탈 패배 처리되었습니다.",
-                    "You left the game and were defeated."
-                );
-            }
-
-            if (leaveReason == LeaveReasonType.Disconnected)
-            {
-                return GetByLanguageForState(
-                    "연결이 끊겨 이탈 패배 처리되었습니다.",
-                    "You were disconnected and defeated."
-                );
-            }
-
-            return GetByLanguageForState(
-                "게임 이탈로 패배 처리되었습니다.",
-                "You were defeated for leaving the game."
-            );
-        }
-
-        if (slot.bankrupt)
-        {
-            return GetByLanguageForState(
-                "파산으로 패배했습니다.",
-                "You were defeated by bankruptcy."
-            );
-        }
-
-        if (GameFinished && WinnerIndex >= 0 && localIndex != WinnerIndex)
-        {
-            string winnerName = GetWinnerNickname();
-
-            return GetByLanguageForState(
-                $"{winnerName}님이 승리하여 패배했습니다.",
-                $"{winnerName} won, so you were defeated."
-            );
-        }
-
-        return GetByLanguageForState(
-            "게임 결과에 따라 패배했습니다.",
-            "You were defeated by the game result."
-        );
     }
 
     #endregion
@@ -6764,97 +6311,6 @@ public class BulmabulGameState : NetworkBehaviour
     }
 
     /// <summary>
-    /// 라인 독점 승리 조건을 검사한다.
-    ///
-    /// 조건:
-    /// - 일반 땅만 검사한다.
-    /// - BulmabulCellType.Land인 칸만 검사한다.
-    /// - isLandmark가 true인 땅은 건설 불가 특수 지역으로 보고 독점 판정에서 제외한다.
-    /// - lineId가 0 이상인 땅만 라인으로 인정한다.
-    /// - 같은 lineId에 포함된 모든 일반 땅을 한 플레이어가 소유하면 라인 1개 독점으로 본다.
-    /// - lineMonopolyWinCount 기본값 2이므로 라인 2개 이상 독점 시 즉시 승리한다.
-    /// </summary>
-    private void CheckWinnerByLineMonopoly(int playerIndex)
-    {
-        if (!Object.HasStateAuthority)
-            return;
-
-        if (GameFinished)
-            return;
-
-        if (!IsValidAlivePlayer(playerIndex))
-            return;
-
-        if (board == null || board.CellCount <= 0)
-            return;
-
-        int needCount = Mathf.Max(1, lineMonopolyWinCount);
-
-        Dictionary<int, int> totalByLine = new Dictionary<int, int>();
-        Dictionary<int, int> ownedByLine = new Dictionary<int, int>();
-
-        int count = Mathf.Min(board.CellCount, MaxCells);
-
-        for (int i = 0; i < count; i++)
-        {
-            BulmabulCellData cell = board.GetCell(i);
-
-            if (cell == null)
-                continue;
-
-            if (cell.cellType != BulmabulCellType.Land)
-                continue;
-
-            if (cell.isLandmark)
-                continue;
-
-            if (cell.lineId < 0)
-                continue;
-
-            if (!totalByLine.ContainsKey(cell.lineId))
-            {
-                totalByLine[cell.lineId] = 0;
-                ownedByLine[cell.lineId] = 0;
-            }
-
-            totalByLine[cell.lineId]++;
-
-            if (LandOwnerByCell.Get(i) == playerIndex)
-                ownedByLine[cell.lineId]++;
-        }
-
-        int monopolyCount = 0;
-
-        foreach (KeyValuePair<int, int> pair in totalByLine)
-        {
-            int lineId = pair.Key;
-            int totalCount = pair.Value;
-
-            if (totalCount <= 0)
-                continue;
-
-            if (!ownedByLine.TryGetValue(lineId, out int ownedCount))
-                continue;
-
-            if (ownedCount >= totalCount)
-                monopolyCount++;
-        }
-
-        if (monopolyCount < needCount)
-            return;
-
-        string winnerName = GetPlayerDisplayName(playerIndex);
-
-        string reason = GetByLanguageForState(
-            $"{winnerName}님이 라인 {monopolyCount}개를 독점하여 승리했습니다.",
-            $"{winnerName} won by monopolizing {monopolyCount} lines."
-        );
-
-        LogServer(reason);
-        FinishGameByWinner(playerIndex, reason);
-    }
-
-    /// <summary>
     /// 살아있는 플레이어가 1명만 남으면 그 플레이어 승리.
     /// </summary>
     private void CheckWinnerByRemainingPlayers()
@@ -6879,24 +6335,14 @@ public class BulmabulGameState : NetworkBehaviour
 
         if (aliveCount == 1 && winnerIndex >= 0)
         {
-            string winnerName = GetPlayerDisplayName(winnerIndex);
-
-            string reason = GetByLanguageForState(
-                $"{winnerName}님이 마지막까지 생존하여 승리했습니다.",
-                $"{winnerName} won by being the last remaining player."
-            );
-
-            FinishGameByWinner(winnerIndex, reason);
+            FinishGameByWinner(winnerIndex);
         }
     }
 
     /// <summary>
     /// 게임 종료 및 승자 확정.
-    /// 
-    /// reasonMessage가 있으면 해당 문구를 최종 로그로 사용한다.
-    /// 없으면 기본 승리 문구를 사용한다.
     /// </summary>
-    private void FinishGameByWinner(int winnerIndex, string reasonMessage = "")
+    private void FinishGameByWinner(int winnerIndex)
     {
         if (!Object.HasStateAuthority)
             return;
@@ -6912,12 +6358,7 @@ public class BulmabulGameState : NetworkBehaviour
         PendingPlayerIndex = -1;
         PendingCellIndex = -1;
         PendingWasDouble = false;
-        PendingChanceCardId = "";
-        PendingTaxAmount = 0;
-        PendingTaxSourceInt = 0;
         IsPaused = false;
-        PauseOwner = PlayerRef.None;
-        PausedRemainSeconds = 0f;
 
         PlayerGameSlot winner = Players.Get(winnerIndex);
 
@@ -6926,14 +6367,9 @@ public class BulmabulGameState : NetworkBehaviour
         if (string.IsNullOrWhiteSpace(winnerNick))
             winnerNick = $"Player {winnerIndex + 1}";
 
-        if (string.IsNullOrWhiteSpace(reasonMessage))
-            LastLogMessage = $"{winnerNick}님이 승리했습니다.";
-        else
-            LastLogMessage = reasonMessage;
+        LastLogMessage = $"{winnerNick}님이 승리했습니다.";
 
-        Debug.Log(
-            $"[BulmabulGameState] Game Finished. WinnerIndex={winnerIndex}, Winner={winnerNick}, Reason={LastLogMessage}"
-        );
+        Debug.Log($"[BulmabulGameState] Game Finished. WinnerIndex={winnerIndex}, Winner={winnerNick}");
 
         BumpRevision();
     }

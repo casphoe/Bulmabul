@@ -32,7 +32,6 @@ public class BulmabulDebugGrantKeptCardsHotkey : NetworkBehaviour
 
     private void Update()
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (!enableDebugHotkey)
             return;
 
@@ -40,7 +39,6 @@ public class BulmabulDebugGrantKeptCardsHotkey : NetworkBehaviour
             return;
 
         TryRequestGrantKeptCards();
-#endif
     }
 
     private void TryRequestGrantKeptCards()

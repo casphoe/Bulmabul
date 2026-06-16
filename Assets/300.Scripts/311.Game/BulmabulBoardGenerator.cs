@@ -53,7 +53,6 @@ public class BulmabulBoardGenerator : MonoBehaviour
     }
 
     #region 각 땅마다 가격대 차이 기능
-
     [Serializable]
     public class LandPriceTier
     {
@@ -85,43 +84,15 @@ public class BulmabulBoardGenerator : MonoBehaviour
         public int lineId;
     }
 
-    [Header("Land Price Tiers")]
-    private LandPriceTier[] landPriceTiers =
-    {
-    /*
-     * 라인 분할 규칙
-     *
-     * 전체 보드:
-     * - 0   : 시작
-     * - 40  : 감옥
-     * - 80  : 여행
-     * - 120 : 세금
-     *
-     * 중간 특수 칸:
-     * - 20, 60, 100, 140 : 보너스
-     *
-     * 일반 땅 라인:
-     * - 한 변을 보너스 칸 기준으로 앞/뒤 절반으로 나눈다.
-     * - 총 8개 라인으로 분리한다.
-     * - 같은 lineId의 모든 일반 땅을 한 명이 소유하면 라인 1개 독점으로 본다.
-     *
-     * 라인 구성:
-     * lineId 0 : 1   ~ 19
-     * lineId 1 : 21  ~ 39
-     * lineId 2 : 41  ~ 59
-     * lineId 3 : 61  ~ 79
-     * lineId 4 : 81  ~ 99
-     * lineId 5 : 101 ~ 119
-     * lineId 6 : 121 ~ 139
-     * lineId 7 : 141 ~ 159
-     */
 
-    // 아래쪽 라인 전반부: 1 ~ 19
+    [Header("Land Price Tiers")]
+    [SerializeField]
+    private LandPriceTier[] landPriceTiers =
+ {
     new LandPriceTier
     {
         startIndex = 1,
-        endIndex = 19,
-
+        endIndex = 39,
         buyCost = 100000,
         tollCost = 20000,
 
@@ -138,34 +109,10 @@ public class BulmabulBoardGenerator : MonoBehaviour
         lineId = 0
     },
 
-    // 아래쪽 라인 후반부: 21 ~ 39
-    new LandPriceTier
-    {
-        startIndex = 21,
-        endIndex = 39,
-
-        buyCost = 120000,
-        tollCost = 24000,
-
-        smallHouseBuildCost = 35000,
-        houseBuildCost = 55000,
-        bigHouseBuildCost = 90000,
-        hotelBuildCost = 230000,
-
-        smallHouseToll = 12000,
-        houseToll = 35000,
-        bigHouseToll = 70000,
-        hotelToll = 260000,
-
-        lineId = 1
-    },
-
-    // 오른쪽 라인 전반부: 41 ~ 59
     new LandPriceTier
     {
         startIndex = 41,
-        endIndex = 59,
-
+        endIndex = 79,
         buyCost = 180000,
         tollCost = 35000,
 
@@ -179,37 +126,13 @@ public class BulmabulBoardGenerator : MonoBehaviour
         bigHouseToll = 90000,
         hotelToll = 350000,
 
-        lineId = 2
+        lineId = 1
     },
 
-    // 오른쪽 라인 후반부: 61 ~ 79
-    new LandPriceTier
-    {
-        startIndex = 61,
-        endIndex = 79,
-
-        buyCost = 210000,
-        tollCost = 42000,
-
-        smallHouseBuildCost = 60000,
-        houseBuildCost = 90000,
-        bigHouseBuildCost = 140000,
-        hotelBuildCost = 350000,
-
-        smallHouseToll = 25000,
-        houseToll = 60000,
-        bigHouseToll = 110000,
-        hotelToll = 420000,
-
-        lineId = 3
-    },
-
-    // 위쪽 라인 전반부: 81 ~ 99
     new LandPriceTier
     {
         startIndex = 81,
-        endIndex = 99,
-
+        endIndex = 119,
         buyCost = 300000,
         tollCost = 60000,
 
@@ -223,37 +146,13 @@ public class BulmabulBoardGenerator : MonoBehaviour
         bigHouseToll = 160000,
         hotelToll = 550000,
 
-        lineId = 4
+        lineId = 2
     },
 
-    // 위쪽 라인 후반부: 101 ~ 119
-    new LandPriceTier
-    {
-        startIndex = 101,
-        endIndex = 119,
-
-        buyCost = 350000,
-        tollCost = 70000,
-
-        smallHouseBuildCost = 90000,
-        houseBuildCost = 140000,
-        bigHouseBuildCost = 210000,
-        hotelBuildCost = 520000,
-
-        smallHouseToll = 50000,
-        houseToll = 110000,
-        bigHouseToll = 190000,
-        hotelToll = 650000,
-
-        lineId = 5
-    },
-
-    // 왼쪽 라인 전반부: 121 ~ 139
     new LandPriceTier
     {
         startIndex = 121,
-        endIndex = 139,
-
+        endIndex = 159,
         buyCost = 500000,
         tollCost = 100000,
 
@@ -267,29 +166,7 @@ public class BulmabulBoardGenerator : MonoBehaviour
         bigHouseToll = 280000,
         hotelToll = 900000,
 
-        lineId = 6
-    },
-
-    // 왼쪽 라인 후반부: 141 ~ 159
-    new LandPriceTier
-    {
-        startIndex = 141,
-        endIndex = 159,
-
-        buyCost = 580000,
-        tollCost = 115000,
-
-        smallHouseBuildCost = 140000,
-        houseBuildCost = 210000,
-        bigHouseBuildCost = 300000,
-        hotelBuildCost = 800000,
-
-        smallHouseToll = 85000,
-        houseToll = 180000,
-        bigHouseToll = 330000,
-        hotelToll = 1050000,
-
-        lineId = 7
+        lineId = 3
     }
 };
 
@@ -311,7 +188,6 @@ public class BulmabulBoardGenerator : MonoBehaviour
 
         return null;
     }
-
     #endregion
 
     #region 땅 이름

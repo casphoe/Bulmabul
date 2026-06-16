@@ -45,7 +45,6 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
 
     private void Update()
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
         if (!enableDebugMove)
             return;
 
@@ -69,7 +68,6 @@ public class BulmabulDebugMoveTester : NetworkBehaviour
             RequestDebugMove(DebugMoveType.NearestJail);
         else if (Input.GetKeyDown(KeyCode.Alpha6))
             RequestDebugMove(DebugMoveType.NearestTravel);
-#endif
     }
 
     private void CacheReferences()

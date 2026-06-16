@@ -219,7 +219,6 @@ public class BulmabulGameUI : MonoBehaviour
 
     private bool _handledGameFinished = false;
     private bool _savingGameResult = false;
-    private bool _handledLocalBankruptDefeat = false;
 
     private void Awake()
     {
@@ -238,8 +237,6 @@ public class BulmabulGameUI : MonoBehaviour
         RefreshMapViewButtonText();
 
         HandleGameFinishedAndShowWinResult();
-
-        HandleLocalBankruptDefeatResult();
 
         // PC에서 버튼을 누른 채 밖으로 드래그한 뒤 마우스를 떼도 굴림 처리되도록 보정
         if (_diceGaugeHolding && Input.GetMouseButtonUp(0))
@@ -312,13 +309,9 @@ public class BulmabulGameUI : MonoBehaviour
             txtSkipTakeOverLandButton = btnSkipTakeOverLand.transform.GetChild(0).GetComponent<TMP_Text>();
         }
     }
-    #region 승리 & 패배 기능 함수
+
     /// <summary>
-    /// 게임 종료를 감지해서 로컬 유저의 승리/패배 결과 패널을 표시하고 자동으로 방에서 나가게 한다.
-    /// 
-    /// 기존 문제:
-    /// - IsLocalPlayerWinner()가 false이면 return 했기 때문에
-    ///   패배자 클라이언트는 ResultPanel, 패배 보상, 로비 이동 처리가 전혀 실행되지 않았다.
+    /// 게임 종료를 감지해서 승리한 로컬 유저에게 보상 지급 후 자동으로 방에서 나가게 한다.
     /// </summary>
     private void HandleGameFinishedAndShowWinResult()
     {
@@ -330,77 +323,31 @@ public class BulmabulGameUI : MonoBehaviour
         if (state == null)
             return;
 
+        // 중요:
         // Fusion Spawned()가 끝나기 전에는 Networked Property 접근 금지.
+        // GameFinished, WinnerIndex, Players 같은 Networked 값은
+        // IsSpawnReady == true 이후에만 읽어야 한다.
         if (!state.IsSpawnReady)
             return;
 
         if (!state.GameFinished)
             return;
 
-        // 승리자도, 패배자도 아닌 관전자/비정상 상태면 처리하지 않는다.
-        if (!state.IsLocalPlayerWinner() && !state.IsLocalPlayerLoser())
+        if (!state.IsLocalPlayerWinner())
             return;
 
         _handledGameFinished = true;
-        StartCoroutine(CoShowGameResultRewardAndLeave());
+        StartCoroutine(CoShowWinResultRewardAndLeave());
     }
 
     /// <summary>
-    /// 전체 게임이 아직 끝나지 않았더라도,
-    /// 로컬 플레이어가 파산으로 개인 패배했다면 패배 보상을 지급하고 방에서 나간다.
-    /// 
-    /// 기존 문제:
-    /// - GameFinished == true일 때만 보상 처리를 했다.
-    /// - 그래서 4인 게임에서 한 명만 파산하면 전체 게임은 계속 진행되므로
-    ///   파산 유저는 "파산했습니다"까지만 보고 보상을 못 받았다.
+    /// 승리 보상 저장 → ResultPanel/Win에 결과 표시 → 일정 시간 후 로비 이동.
     /// </summary>
-    private void HandleLocalBankruptDefeatResult()
-    {
-        if (_handledLocalBankruptDefeat || _handledGameFinished || _savingGameResult)
-            return;
-
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        if (state == null)
-            return;
-
-        if (!state.IsSpawnReady)
-            return;
-
-        // 전체 게임이 끝난 경우는 HandleGameFinishedAndShowWinResult()에서 처리한다.
-        if (state.GameFinished)
-            return;
-
-        if (!state.IsLocalPlayerBankruptDefeat())
-            return;
-
-        _handledLocalBankruptDefeat = true;
-        StartCoroutine(CoShowBankruptDefeatRewardAndLeave());
-    }
-
-    /// <summary>
-    /// 게임 결과 보상 저장 → ResultPanel에 승리/패배 표시 → 일정 시간 후 로비 이동.
-    /// </summary>
-    private IEnumerator CoShowGameResultRewardAndLeave()
+    private IEnumerator CoShowWinResultRewardAndLeave()
     {
         _savingGameResult = true;
 
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        bool isWinner = state != null && state.IsLocalPlayerWinner();
-        bool isNormalDefeat = state != null && state.IsLocalPlayerNormalDefeat();
-
-        Task<BulmabulRewardResult> rewardTask = null;
-
-        if (isWinner)
-        {
-            rewardTask = BulmabulRewardService.ApplyLocalWinRewardAsync();
-        }
-        else if (isNormalDefeat)
-        {
-            // 게임을 나간 것이 아니라 파산 등 정상 진행으로 패배한 경우에는 소량 경험치를 지급한다.
-            rewardTask = BulmabulRewardService.ApplyLocalDefeatRewardAsync();
-        }
+        Task<BulmabulRewardResult> rewardTask = BulmabulRewardService.ApplyLocalWinRewardAsync();
 
         while (rewardTask != null && !rewardTask.IsCompleted)
             yield return null;
@@ -409,93 +356,29 @@ public class BulmabulGameUI : MonoBehaviour
         {
             Debug.LogException(rewardTask.Exception);
 
-            if (isWinner)
-            {
-                ShowWinResultPanel(
-                    "승리했습니다!\n\n하지만 보상 저장 중 오류가 발생했습니다.\n\n잠시 후 로비로 이동합니다.",
-                    "You won!\n\nHowever, failed to save rewards.\n\nReturning to the lobby shortly."
-                );
-            }
-            else
-            {
-                ShowWinResultPanel(
-                    "패배했습니다.\n\n하지만 패배 보상 저장 중 오류가 발생했습니다.\n\n잠시 후 로비로 이동합니다.",
-                    "You were defeated.\n\nHowever, failed to save defeat rewards.\n\nReturning to the lobby shortly."
-                );
-            }
+            ShowWinResultPanel(
+                "승리했습니다!\n\n상대 플레이어가 게임을 나갔습니다.\n하지만 보상 저장 중 오류가 발생했습니다.\n\n잠시 후 로비로 이동합니다.",
+                "You won!\n\nThe other player left the game.\nHowever, failed to save rewards.\n\nReturning to the lobby shortly."
+            );
         }
         else
         {
             BulmabulRewardResult result = rewardTask != null ? rewardTask.Result : null;
 
-            if (isWinner)
+            if (result != null)
             {
                 ShowWinResultPanel(
                     BuildWinRewardResultTextKor(result),
                     BuildWinRewardResultTextEng(result)
                 );
             }
-            else if (isNormalDefeat)
-            {
-                ShowWinResultPanel(
-                    BuildDefeatRewardResultTextKor(result),
-                    BuildDefeatRewardResultTextEng(result)
-                );
-            }
             else
             {
-                // 이탈 패배 등 보상 지급 대상이 아닌 패배.
                 ShowWinResultPanel(
-                    "패배했습니다.\n\n잠시 후 로비로 이동합니다.",
-                    "You were defeated.\n\nReturning to the lobby shortly."
+                    "승리했습니다!\n\n상대 플레이어가 게임을 나갔습니다.\n승리 보상을 획득했습니다!\n\n잠시 후 로비로 이동합니다.",
+                    "You won!\n\nThe other player left the game.\nYou received victory rewards!\n\nReturning to the lobby shortly."
                 );
             }
-        }
-
-        float delay = Mathf.Max(3.5f, resultLeaveDelay);
-        yield return new WaitForSeconds(delay);
-
-        if (NetWorkLauncher.instance != null)
-        {
-            _ = NetWorkLauncher.instance.LeaveRoomToLobby(1);
-        }
-        else
-        {
-            UnityEngine.SceneManagement.SceneManager.LoadScene("LobbyScene");
-        }
-
-        _savingGameResult = false;
-    }
-
-    /// <summary>
-    /// 파산으로 개인 패배한 로컬 유저에게 패배 보상을 지급하고 방에서 나간다.
-    /// </summary>
-    private IEnumerator CoShowBankruptDefeatRewardAndLeave()
-    {
-        _savingGameResult = true;
-
-        Task<BulmabulRewardResult> rewardTask = BulmabulRewardService.ApplyLocalDefeatRewardAsync();
-
-        while (rewardTask != null && !rewardTask.IsCompleted)
-            yield return null;
-
-        if (rewardTask != null && rewardTask.IsFaulted)
-        {
-            Debug.LogException(rewardTask.Exception);
-
-            ShowWinResultPanel(
-                "파산으로 패배했습니다.\n\n하지만 패배 보상 저장 중 오류가 발생했습니다.\n\n잠시 후 로비로 이동합니다.",
-                "You were defeated by bankruptcy.\n\nHowever, failed to save defeat rewards.\n\nReturning to the lobby shortly."
-            );
-        }
-        else
-        {
-            BulmabulRewardResult result = rewardTask != null ? rewardTask.Result : null;
-
-            ShowWinResultPanel(
-                BuildBankruptDefeatRewardResultTextKor(result),
-                BuildBankruptDefeatRewardResultTextEng(result)
-            );
         }
 
         float delay = Mathf.Max(3.5f, resultLeaveDelay);
@@ -526,21 +409,12 @@ public class BulmabulGameUI : MonoBehaviour
 
     private string BuildWinRewardResultTextKor(BulmabulRewardResult result)
     {
-        BulmabulGameState state = BulmabulGameState.Instance;
-        string winReason = state != null ? state.GetWinReasonText() : "승리 조건을 달성했습니다.";
-
         if (result == null)
-        {
-            return
-                $"승리했습니다!\n\n" +
-                $"승리 이유:\n{winReason}\n\n" +
-                $"승리 보상을 획득했습니다!\n\n" +
-                $"잠시 후 로비로 이동합니다.";
-        }
+            return "승리했습니다!\n\n상대 플레이어가 게임을 나갔습니다.\n승리 보상을 획득했습니다!\n\n잠시 후 로비로 이동합니다.";
 
         string msg =
             $"승리했습니다!\n\n" +
-            $"승리 이유:\n{winReason}\n\n" +
+            $"상대 플레이어가 게임을 나갔습니다.\n\n" +
             $"경험치 배율 : x{result.ExpMultiplier:0.##}\n" +
             $"획득 경험치 : +{result.FinalExpReward:N0}\n" +
             $"승리 보상 : +{result.WinCashReward:N0}";
@@ -562,24 +436,12 @@ public class BulmabulGameUI : MonoBehaviour
 
     private string BuildWinRewardResultTextEng(BulmabulRewardResult result)
     {
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        string winReason = state != null
-            ? state.GetWinReasonText()
-            : "You achieved the victory condition.";
-
         if (result == null)
-        {
-            return
-                $"You won!\n\n" +
-                $"Victory Reason:\n{winReason}\n\n" +
-                $"You received victory rewards!\n\n" +
-                $"Returning to the lobby shortly.";
-        }
+            return "You won!\n\nThe other player left the game.\nYou received victory rewards!\n\nReturning to the lobby shortly.";
 
         string msg =
             $"You won!\n\n" +
-            $"Victory Reason:\n{winReason}\n\n" +
+            $"The other player left the game.\n\n" +
             $"EXP Multiplier : x{result.ExpMultiplier:0.##}\n" +
             $"EXP Gained : +{result.FinalExpReward:N0}\n" +
             $"Win Reward : +{result.WinCashReward:N0}";
@@ -598,177 +460,6 @@ public class BulmabulGameUI : MonoBehaviour
 
         return msg;
     }
-
-    private string BuildDefeatRewardResultTextKor(BulmabulRewardResult result)
-    {
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        string defeatReason = state != null
-            ? state.GetLocalDefeatReasonText()
-            : "게임 결과에 따라 패배했습니다.";
-
-        string winReason = state != null
-            ? state.GetWinReasonText()
-            : "상대가 승리 조건을 달성했습니다.";
-
-        if (result == null)
-        {
-            return
-                $"패배했습니다.\n\n" +
-                $"패배 이유:\n{defeatReason}\n\n" +
-                $"승리 이유:\n{winReason}\n\n" +
-                $"잠시 후 로비로 이동합니다.";
-        }
-
-        string msg =
-            $"패배했습니다.\n\n" +
-            $"패배 이유:\n{defeatReason}\n\n" +
-            $"승리 이유:\n{winReason}\n\n" +
-            $"끝까지 플레이하여 패배 보상을 획득했습니다.\n\n" +
-            $"경험치 배율 : x{result.ExpMultiplier:0.##}\n" +
-            $"획득 경험치 : +{result.FinalExpReward:N0}\n" +
-            $"패배 보상 : +{result.WinCashReward:N0}";
-
-        if (result.IsLevelUp)
-        {
-            msg +=
-                $"\n\n레벨업!\n" +
-                $"Lv.{result.BeforeLevel} → Lv.{result.AfterLevel}\n" +
-                $"레벨업 보상 : +{result.LevelUpCashReward:N0}";
-        }
-
-        msg +=
-            $"\n\n총 획득 재화 : +{result.TotalCashReward:N0}\n" +
-            $"잠시 후 로비로 이동합니다.";
-
-        return msg;
-    }
-
-    private string BuildDefeatRewardResultTextEng(BulmabulRewardResult result)
-    {
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        string defeatReason = state != null
-            ? state.GetLocalDefeatReasonText()
-            : "You were defeated by the game result.";
-
-        string winReason = state != null
-            ? state.GetWinReasonText()
-            : "The opponent achieved the victory condition.";
-
-        if (result == null)
-        {
-            return
-                $"You were defeated.\n\n" +
-                $"Defeat Reason:\n{defeatReason}\n\n" +
-                $"Victory Reason:\n{winReason}\n\n" +
-                $"Returning to the lobby shortly.";
-        }
-
-        string msg =
-            $"You were defeated.\n\n" +
-            $"Defeat Reason:\n{defeatReason}\n\n" +
-            $"Victory Reason:\n{winReason}\n\n" +
-            $"You received defeat rewards for playing until the end.\n\n" +
-            $"EXP Multiplier : x{result.ExpMultiplier:0.##}\n" +
-            $"EXP Gained : +{result.FinalExpReward:N0}\n" +
-            $"Defeat Reward : +{result.WinCashReward:N0}";
-
-        if (result.IsLevelUp)
-        {
-            msg +=
-                $"\n\nLevel Up!\n" +
-                $"Lv.{result.BeforeLevel} → Lv.{result.AfterLevel}\n" +
-                $"Level Up Reward : +{result.LevelUpCashReward:N0}";
-        }
-
-        msg +=
-            $"\n\nTotal Cash Gained : +{result.TotalCashReward:N0}\n" +
-            $"Returning to the lobby shortly.";
-
-        return msg;
-    }
-
-    private string BuildBankruptDefeatRewardResultTextKor(BulmabulRewardResult result)
-    {
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        string defeatReason = state != null
-            ? state.GetLocalDefeatReasonText()
-            : "파산으로 패배했습니다.";
-
-        if (result == null)
-        {
-            return
-                $"파산으로 패배했습니다.\n\n" +
-                $"패배 이유:\n{defeatReason}\n\n" +
-                $"패배 보상을 획득했습니다.\n\n" +
-                $"잠시 후 로비로 이동합니다.";
-        }
-
-        string msg =
-            $"파산으로 패배했습니다.\n\n" +
-            $"패배 이유:\n{defeatReason}\n\n" +
-            $"끝까지 플레이하여 패배 보상을 획득했습니다.\n\n" +
-            $"경험치 배율 : x{result.ExpMultiplier:0.##}\n" +
-            $"획득 경험치 : +{result.FinalExpReward:N0}\n" +
-            $"패배 보상 : +{result.WinCashReward:N0}";
-
-        if (result.IsLevelUp)
-        {
-            msg +=
-                $"\n\n레벨업!\n" +
-                $"Lv.{result.BeforeLevel} → Lv.{result.AfterLevel}\n" +
-                $"레벨업 보상 : +{result.LevelUpCashReward:N0}";
-        }
-
-        msg +=
-            $"\n\n총 획득 재화 : +{result.TotalCashReward:N0}\n" +
-            $"잠시 후 로비로 이동합니다.";
-
-        return msg;
-    }
-
-    private string BuildBankruptDefeatRewardResultTextEng(BulmabulRewardResult result)
-    {
-        BulmabulGameState state = BulmabulGameState.Instance;
-
-        string defeatReason = state != null
-            ? state.GetLocalDefeatReasonText()
-            : "You were defeated by bankruptcy.";
-
-        if (result == null)
-        {
-            return
-                $"You were defeated by bankruptcy.\n\n" +
-                $"Defeat Reason:\n{defeatReason}\n\n" +
-                $"You received defeat rewards.\n\n" +
-                $"Returning to the lobby shortly.";
-        }
-
-        string msg =
-            $"You were defeated by bankruptcy.\n\n" +
-            $"Defeat Reason:\n{defeatReason}\n\n" +
-            $"You received defeat rewards for playing until the end.\n\n" +
-            $"EXP Multiplier : x{result.ExpMultiplier:0.##}\n" +
-            $"EXP Gained : +{result.FinalExpReward:N0}\n" +
-            $"Defeat Reward : +{result.WinCashReward:N0}";
-
-        if (result.IsLevelUp)
-        {
-            msg +=
-                $"\n\nLevel Up!\n" +
-                $"Lv.{result.BeforeLevel} → Lv.{result.AfterLevel}\n" +
-                $"Level Up Reward : +{result.LevelUpCashReward:N0}";
-        }
-
-        msg +=
-            $"\n\nTotal Cash Gained : +{result.TotalCashReward:N0}\n" +
-            $"Returning to the lobby shortly.";
-
-        return msg;
-    }
-    #endregion
 
     /// <summary>
     /// UI 버튼 이벤트 연결.
