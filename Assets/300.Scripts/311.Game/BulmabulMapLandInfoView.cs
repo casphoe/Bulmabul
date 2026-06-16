@@ -130,6 +130,24 @@ public class BulmabulMapLandInfoView : MonoBehaviour
         SetVisible(false);
     }
 
+    /// <summary>
+    /// 전체맵 정보판에 사용할 TMP Font Asset을 외부에서 주입한다.
+    /// 
+    /// 중요:
+    /// - BulmabulMapLandInfoView는 런타임에 자동 AddComponent 될 수 있다.
+    /// - 그래서 각 셀의 Inspector에 직접 폰트를 넣으면 Play 종료 후 사라질 수 있다.
+    /// - BulmabulFullMapLandInfoController가 공통 폰트를 들고 있다가
+    ///   생성된 모든 정보판에 이 함수로 폰트를 주입하는 구조가 안전하다.
+    /// </summary>
+    public void SetDefaultFontAsset(TMP_FontAsset fontAsset)
+    {
+        defaultFontAsset = fontAsset;
+
+        EnsureCreated();
+        ApplyTextFont();
+        ApplyStyle();
+    }
+
     private void Awake()
     {
         if (!Application.isPlaying)
@@ -379,6 +397,10 @@ public class BulmabulMapLandInfoView : MonoBehaviour
             if (txtInfo.transform.parent != root)
                 txtInfo.transform.SetParent(root, false);
 
+            // 이미 생성된 TxtMapInfo에도 폰트를 다시 강제 적용한다.
+            ApplyTextFont();
+            ApplyStyle();
+
             return;
         }
 
@@ -402,6 +424,8 @@ public class BulmabulMapLandInfoView : MonoBehaviour
             tmp = go.AddComponent<TextMeshPro>();
 
         txtInfo = tmp;
+
+        ApplyTextFont();
     }
 
     /// <summary>
@@ -509,8 +533,7 @@ public class BulmabulMapLandInfoView : MonoBehaviour
     {
         if (txtInfo != null)
         {
-            if (defaultFontAsset != null)
-                txtInfo.font = defaultFontAsset;
+            ApplyTextFont();
 
             txtInfo.fontSize = fontSize;
             txtInfo.alignment = TextAlignmentOptions.Center;
@@ -536,6 +559,29 @@ public class BulmabulMapLandInfoView : MonoBehaviour
         }
 
         ApplyChildRotation();
+    }
+
+    /// <summary>
+    /// 전체맵 정보판 TextMeshPro에 TMP Font Asset을 적용한다.
+    /// 
+    /// txtInfo는 런타임에 자동 생성되므로 Inspector에서 직접 넣는 방식이 아니라
+    /// defaultFontAsset 또는 TMP 기본 폰트를 통해 적용한다.
+    /// </summary>
+    private void ApplyTextFont()
+    {
+        if (txtInfo == null)
+            return;
+
+        if (defaultFontAsset != null)
+        {
+            txtInfo.font = defaultFontAsset;
+            return;
+        }
+
+        if (TMP_Settings.defaultFontAsset != null)
+        {
+            txtInfo.font = TMP_Settings.defaultFontAsset;
+        }
     }
 
     private string BuildInfoText(BulmabulGameState state, int ownerIndex, int buildFlags)

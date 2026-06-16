@@ -222,6 +222,7 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
             await ShutdownAndDisposeRunnerAsync("ResetRunner");
 
             _starting = false;
+            _loadingGameplayScene = false;
             playerCount = 0;
             _joinedLobby = false;
             selectindex = -1;
@@ -970,9 +971,16 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
         Debug.Log("[Fusion] Loading gameplay scene from room...");
 
-        // Fusion 네트워크 씬 로드
-        // 방에 있는 모든 플레이어가 같이 gameplayScene으로 이동한다.
-        _runner.LoadScene(gameplayScene, LoadSceneMode.Single);
+        try
+        {
+            // 방에 있는 모든 플레이어가 같이 gameplayScene으로 이동한다.
+            _runner.LoadScene(gameplayScene, LoadSceneMode.Single);
+        }
+        catch (Exception e)
+        {
+            _loadingGameplayScene = false;
+            Debug.LogException(e);
+        }
     }
 
     public void OnInput(NetworkRunner runner, NetworkInput input) { }
@@ -999,6 +1007,10 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
 
     public void OnSceneLoadDone(NetworkRunner runner)
     {
+        // 게임씬 로딩 완료.
+        // 다음 게임 시작을 막지 않도록 로딩 플래그 해제.
+        _loadingGameplayScene = false;
+
         // 1) 게임씬을 활성씬으로 바꾸기
         // SceneRef의 BuildIndex를 사용하려면 gameScene이 올바르게 세팅되어 있어야 함
         var loadedGameScene = SceneManager.GetSceneByBuildIndex(2);
@@ -1106,6 +1118,11 @@ public class NetWorkLauncher : MonoBehaviour, INetworkRunnerCallbacks
         currentMode = MatchMode.Solo;
         selectindex = -1;
         selectedMapIndex = 0;
+
+        // 중요:
+        // 게임 종료 후 로비로 돌아왔을 때 다음 방에서 게임 시작이 막히지 않도록 초기화한다.
+        _loadingGameplayScene = false;
+        _starting = false;
     }
 
     private async void ForceReturnToLobby()
